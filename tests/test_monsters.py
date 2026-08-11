@@ -56,3 +56,12 @@ def test_count_from_frames_is_median(monkeypatch):
     monkeypatch.setattr(monsters, "detect_dragons", lambda *a, **k: next(seq))
     frames = [object(), object(), object()]
     assert monsters.count_from_frames(frames, (0,0,10,10), templates=[]) == 3
+
+def test_count_dragons_uses_capture_fn(monkeypatch):
+    grabbed = {"n": 0}
+    def fake_capture():
+        grabbed["n"] += 1
+        return np.zeros((10, 10, 3), np.uint8)
+    monkeypatch.setattr(monsters, "count_from_frames", lambda frames, *a, **k: len(frames))
+    n = monsters.count_dragons(fake_capture, templates=[], samples=3, interval=0)
+    assert n == 3 and grabbed["n"] == 3

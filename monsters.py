@@ -70,3 +70,35 @@ def count_from_frames(frames, roi, templates, diff_thres=0.35):
 
 def is_depleted(count, threshold=2):
     return count < threshold
+
+import time
+
+DEFAULT_ROI = (700, 250, 1900, 950)   # LIVE-TUNE: excludes minimap + bottom UI
+
+def count_dragons(capture_fn, templates, roi=DEFAULT_ROI, samples=3, interval=0.3, diff_thres=0.35):
+    frames = []
+    for i in range(samples):
+        f = capture_fn()
+        if f is not None:
+            frames.append(f)
+        if i < samples - 1 and interval:
+            time.sleep(interval)
+    return count_from_frames(frames, roi, templates, diff_thres)
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "test":
+        import recovery                          # live capture lives here
+        tpls = load_templates()
+        frame = recovery.capture()
+        boxes = detect_dragons(frame, DEFAULT_ROI, tpls)
+        print(f"templates={len(tpls)}  dragons detected={len(boxes)}  ROI={DEFAULT_ROI}")
+        os.makedirs("debug_output", exist_ok=True)
+        vis = frame.copy()
+        cv2.rectangle(vis, DEFAULT_ROI[:2], DEFAULT_ROI[2:], (0, 255, 255), 2)
+        for (x1, y1, x2, y2) in boxes:
+            cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        cv2.imwrite("debug_output/dragons_detected.png", vis)
+        print("wrote debug_output/dragons_detected.png")
+    else:
+        print("usage: python monsters.py test")
