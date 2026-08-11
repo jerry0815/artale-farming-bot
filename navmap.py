@@ -27,3 +27,40 @@ def classify_node(x, y):
         if ylo <= y <= yhi and xlo <= x <= xhi:
             return name
     return None
+
+from collections import deque
+
+# Executable edges. Downjumps go one level DOWN through a gap; ropes climb UP.
+# `rope` names the physical rope (metadata; per-rope wiring is a live follow-up).
+EDGES = [
+    {"src": "TOP_FARM",     "dst": "REST",        "kind": "downjump", "rope": None},
+    {"src": "TOP_FARM",     "dst": "BOTTOM_FARM", "kind": "downjump", "rope": None},
+    {"src": "REST",         "dst": "BOTTOM_FARM", "kind": "downjump", "rope": None},
+    {"src": "REST",         "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_L"},
+    {"src": "MID",          "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_L"},
+    {"src": "BOTTOM_FARM",  "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_C"},
+    {"src": "LOWER_LEDGE",  "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_C"},
+]
+
+def neighbors(node):
+    return [e for e in EDGES if e["src"] == node]
+
+def plan(src, dst):
+    if src not in NODES or dst not in NODES:
+        return None
+    if src == dst:
+        return []
+    # BFS over EDGES, fewest hops.
+    q = deque([(src, [])])
+    seen = {src}
+    while q:
+        node, path = q.popleft()
+        for e in neighbors(node):
+            if e["dst"] in seen:
+                continue
+            new_path = path + [e]
+            if e["dst"] == dst:
+                return new_path
+            seen.add(e["dst"])
+            q.append((e["dst"], new_path))
+    return None
