@@ -65,3 +65,13 @@ def test_count_dragons_uses_capture_fn(monkeypatch):
     monkeypatch.setattr(monsters, "count_from_frames", lambda frames, *a, **k: len(frames))
     n = monsters.count_dragons(fake_capture, templates=[], samples=3, interval=0)
     assert n == 3 and grabbed["n"] == 3
+
+def test_roi_by_node_covers_farm_nodes():
+    assert set(monsters.ROI_BY_NODE) == {"TOP_FARM", "BOTTOM_FARM"}
+    for roi in monsters.ROI_BY_NODE.values():
+        assert len(roi) == 4
+
+def test_load_templates_sorts_numerically():
+    # the sort key is numeric, so _2 sorts before _10 (lexicographic would reverse this)
+    assert monsters._frame_num("blue_wing_dragon_2.png") == 2
+    assert monsters._frame_num("blue_wing_dragon_10.png") == 10

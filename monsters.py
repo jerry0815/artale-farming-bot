@@ -3,7 +3,7 @@
 Ported from MapleStoryAutoLevelUp get_monsters_in_range: match green-screen
 dragon sprites (chroma masked) against a screen-frame ROI, NMS, count.
 """
-import os, glob
+import os, glob, re
 import cv2
 import numpy as np
 from detection import apply_nms
@@ -26,8 +26,12 @@ def _downscale(img, mask, max_dim):
     mask2 = cv2.resize(mask, size, interpolation=cv2.INTER_NEAREST)
     return img2, mask2
 
+def _frame_num(path):
+    m = re.search(r'(\d+)', os.path.basename(path))
+    return int(m.group(1)) if m else 0
+
 def load_templates(folder=DEFAULT_TEMPLATE_DIR, max_templates=12, max_dim=120):
-    paths = sorted(glob.glob(os.path.join(folder, "blue_wing_dragon*.png")))
+    paths = sorted(glob.glob(os.path.join(folder, "blue_wing_dragon*.png")), key=_frame_num)
     out, seen = [], set()
     for p in paths:
         img = cv2.imread(p, cv2.IMREAD_COLOR)
@@ -74,6 +78,15 @@ def is_depleted(count, threshold=2):
 import time
 
 DEFAULT_ROI = (700, 250, 1900, 950)   # LIVE-TUNE: excludes minimap + bottom UI
+
+# Per-node playfield ROIs. The camera follows the character and the two farming
+# platforms are vertically stacked, so a single ROI would let the other platform's
+# dragons inflate the count and suppress rotation. Scope the count to the node she
+# is on. LIVE-TUNE: split the y so each ROI covers only its own platform's band.
+ROI_BY_NODE = {
+    "TOP_FARM":    (700, 250, 1900, 600),
+    "BOTTOM_FARM": (700, 580, 1900, 950),
+}
 
 def count_dragons(capture_fn, templates, roi=DEFAULT_ROI, samples=3, interval=0.3, diff_thres=0.35):
     frames = []

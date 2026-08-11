@@ -81,7 +81,7 @@ def travel(dst, locate_fn, execute_fn, max_rounds=8):
             return False                 # lost -> caller decides (recover/panic)
         path = plan(cur, dst)
         if not path:                     # unreachable or already there handled above
-            return cur == dst
+            return False   # unreachable (cur == dst already handled above)
         edge = path[0]                   # execute one hop, then re-localize + re-plan
         execute_fn(edge)                 # success is judged by re-localizing, not by return
     return locate_fn() == dst

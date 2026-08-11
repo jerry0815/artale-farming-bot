@@ -877,7 +877,7 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
         heal_skill()
 
         # count dragons; rotate if depleted
-        n = monsters.count_dragons(capture, tpls, samples=count_samples)
+        n = monsters.count_dragons(capture, tpls, roi=monsters.ROI_BY_NODE.get(node, monsters.DEFAULT_ROI), samples=count_samples)
         print(f"[nav] {node} dragons~{n}")
         target = navmap.next_farm_target(node, n, threshold=deplete_threshold)
         if target:
