@@ -382,7 +382,7 @@ def _shoot(n=1):
     for _ in range(n):
         if kb.pause:
             return
-        kb.safe_press('c'); time.sleep(0.1); kb.safe_release('c'); time.sleep(0.1)
+        kb.safe_press('c'); time.sleep(0.06); kb.safe_release('c'); time.sleep(0.06)
 
 
 def _face_right():
@@ -413,7 +413,7 @@ def _walk_shoot(key, target_x, going_right, seed=None, cap=3.5, fall_y=FALLEN_Y_
                 break                                 # hard edge guard
             if (going_right and x >= target_x) or (not going_right and x <= target_x):
                 break
-        kb.safe_press('c'); time.sleep(0.1); kb.safe_release('c'); time.sleep(0.1)
+        kb.safe_press('c'); time.sleep(0.06); kb.safe_release('c'); time.sleep(0.06)
     kb.safe_release(key)
     return True
 
@@ -433,12 +433,14 @@ def farm_bottom(seconds, x_home=BOTTOM_HOME_X, x_far=BOTTOM_FAR_X, stand=12.0):
         while time.time() - s < stand and time.time() - t0 < seconds:
             if kb.pause:
                 break
-            _shoot()
+            # _shoot()
+            kb.safe_press('c'); time.sleep(0.1)
             r = _plausible_read(last)                 # rejects buff-glow phantom reads
             if r is not None:
                 last = r
                 if r[1] >= BOTTOM_FALL_Y:
                     kb.safe_release_all(); print(f"[farm_bottom] fell to {r}"); return False
+        kb.safe_release('c'); time.sleep(0.1)
         if kb.pause or time.time() - t0 >= seconds:
             break
         # sweep right (edge guard = x_far+6), then back left to home; bottom fall-threshold.
@@ -730,7 +732,7 @@ def farming_loop(exp_check=None, enemy_check=None, panic=None,
 
 
 def farming_loop_split(exp_check=None, enemy_check=None, panic=None,
-                       top_secs=(120, 240), bottom_secs=(120, 240),
+                       top_secs=(60, 150), bottom_secs=(60, 150),
                        break_every=(8 * 60, 15 * 60), rest_range=(30, 120),
                        skill_interval=(260, 340), max_seconds=None):
     """Top<->bottom split farming. Farm top a while -> go_to_bottom -> farm bottom a
@@ -742,13 +744,16 @@ def farming_loop_split(exp_check=None, enemy_check=None, panic=None,
         print("[split] could not focus"); return
     t_start = time.time()
     next_break = time.time() + _r.uniform(*break_every)
-    next_skill = [time.time() + _r.uniform(*skill_interval)]
+    next_skill = [time.time()]
     phase = "top"
 
     def heal_skill():
+        time.sleep(0.2)
         kb.safe_press('h'); time.sleep(0.08); kb.safe_release('h')
         if time.time() >= next_skill[0]:
+            time.sleep(0.2)
             kb.safe_press('a'); time.sleep(0.4); kb.safe_release('a')
+            kb.safe_press('j'); time.sleep(0.4); kb.safe_release('j')
             next_skill[0] = time.time() + _r.uniform(*skill_interval)
 
     while True:
@@ -760,14 +765,14 @@ def farming_loop_split(exp_check=None, enemy_check=None, panic=None,
         x, y = stable_char(3)
         if x < 0:
             time.sleep(0.2); continue
-        if enemy_check and enemy_check():
-            print("[split] another player -> Free Market")
-            if panic: panic()
-            time.sleep(1); continue
-        if exp_check and exp_check():
-            print("[split] EXP too low -> Free Market")
-            if panic: panic()
-            time.sleep(1); continue
+        # if enemy_check and enemy_check():
+        #     print("[split] another player -> Free Market")
+        #     if panic: panic()
+        #     time.sleep(1); continue
+        # if exp_check and exp_check():
+        #     print("[split] EXP too low -> Free Market")
+        #     if panic: panic()
+        #     time.sleep(1); continue
 
         # scheduled break: rest on the left fallen platform, then resume on top
         if time.time() >= next_break:
@@ -817,8 +822,7 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
     import monsters, navmap
     if not focus():
         print("[nav] could not focus"); return
-    tpls = monsters.load_templates()
-    print(f"[nav] loaded {len(tpls)} dragon templates")
+    print("[nav] motion-based dragon counting (background subtraction)")
     t_start = time.time()
     next_break = time.time() + _r.uniform(*break_every)
     next_skill = [time.time() + _r.uniform(*skill_interval)]
@@ -876,8 +880,10 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
             continue                                 # fell mid-stint -> re-locate/recover next round
         heal_skill()
 
-        # count dragons; rotate if depleted
-        n = monsters.count_dragons(capture, tpls, roi=monsters.ROI_BY_NODE.get(node, monsters.DEFAULT_ROI), samples=count_samples)
+        # count dragons (motion-based: dragons are the only moving thing while parked);
+        # rotate if depleted
+        n = monsters.count_dragons_motion(
+            capture, roi=monsters.MOTION_ROI_BY_NODE.get(node, monsters.DEFAULT_MOTION_ROI))
         print(f"[nav] {node} dragons~{n}")
         target = navmap.next_farm_target(node, n, threshold=deplete_threshold)
         if target:

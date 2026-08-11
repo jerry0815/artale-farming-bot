@@ -98,9 +98,106 @@ def count_dragons(capture_fn, templates, roi=DEFAULT_ROI, samples=3, interval=0.
             time.sleep(interval)
     return count_from_frames(frames, roi, templates, diff_thres)
 
+# ---------------------------------------------------------------------------
+# Motion-based counting (primary method).
+#
+# Template matching fails on this map: the reference sprites match the blue ice
+# cave (false positives), and real-game templates only catch their exact pose
+# (dragons animate + overlap). Since the dragons are the ONLY things moving while
+# the character is parked, a per-count background plate (pixel median of a short
+# burst of frames) cancels the static ice/platforms/UI/character, and the moving
+# dragons remain as foreground. Foreground AREA / typical-dragon-area gives a
+# pose-invariant, overlap-tolerant count. Verified live 2026-08-11.
+# ---------------------------------------------------------------------------
+
+# Playfield band to search (excludes the top-left minimap and the bottom UI).
+# LIVE-TUNE per home spot; motion-subtraction ignores static scenery anyway.
+DEFAULT_MOTION_ROI = (360, 70, 1910, 720)
+# Per-node motion ROIs. The camera follows the character, so the dragons she is
+# actually farming sit in a band relative to her home spot. Scope the count to that
+# band so the other platform's dragons don't leak in. LIVE-TUNE both bands.
+MOTION_ROI_BY_NODE = {
+    "TOP_FARM":    (360, 70, 1910, 720),
+    "BOTTOM_FARM": (360, 300, 1910, 950),
+}
+DRAGON_AREA = 16000      # typical foreground px per dragon (LIVE-TUNE)
+FG_DIFF_THR = 45         # abs per-pixel diff (gray) counted as motion
+FG_MIN_BLOB = 1500       # ignore foreground specks smaller than this
+
+def background_plate(frames):
+    """Per-pixel median of a burst of frames = the static scene (ice, platforms,
+    UI, a parked character). Moving dragons average out. Needs >= 3 frames."""
+    return np.median(np.stack(frames), axis=0).astype(np.uint8)
+
+def foreground_area(frame, bg, roi, diff_thr=FG_DIFF_THR, min_blob=FG_MIN_BLOB):
+    """Total moving-foreground pixel area inside `roi` (dragons), plus the blob
+    boxes (full-frame coords). Morphology joins dragon parts and drops specks."""
+    x0, y0, x1, y1 = roi
+    d = cv2.absdiff(frame, bg)
+    g = cv2.cvtColor(d, cv2.COLOR_BGR2GRAY)
+    m = (g > diff_thr).astype(np.uint8) * 255
+    m[:y0, :] = 0; m[y1:, :] = 0; m[:, :x0] = 0; m[:, x1:] = 0
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25)))
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
+    n, _lab, st, _cen = cv2.connectedComponentsWithStats(m, 8)
+    boxes, area = [], 0
+    for i in range(1, n):
+        a = int(st[i, 4])
+        if a >= min_blob:
+            area += a
+            boxes.append((int(st[i, 0]), int(st[i, 1]),
+                          int(st[i, 0] + st[i, 2]), int(st[i, 1] + st[i, 3])))
+    return area, boxes
+
+def estimate_count(area, dragon_area=DRAGON_AREA):
+    return int(round(area / float(dragon_area)))
+
+def count_dragons_motion(capture_fn, roi=DEFAULT_MOTION_ROI, samples=12, interval=0.08,
+                         dragon_area=DRAGON_AREA, diff_thr=FG_DIFF_THR, min_blob=FG_MIN_BLOB):
+    """Robust dragon count via motion. Grabs a short burst, builds a background
+    plate, and returns the median per-frame foreground-area estimate. Returns 0 if
+    it cannot get enough frames."""
+    frames = []
+    for i in range(samples):
+        f = capture_fn()
+        if f is not None:
+            frames.append(f)
+        if i < samples - 1 and interval:
+            time.sleep(interval)
+    if len(frames) < 3:
+        return 0
+    bg = background_plate(frames)
+    areas = [foreground_area(f, bg, roi, diff_thr, min_blob)[0] for f in frames]
+    areas.sort()
+    return estimate_count(areas[len(areas) // 2], dragon_area)
+
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "test":
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    if cmd == "motion":
+        import recovery, time as _t
+        secs = float(sys.argv[2]) if len(sys.argv) > 2 else 1.5
+        frames = []
+        t0 = _t.time()
+        while _t.time() - t0 < secs:
+            f = recovery.capture()
+            if f is not None:
+                frames.append(f)
+        bg = background_plate(frames)
+        roi = DEFAULT_MOTION_ROI
+        areas = [foreground_area(f, bg, roi)[0] for f in frames]
+        areas.sort(); med = areas[len(areas) // 2]
+        n = estimate_count(med)
+        print(f"frames={len(frames)}  median_fg_area={med}  est_dragons={n}  ROI={roi}")
+        os.makedirs("debug_output", exist_ok=True)
+        last = frames[-1]; _, boxes = foreground_area(last, bg, roi)
+        vis = last.copy(); cv2.rectangle(vis, roi[:2], roi[2:], (0, 255, 255), 2)
+        for (a, b, c, d) in boxes:
+            cv2.rectangle(vis, (a, b), (c, d), (0, 0, 255), 3)
+        cv2.putText(vis, f"est {n} dragons", (400, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
+        cv2.imwrite("debug_output/dragons_motion.png", vis)
+        print("wrote debug_output/dragons_motion.png")
+    elif cmd == "test":
         import recovery                          # live capture lives here
         tpls = load_templates()
         frame = recovery.capture()
@@ -114,4 +211,4 @@ if __name__ == "__main__":
         cv2.imwrite("debug_output/dragons_detected.png", vis)
         print("wrote debug_output/dragons_detected.png")
     else:
-        print("usage: python monsters.py test")
+        print("usage: python monsters.py [motion <secs> | test]")
