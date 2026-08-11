@@ -446,3 +446,16 @@ success.
    (`calibrate_minimap_x`, `get_character`) is fine to run for calibration.
 4. **Optional flourishes remain OFF** (`idle_jump_prob`, `arrow_glance_prob` = 0). Do not
    auto-enable arrow-glancing — `Up` near the rope can grab it unintentionally.
+
+### Node-map navigation + dragon-count rotation (2026-08-10)
+- `navmap.py` — node graph (TOP_FARM/REST/MID/BOTTOM_FARM/LOWER_LEDGE + 3 ropes
+  R_L/R_R/R_C), `classify_node`, `plan` (BFS), `travel` (DI), `next_farm_target`.
+- `monsters.py` — blue-wing-dragon detection (masked template match on the 49
+  green-screen sprites), `count_dragons`, `is_depleted`. Calibrate scale/threshold
+  with `python monsters.py test` (writes debug_output/dragons_detected.png).
+- `recovery.py: farming_loop_nav()` — farm a platform, count dragons, rotate
+  top<->bottom when < 2. CLI `python recovery.py runnav` (full) / `nav <secs>` (test).
+  `farming_loop_split` remains the timer-based fallback.
+- STILL LIVE-TUNE: node y-bands, the three rope x-columns, monster `diff_thres` /
+  template scale (reference sprites vs Artale 150%-DPI grab), and `monsters.DEFAULT_ROI`.
+- Design + plan: docs/superpowers/specs/ and docs/superpowers/plans/ (2026-08-10).
