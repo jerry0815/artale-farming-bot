@@ -43,3 +43,16 @@ def test_detect_empty_frame_is_zero():
     canvas = np.zeros((200, 300, 3), np.uint8)
     boxes = monsters.detect_dragons(canvas, (0, 0, 300, 200), tpls, diff_thres=0.30)
     assert boxes == []
+
+def test_is_depleted_threshold():
+    assert monsters.is_depleted(1) is True
+    assert monsters.is_depleted(0) is True
+    assert monsters.is_depleted(2) is False
+    assert monsters.is_depleted(3) is False
+
+def test_count_from_frames_is_median(monkeypatch):
+    # stub detect_dragons to return controlled per-frame counts 3,3,0 -> median 3
+    seq = iter([[( 0,0,1,1)]*3, [(0,0,1,1)]*3, []])
+    monkeypatch.setattr(monsters, "detect_dragons", lambda *a, **k: next(seq))
+    frames = [object(), object(), object()]
+    assert monsters.count_from_frames(frames, (0,0,10,10), templates=[]) == 3

@@ -60,3 +60,13 @@ def detect_dragons(frame_bgr, roi, templates, diff_thres=0.35):
             boxes.append([x0 + int(px), y0 + int(py),
                           x0 + int(px) + tw, y0 + int(py) + th])
     return [tuple(b) for b in apply_nms(boxes, overlapThresh=0.3)]
+
+def count_from_frames(frames, roi, templates, diff_thres=0.35):
+    counts = [len(detect_dragons(f, roi, templates, diff_thres)) for f in frames]
+    if not counts:
+        return 0
+    counts.sort()
+    return counts[len(counts) // 2]
+
+def is_depleted(count, threshold=2):
+    return count < threshold
