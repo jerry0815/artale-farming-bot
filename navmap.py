@@ -72,6 +72,19 @@ def next_farm_target(current, dragon_count, threshold=2):
         return None
     return FARM_NODES[1] if current == FARM_NODES[0] else FARM_NODES[0]
 
+# Farming states (per platform). STAND_SHOOT = park at home and fire in place;
+# WALK_SHOOT = sweep out-and-back shooting. They alternate while the platform is
+# populated; a low count rotates to the next platform instead.
+STAND_SHOOT, WALK_SHOOT, ROTATE = "STAND_SHOOT", "WALK_SHOOT", "ROTATE"
+
+def next_farm_state(prev_state, dragon_count, threshold=2):
+    """Transition for the farming state machine, evaluated at a standstill between
+    moves. Returns ROTATE when the platform is depleted (count < threshold), else
+    alternates STAND_SHOOT <-> WALK_SHOOT."""
+    if dragon_count < threshold:
+        return ROTATE
+    return WALK_SHOOT if prev_state == STAND_SHOOT else STAND_SHOOT
+
 def travel(dst, locate_fn, execute_fn, max_rounds=8):
     for _ in range(max_rounds):
         cur = locate_fn()

@@ -830,23 +830,72 @@ def farming_loop_split(exp_check=None, enemy_check=None, panic=None,
                     phase = "top"
 
 
+# Per-node farming context for the state machine (home/far x, the y that counts as
+# a fall off THIS platform, the resting y, and the right-edge safety x).
+FARM_CTX = {
+    "TOP_FARM":    dict(home=74, far=112, fall_y=FALLEN_Y_MIN, home_y=85,
+                        edge=RIGHT_EDGE_SAFETY, cap=3.5),
+    "BOTTOM_FARM": dict(home=BOTTOM_HOME_X, far=BOTTOM_FAR_X, fall_y=BOTTOM_FALL_Y,
+                        home_y=143, edge=BOTTOM_FAR_X + 6, cap=2.2),
+}
+
+def _stand_shoot(node, seconds):
+    """STAND_SHOOT state: parked at home, fire in place for a beat. Returns False if
+    she fell off the platform; walks back to home if knocked toward the right edge."""
+    c = FARM_CTX[node]
+    t0, last = time.time(), (c["home"], c["home_y"])
+    while time.time() - t0 < seconds:
+        if kb.pause:
+            break
+        _shoot()
+        r = _plausible_read(last)                     # rejects buff-glow phantom reads
+        if r is None:
+            continue
+        last = r
+        if r[1] >= c["fall_y"]:
+            kb.safe_release_all(); print(f"[stand] fell to {r}"); return False
+        if r[0] >= c["edge"]:                          # knocked toward the edge -> return home
+            if not _walk_shoot(Key.left, c["home"], going_right=False,
+                               seed=(c["edge"], c["home_y"]), cap=c["cap"], fall_y=c["fall_y"]):
+                return False
+            _face_right(); last = (c["home"], c["home_y"])
+    kb.safe_release_all()
+    return True
+
+def _walk_shoot_sweep(node):
+    """WALK_SHOOT state: sweep right to x_far shooting, then back left to home, then
+    face right. Returns False if she fell."""
+    c = FARM_CTX[node]
+    if not _walk_shoot(Key.right, c["far"], going_right=True, seed=(c["home"], c["home_y"]),
+                       cap=c["cap"], fall_y=c["fall_y"], edge_safety=c["edge"]):
+        return False
+    if not _walk_shoot(Key.left, c["home"], going_right=False, seed=(c["far"], c["home_y"]),
+                       cap=c["cap"], fall_y=c["fall_y"]):
+        return False
+    _face_right()
+    return True
+
+
 def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
-                     farm_secs=(20, 40), break_every=(8 * 60, 15 * 60),
+                     stand_secs=(4, 8), break_every=(8 * 60, 15 * 60),
                      rest_range=(30, 120), skill_interval=(260, 340),
-                     deplete_threshold=2, count_samples=3, max_seconds=None):
-    """Node-graph farming loop: farm the current platform, count dragons, and when
-    depleted (< deplete_threshold) travel() to the other farming platform. Recovery
-    and rotation both go through navmap.travel(). Preserves EXP/red-dot safety,
-    F8 pause, jittered breaks, and jittered skill/heal cadence. max_seconds bounds it."""
+                     deplete_threshold=2, max_seconds=None):
+    """Node-graph farming loop with a STAND/WALK state machine. Each iteration runs
+    ONE state move on the current platform (STAND_SHOOT or WALK_SHOOT), then counts
+    dragons at the resulting standstill; a low count (< deplete_threshold) rotates to
+    the next platform via travel(), otherwise the states alternate. Recovery and
+    rotation both go through navmap.travel(). Preserves EXP/red-dot safety, F8 pause,
+    jittered breaks, and jittered skill/heal cadence. max_seconds bounds it."""
     import random as _r
     import monsters, navmap
     if not focus():
         print("[nav] could not focus"); return
-    print("[nav] motion-based dragon counting (background subtraction)")
+    print("[nav] state machine (stand/walk) + motion-based dragon counting")
     t_start = time.time()
     next_break = time.time() + _r.uniform(*break_every)
     next_skill = [time.time() + _r.uniform(*skill_interval)]
     current = "TOP_FARM"
+    farm_state = navmap.STAND_SHOOT
 
     def heal_skill():
         kb.safe_press('h'); time.sleep(0.08); kb.safe_release('h')
@@ -893,23 +942,33 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
             current = "TOP_FARM"
             continue
 
-        # farm a stint on the current node
+        # --- one state move of the farming state machine ---
         current = node
-        ok = farm(_r.uniform(*farm_secs)) if node == "TOP_FARM" else farm_bottom(_r.uniform(*farm_secs))
+        if farm_state == navmap.WALK_SHOOT:
+            ok = _walk_shoot_sweep(node)
+        else:
+            ok = _stand_shoot(node, _r.uniform(*stand_secs))
         if not ok:
-            continue                                 # fell mid-stint -> re-locate/recover next round
+            farm_state = navmap.STAND_SHOOT          # fell -> re-locate/recover, reset state
+            continue
         heal_skill()
 
-        # count dragons (motion-based: dragons are the only moving thing while parked);
-        # rotate if depleted
+        # count window: release keys (no flying arrows) so motion-subtraction sees
+        # only the dragons, then decide the next state.
+        kb.safe_release_all()
         n = monsters.count_dragons_motion(
             capture, roi=monsters.MOTION_ROI_BY_NODE.get(node, monsters.DEFAULT_MOTION_ROI))
-        print(f"[nav] {node} dragons~{n}")
-        target = navmap.next_farm_target(node, n, threshold=deplete_threshold)
-        if target:
-            print(f"[nav] {node} depleted ({n} < {deplete_threshold}) -> travel to {target}")
-            if go(target):
-                current = target
+        nxt = navmap.next_farm_state(farm_state, n, threshold=deplete_threshold)
+        print(f"[nav] {node} {farm_state} dragons~{n} -> {nxt}")
+        if nxt == navmap.ROTATE:
+            target = navmap.next_farm_target(node, n, threshold=deplete_threshold)
+            if target:
+                print(f"[nav] {node} depleted ({n} < {deplete_threshold}) -> travel to {target}")
+                if go(target):
+                    current = target
+            farm_state = navmap.STAND_SHOOT          # start fresh on the new platform
+        else:
+            farm_state = nxt
 
 
 def break_cycle(idle_seconds=30):
@@ -1099,7 +1158,7 @@ if __name__ == "__main__":
         secs = int(sys.argv[2]) if len(sys.argv) > 2 else 90
         lis = Listener(on_press=kb.on_press); lis.start()
         try:
-            farming_loop_nav(break_every=(9999, 9999), farm_secs=(12, 16), max_seconds=secs)
+            farming_loop_nav(break_every=(9999, 9999), stand_secs=(4, 8), max_seconds=secs)
         finally:
             kb.safe_release_all(); lis.stop()
     elif cmd == "split":

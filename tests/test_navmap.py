@@ -92,6 +92,21 @@ def test_every_edge_has_an_executor():
     for e in navmap.EDGES:
         assert (e["src"], e["dst"]) in recovery.EDGE_ACTIONS, (e["src"], e["dst"])
 
+def test_next_farm_state_alternates_when_populated():
+    import navmap
+    assert navmap.next_farm_state(navmap.STAND_SHOOT, 5) == navmap.WALK_SHOOT
+    assert navmap.next_farm_state(navmap.WALK_SHOOT, 5) == navmap.STAND_SHOOT
+
+def test_next_farm_state_rotates_when_few():
+    import navmap
+    assert navmap.next_farm_state(navmap.STAND_SHOOT, 1) == navmap.ROTATE
+    assert navmap.next_farm_state(navmap.WALK_SHOOT, 0, threshold=2) == navmap.ROTATE
+
+def test_next_farm_state_threshold_boundary_keeps_farming():
+    import navmap
+    # exactly at threshold is NOT "few" -> keep alternating, don't rotate
+    assert navmap.next_farm_state(navmap.STAND_SHOOT, 2) == navmap.WALK_SHOOT
+
 def test_rotation_decision_end_to_end():
     import navmap
     # depleted top -> go bottom; then depleted bottom -> go top; populated -> stay
