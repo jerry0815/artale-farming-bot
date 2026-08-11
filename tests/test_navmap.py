@@ -80,3 +80,14 @@ def test_travel_bails_when_lost():
                        execute_fn=lambda e: True,
                        max_rounds=3)
     assert ok is False
+
+def test_every_edge_has_an_executor():
+    # only run if recovery.py's heavy deps are importable in this env
+    try:
+        import recovery
+    except Exception as e:
+        import pytest
+        pytest.skip(f"recovery not importable here: {e}")
+    import navmap
+    for e in navmap.EDGES:
+        assert (e["src"], e["dst"]) in recovery.EDGE_ACTIONS, (e["src"], e["dst"])

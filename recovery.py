@@ -20,6 +20,7 @@ import pyautogui
 from pynput.keyboard import Key, Listener
 import random
 import keyboard as kb   # safe_press/release/release_all + F8 pause listener
+import navmap
 
 # --- recovery map constants (calibrated 2026-08-09, full-minimap frame) ---
 ROPE_X = 91              # rope minimap x (climbs to farming platform)
@@ -626,6 +627,31 @@ def _idle_on_fallen(seconds):
         if kb.pause:
             break
         time.sleep(0.3)
+
+
+def _nav_locate():
+    x, y = stable_char(3)
+    return navmap.classify_node(x, y)
+
+# (src,dst) -> a callable that performs the move using the tuned primitives.
+# Rope/up moves reuse recover_to_farming (it climbs any-below -> top). Downjumps
+# reuse the proven composites. Per-rope single-level moves are a live follow-up.
+EDGE_ACTIONS = {
+    ("TOP_FARM", "REST"):        lambda: drop_to_fallen(),
+    ("TOP_FARM", "BOTTOM_FARM"): lambda: go_to_bottom(),
+    ("REST", "BOTTOM_FARM"):     lambda: rest_to_bottom(),
+    ("REST", "TOP_FARM"):        lambda: recover_to_farming(),
+    ("MID", "TOP_FARM"):         lambda: recover_to_farming(),
+    ("BOTTOM_FARM", "TOP_FARM"): lambda: recover_to_farming(),
+    ("LOWER_LEDGE", "TOP_FARM"): lambda: recover_to_farming(),
+}
+
+def execute_edge(edge):
+    fn = EDGE_ACTIONS.get((edge["src"], edge["dst"]))
+    if fn is None:
+        print(f"[nav] no executor for {edge['src']}->{edge['dst']}")
+        return False
+    return bool(fn())
 
 
 def farming_loop(exp_check=None, enemy_check=None, panic=None,
