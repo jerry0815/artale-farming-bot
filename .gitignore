@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Generated debug output (screenshots, OCR error dumps)
+debug_output/
+ocr_errors/
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
