@@ -64,3 +64,24 @@ def plan(src, dst):
             seen.add(e["dst"])
             q.append((e["dst"], new_path))
     return None
+
+def next_farm_target(current, dragon_count, threshold=2):
+    if dragon_count >= threshold:
+        return None
+    if current not in FARM_NODES:
+        return None
+    return FARM_NODES[1] if current == FARM_NODES[0] else FARM_NODES[0]
+
+def travel(dst, locate_fn, execute_fn, max_rounds=8):
+    for _ in range(max_rounds):
+        cur = locate_fn()
+        if cur == dst:
+            return True
+        if cur is None:
+            return False                 # lost -> caller decides (recover/panic)
+        path = plan(cur, dst)
+        if not path:                     # unreachable or already there handled above
+            return cur == dst
+        edge = path[0]                   # execute one hop, then re-localize + re-plan
+        execute_fn(edge)                 # success is judged by re-localizing, not by return
+    return locate_fn() == dst
