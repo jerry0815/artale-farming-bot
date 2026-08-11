@@ -58,6 +58,14 @@ SP = r"C:\Users\jerry\AppData\Local\Temp\claude\C--jerry-toy-work-maple\76b73c35
 MM_X, MM_Y, MM_W, MM_H = 20, 171, 229, 259   # band was H=145; 259 reaches lower platforms
 CHAR_TPL = "assets/minimap_character/"
 
+# Valid map area for the character dot (minimap-crop coords). The character is
+# always on a platform: patrol x66..161, recover x55..152, y ~76 (top) .. ~156
+# (lower ledge). Heavy buff-glow spawns phantom yellow blobs at the minimap
+# CORNERS/EDGES -- documented at (22,232),(2,242),(36,153),(28,235),(122,188) --
+# all outside this box. Used to prefer the real dot over glow phantoms.
+MAP_X_MIN, MAP_X_MAX = 50, 170
+MAP_Y_MIN, MAP_Y_MAX = 65, 175
+
 
 def capture():
     win = gw.getWindowsWithTitle(TITLE)
@@ -149,13 +157,25 @@ def get_character_color(np_img=None, near=None):
     num, labels, stats, cents = cv2.connectedComponentsWithStats(mask, 8)
     blobs = [(int(cents[i][0]), int(cents[i][1]), int(stats[i][4]))
              for i in range(1, num) if 15 <= stats[i][4] <= 120]
-    if not blobs:
+    pick = _pick_char_blob(blobs, near)
+    if pick is None:
         return -1, -1
+    return pick[0], pick[1]
+
+
+def _pick_char_blob(blobs, near=None):
+    """Choose the character dot among yellow blobs, rejecting buff-glow phantoms.
+    Prefer blobs inside the valid map box (MAP_X/Y_MIN/MAX); fall back to all blobs
+    only when NONE are in-box (e.g. a genuine deep fall) so recovery can still see
+    her. Within the candidates: nearest to `near` if given, else the largest."""
+    if not blobs:
+        return None
+    in_box = [b for b in blobs
+              if MAP_X_MIN <= b[0] <= MAP_X_MAX and MAP_Y_MIN <= b[1] <= MAP_Y_MAX]
+    cand = in_box or blobs
     if near is not None and near[0] >= 0:
-        bx, by, _ = min(blobs, key=lambda b: (b[0]-near[0])**2 + (b[1]-near[1])**2)
-    else:
-        bx, by, _ = max(blobs, key=lambda b: b[2])
-    return bx, by
+        return min(cand, key=lambda b: (b[0]-near[0])**2 + (b[1]-near[1])**2)
+    return max(cand, key=lambda b: b[2])
 
 
 def get_character_full(np_img=None, near=None):
