@@ -20,6 +20,7 @@ import pyautogui
 from pynput.keyboard import Key, Listener
 import random
 import keyboard as kb   # safe_press/release/release_all + F8 pause listener
+import navmap
 
 # --- recovery map constants (calibrated 2026-08-09, full-minimap frame) ---
 ROPE_X = 91              # rope minimap x (climbs to farming platform)
@@ -628,6 +629,31 @@ def _idle_on_fallen(seconds):
         time.sleep(0.3)
 
 
+def _nav_locate():
+    x, y = stable_char(3)
+    return navmap.classify_node(x, y)
+
+# (src,dst) -> a callable that performs the move using the tuned primitives.
+# Rope/up moves reuse recover_to_farming (it climbs any-below -> top). Downjumps
+# reuse the proven composites. Per-rope single-level moves are a live follow-up.
+EDGE_ACTIONS = {
+    ("TOP_FARM", "REST"):        lambda: drop_to_fallen(),
+    ("TOP_FARM", "BOTTOM_FARM"): lambda: go_to_bottom(),
+    ("REST", "BOTTOM_FARM"):     lambda: rest_to_bottom(),
+    ("REST", "TOP_FARM"):        lambda: recover_to_farming(),
+    ("MID", "TOP_FARM"):         lambda: recover_to_farming(),
+    ("BOTTOM_FARM", "TOP_FARM"): lambda: recover_to_farming(),
+    ("LOWER_LEDGE", "TOP_FARM"): lambda: recover_to_farming(),
+}
+
+def execute_edge(edge):
+    fn = EDGE_ACTIONS.get((edge["src"], edge["dst"]))
+    if fn is None:
+        print(f"[nav] no executor for {edge['src']}->{edge['dst']}")
+        return False
+    return bool(fn())
+
+
 def farming_loop(exp_check=None, enemy_check=None, panic=None,
                  break_every=(8 * 60, 15 * 60), rest_range=(30, 120),
                  farm_leg=(16, 34), skill_interval=(260, 340), max_seconds=None):
@@ -777,6 +803,87 @@ def farming_loop_split(exp_check=None, enemy_check=None, panic=None,
                 print("[split] bottom stint done -> climb to top")
                 if recover_to_farming():
                     phase = "top"
+
+
+def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
+                     farm_secs=(20, 40), break_every=(8 * 60, 15 * 60),
+                     rest_range=(30, 120), skill_interval=(260, 340),
+                     deplete_threshold=2, count_samples=3, max_seconds=None):
+    """Node-graph farming loop: farm the current platform, count dragons, and when
+    depleted (< deplete_threshold) travel() to the other farming platform. Recovery
+    and rotation both go through navmap.travel(). Preserves EXP/red-dot safety,
+    F8 pause, jittered breaks, and jittered skill/heal cadence. max_seconds bounds it."""
+    import random as _r
+    import monsters, navmap
+    if not focus():
+        print("[nav] could not focus"); return
+    tpls = monsters.load_templates()
+    print(f"[nav] loaded {len(tpls)} dragon templates")
+    t_start = time.time()
+    next_break = time.time() + _r.uniform(*break_every)
+    next_skill = [time.time() + _r.uniform(*skill_interval)]
+    current = "TOP_FARM"
+
+    def heal_skill():
+        kb.safe_press('h'); time.sleep(0.08); kb.safe_release('h')
+        if time.time() >= next_skill[0]:
+            kb.safe_press('a'); time.sleep(0.4); kb.safe_release('a')
+            next_skill[0] = time.time() + _r.uniform(*skill_interval)
+
+    def go(dst):
+        return navmap.travel(dst, locate_fn=_nav_locate, execute_fn=execute_edge)
+
+    while True:
+        if max_seconds is not None and time.time() - t_start > max_seconds:
+            kb.safe_release_all(); print("[nav] max_seconds -> stop"); return
+        if kb.pause:
+            kb.safe_release_all(); time.sleep(0.1); continue
+
+        # locate; recover onto a farm node if off-map
+        node = _nav_locate()
+        if node is None:
+            time.sleep(0.2); continue
+        if node not in navmap.FARM_NODES:
+            print(f"[nav] on {node} -> travel to {current}")
+            if not go(current) and panic:
+                panic(); time.sleep(1)
+            continue
+
+        # safety
+        if enemy_check and enemy_check():
+            print("[nav] another player -> panic")
+            if panic: panic()
+            time.sleep(1); continue
+        if exp_check and exp_check():
+            print("[nav] EXP too low -> panic")
+            if panic: panic()
+            time.sleep(1); continue
+
+        # scheduled break: drop to REST, rest, climb back
+        if time.time() >= next_break:
+            print("[nav] break -> rest on fallen platform")
+            if drop_to_fallen():
+                _idle_on_fallen(_r.uniform(*rest_range))
+            recover_to_farming()
+            next_break = time.time() + _r.uniform(*break_every)
+            current = "TOP_FARM"
+            continue
+
+        # farm a stint on the current node
+        current = node
+        ok = farm(_r.uniform(*farm_secs)) if node == "TOP_FARM" else farm_bottom(_r.uniform(*farm_secs))
+        if not ok:
+            continue                                 # fell mid-stint -> re-locate/recover next round
+        heal_skill()
+
+        # count dragons; rotate if depleted
+        n = monsters.count_dragons(capture, tpls, roi=monsters.ROI_BY_NODE.get(node, monsters.DEFAULT_ROI), samples=count_samples)
+        print(f"[nav] {node} dragons~{n}")
+        target = navmap.next_farm_target(node, n, threshold=deplete_threshold)
+        if target:
+            print(f"[nav] {node} depleted ({n} < {deplete_threshold}) -> travel to {target}")
+            if go(target):
+                current = target
 
 
 def break_cycle(idle_seconds=30):
@@ -941,6 +1048,32 @@ if __name__ == "__main__":
         print(f"FULL RUN ({cmd}) ready. Switch to the game and press F8 to start / pause.")
         try:
             loop(exp_check=_exp_check, enemy_check=_enemy_check, panic=_panic)
+        finally:
+            kb.safe_release_all(); lis.stop()
+    elif cmd == "runnav":
+        _exp_proc = ExpProcessor(); _started = [None]
+        def _exp_check():
+            if _started[0] is None: _started[0] = time.time()
+            eg = get_exp(_exp_proc)
+            if eg is not None and eg[0] is not None:
+                return eg[0] < 4000 and (time.time() - _started[0]) > 180
+            return False
+        def _enemy_check(): return len(get_enemy()) > 0
+        def _panic():
+            kb.safe_release_all()
+            print("[safety] trigger -> releasing keys and PAUSING (no Free Market). F8 to resume.")
+            kb.pause = True
+        lis = Listener(on_press=kb.on_press); lis.start(); kb.pause = True
+        print("FULL RUN (runnav) ready. Switch to the game and press F8 to start / pause.")
+        try:
+            farming_loop_nav(exp_check=_exp_check, enemy_check=_enemy_check, panic=_panic)
+        finally:
+            kb.safe_release_all(); lis.stop()
+    elif cmd == "nav":
+        secs = int(sys.argv[2]) if len(sys.argv) > 2 else 90
+        lis = Listener(on_press=kb.on_press); lis.start()
+        try:
+            farming_loop_nav(break_every=(9999, 9999), farm_secs=(12, 16), max_seconds=secs)
         finally:
             kb.safe_release_all(); lis.stop()
     elif cmd == "split":
