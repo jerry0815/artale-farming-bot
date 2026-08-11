@@ -42,3 +42,21 @@ def load_templates(folder=DEFAULT_TEMPLATE_DIR, max_templates=12, max_dim=120):
         if len(out) >= max_templates:
             break
     return out
+
+def detect_dragons(frame_bgr, roi, templates, diff_thres=0.35):
+    x0, y0, x1, y1 = roi
+    sub = frame_bgr[y0:y1, x0:x1]
+    if sub.size == 0:
+        return []
+    boxes = []
+    for img, mask in templates:
+        th, tw = img.shape[:2]
+        if th > sub.shape[0] or tw > sub.shape[1]:
+            continue
+        res = cv2.matchTemplate(sub, img, cv2.TM_SQDIFF_NORMED, mask=mask)
+        res = np.nan_to_num(res, nan=1.0, posinf=1.0, neginf=1.0)  # masked SQDIFF can NaN
+        ys, xs = np.where(res <= diff_thres)
+        for px, py in zip(xs, ys):
+            boxes.append([x0 + int(px), y0 + int(py),
+                          x0 + int(px) + tw, y0 + int(py) + th])
+    return [tuple(b) for b in apply_nms(boxes, overlapThresh=0.3)]

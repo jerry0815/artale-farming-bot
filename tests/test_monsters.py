@@ -19,3 +19,27 @@ def test_load_templates_returns_pairs_and_caps_count():
 
 def test_load_templates_missing_folder_returns_empty():
     assert monsters.load_templates(folder="does/not/exist") == []
+
+def _paste(canvas, tile_bgr, x, y):
+    mask = monsters.build_mask(tile_bgr)
+    h, w = tile_bgr.shape[:2]
+    roi = canvas[y:y+h, x:x+w]
+    roi[mask > 0] = tile_bgr[mask > 0]     # paste only non-green pixels
+
+def test_detect_counts_two_pasted_dragons():
+    tpls = monsters.load_templates(max_templates=1)
+    assert tpls, "need at least one template"
+    tile = tpls[0][0]                       # the (downscaled) template image, green bg
+    h, w = tile.shape[:2]
+    canvas = np.zeros((h + 40, w * 3 + 60, 3), np.uint8)   # black playfield
+    _paste(canvas, tile, 10, 20)
+    _paste(canvas, tile, w + 40, 20)
+    roi = (0, 0, canvas.shape[1], canvas.shape[0])
+    boxes = monsters.detect_dragons(canvas, roi, tpls, diff_thres=0.30)
+    assert len(boxes) == 2
+
+def test_detect_empty_frame_is_zero():
+    tpls = monsters.load_templates(max_templates=1)
+    canvas = np.zeros((200, 300, 3), np.uint8)
+    boxes = monsters.detect_dragons(canvas, (0, 0, 300, 200), tpls, diff_thres=0.30)
+    assert boxes == []
