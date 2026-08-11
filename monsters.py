@@ -116,9 +116,15 @@ DEFAULT_MOTION_ROI = (360, 70, 1910, 720)
 # Per-node motion ROIs. The camera follows the character, so the dragons she is
 # actually farming sit in a band relative to her home spot. Scope the count to that
 # band so the other platform's dragons don't leak in. LIVE-TUNE both bands.
+# Her-level farming lane per node (screen coords). Scoped to the band where her
+# arrows reach on THAT platform, excluding other ledges visible in the same frame
+# (e.g. the higher ledge above the top platform). Both measured live 2026-08-11
+# with the character parked at each home (TOP x74,y85 / BOTTOM x63,y143..150).
+# The camera clamps per area, so the OTHER platform is mostly off-screen; these
+# bands exclude the extra ledges that remain in-frame. Still fine to LIVE-TUNE.
 MOTION_ROI_BY_NODE = {
-    "TOP_FARM":    (360, 70, 1910, 720),
-    "BOTTOM_FARM": (360, 300, 1910, 950),
+    "TOP_FARM":    (380, 500, 1910, 790),
+    "BOTTOM_FARM": (380, 400, 1910, 820),
 }
 DRAGON_AREA = 16000      # typical foreground px per dragon (LIVE-TUNE)
 FG_DIFF_THR = 45         # abs per-pixel diff (gray) counted as motion
