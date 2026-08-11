@@ -91,3 +91,13 @@ def test_every_edge_has_an_executor():
     import navmap
     for e in navmap.EDGES:
         assert (e["src"], e["dst"]) in recovery.EDGE_ACTIONS, (e["src"], e["dst"])
+
+def test_rotation_decision_end_to_end():
+    import navmap
+    # depleted top -> go bottom; then depleted bottom -> go top; populated -> stay
+    assert navmap.next_farm_target("TOP_FARM", 1, threshold=2) == "BOTTOM_FARM"
+    assert navmap.next_farm_target("BOTTOM_FARM", 1, threshold=2) == "TOP_FARM"
+    assert navmap.next_farm_target("TOP_FARM", 4, threshold=2) is None
+    # and travel between the two farm nodes is always planttable
+    assert navmap.plan("TOP_FARM", "BOTTOM_FARM") is not None
+    assert navmap.plan("BOTTOM_FARM", "TOP_FARM") is not None
