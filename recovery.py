@@ -374,40 +374,26 @@ def _climb_segment(grab_x, exit_y, hop, stall_ok=False, cap=ROPE_CLIMB_MAX):
 
 
 def climb_and_jump():
-    """Press Up to climb the rope; if she reaches the top, up-jump onto the platform.
-    Returns True only if she actually climbed to the top -- if Up did nothing (she was
-    beside the rope, not on it), returns False so the caller re-aligns and retries."""
+    """Climb the rope(s) to the top farming platform, then up-jump onto it. From the
+    bottom she must climb the CENTER rope to the MID ledge, shift LEFT, and climb the
+    LEFT rope to the top; from MID/REST only the left rope remains. Returns True only if
+    she reached the top -- on any missed stage releases keys and returns False so the
+    caller (recover_to_farming) re-localizes and retries."""
     x0, y0 = get_character_full()
-    kb.safe_press(Key.up)
-    if y0 >= BOTTOM_Y_MIN:                       # bottom platform: rope base is above the
-        kb.safe_press(JUMP); time.sleep(0.08)    # floor -> hop (Up+Jump) to catch the rope
-        kb.safe_release(JUMP)
-    last_y, no_grab, t0, climbed, climbing = None, 0, time.time(), False, False
-    while time.time() - t0 < ROPE_CLIMB_MAX:
-        if kb.pause:
-            break
-        x, y = get_character_full()
-        if y >= 0:
-            if y <= ROPE_EXIT_TOP_Y:
-                climbed = True; break
-            if y0 >= 0 and y <= y0 - 6:              # risen 6px -> she IS climbing the rope
-                climbing = True
-            if not climbing:                          # not climbing yet: did she grab at all?
-                if last_y is not None and y >= last_y - 1:
-                    no_grab += 1
-                    if no_grab >= 6:                  # never grabbed -> give up (re-align)
-                        break
-                else:
-                    no_grab = 0
-            # once climbing, HOLD Up straight to the top. Do NOT release on a transient
-            # "not rising" frame -- that release-mid-climb was the stutter.
-            last_y = y
-        time.sleep(0.08)
-    if climbed:
-        kb.safe_press(JUMP); time.sleep(0.15); kb.safe_release(JUMP); time.sleep(0.12)
-    kb.safe_release(Key.up)
-    time.sleep(0.1)
-    return climbed
+    stages = _climb_plan(y0)
+    if "R_C->MID" in stages:                              # center rope: bottom -> MID ledge
+        if not _climb_segment(R_C_X, MID_LEDGE_Y, hop=True, stall_ok=True):
+            kb.safe_release_all(); return False
+        _xm, ym = get_character_full()
+        if not (MID_Y_MIN <= ym <= MID_Y_MAX):            # not on the ledge -> bail, don't shift
+            kb.safe_release_all(); return False
+        if not walk_to_x(R_L_X, tol=1):                   # the measured LEFT shift to the left rope
+            kb.safe_release_all(); return False
+    if not _climb_segment(R_L_X, TOP_EXIT_Y, hop=R_L_HOP):  # left rope: MID -> top
+        kb.safe_release_all(); return False
+    kb.safe_press(JUMP); time.sleep(0.15); kb.safe_release(JUMP); time.sleep(0.12)
+    kb.safe_release_all(); time.sleep(0.1)
+    return True
 
 
 def drop_to_fallen(drop_x=DROP_X):

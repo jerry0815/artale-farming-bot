@@ -79,3 +79,43 @@ def test_climb_segment_transient_stall_does_not_abort(monkeypatch):
     # with stall_ok=False, transient stall must NOT abort -> continues and reaches exit_y
     _patch_climb(monkeypatch, recovery, [140, 130, 124, 124, 118, 110, 100, 92])
     assert recovery._climb_segment(95, 92, hop=True, stall_ok=False) is True
+
+def test_climb_and_jump_two_stage_from_bottom(monkeypatch):
+    recovery = _skip_if_no_recovery()
+    # first read = bottom (y143) -> two-stage plan; after stage 1, read = MID ledge (y118)
+    pos = iter([(95, 143), (100, 118)])
+    monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: next(pos, (100, 118)))
+    seg_calls, walks = [], []
+    monkeypatch.setattr(recovery, "_climb_segment",
+                        lambda grab_x, exit_y, hop, **k: seg_calls.append(grab_x) or True)
+    monkeypatch.setattr(recovery, "walk_to_x", lambda x, **k: walks.append(x) or True)
+    monkeypatch.setattr(recovery, "kb", _FakeKB())
+    monkeypatch.setattr(recovery.time, "sleep", lambda *a: None)
+    assert recovery.climb_and_jump() is True
+    assert seg_calls == [recovery.R_C_X, recovery.R_L_X]     # center rope, then left rope
+    assert recovery.R_L_X in walks                           # the LEFT shift happened
+
+def test_climb_and_jump_one_stage_from_mid(monkeypatch):
+    recovery = _skip_if_no_recovery()
+    monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: (91, 120))  # on MID
+    seg_calls = []
+    monkeypatch.setattr(recovery, "_climb_segment",
+                        lambda grab_x, exit_y, hop, **k: seg_calls.append(grab_x) or True)
+    monkeypatch.setattr(recovery, "walk_to_x", lambda *a, **k: True)
+    monkeypatch.setattr(recovery, "kb", _FakeKB())
+    monkeypatch.setattr(recovery.time, "sleep", lambda *a: None)
+    assert recovery.climb_and_jump() is True
+    assert seg_calls == [recovery.R_L_X]                      # only the left rope
+
+def test_climb_and_jump_bails_if_not_on_ledge_after_stage1(monkeypatch):
+    recovery = _skip_if_no_recovery()
+    # bottom start, but after stage 1 she is NOT in the MID band (fell to y145)
+    pos = iter([(95, 143), (95, 145)])
+    monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: next(pos, (95, 145)))
+    monkeypatch.setattr(recovery, "_climb_segment", lambda *a, **k: True)
+    walks = []
+    monkeypatch.setattr(recovery, "walk_to_x", lambda x, **k: walks.append(x) or True)
+    monkeypatch.setattr(recovery, "kb", _FakeKB())
+    monkeypatch.setattr(recovery.time, "sleep", lambda *a: None)
+    assert recovery.climb_and_jump() is False
+    assert recovery.R_L_X not in walks                       # never attempted the left shift
