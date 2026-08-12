@@ -107,6 +107,16 @@ def test_climb_and_jump_one_stage_from_mid(monkeypatch):
     assert recovery.climb_and_jump() is True
     assert seg_calls == [recovery.R_L_X]                      # only the left rope
 
+def test_climb_segment_slow_climb_survives_flat_frames(monkeypatch):
+    recovery = _skip_if_no_recovery()
+    # Cumulative rise latches 'climbing' by y=112 (118-6); then several flat frames
+    # (idle bob / template jitter) must NOT abort a real top-climb before exit_y.
+    # Under the OLD per-frame gate 'climbing' never latches and no_grab aborts at the
+    # third flat frame -> this asserts the cumulative-latch + no_grab-reset fix.
+    _patch_climb(monkeypatch, recovery, [118, 115, 112, 112, 112, 112, 108, 104, 100, 96, 92])
+    assert recovery._climb_segment(91, 92, hop=False, stall_ok=False) is True
+
+
 def test_climb_and_jump_bails_if_not_on_ledge_after_stage1(monkeypatch):
     recovery = _skip_if_no_recovery()
     # bottom start, but after stage 1 she is NOT in the MID band (fell to y145)

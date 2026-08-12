@@ -341,32 +341,42 @@ def _climb_segment(grab_x, exit_y, hop, stall_ok=False, cap=ROPE_CLIMB_MAX):
     """Align to grab_x, grab the rope, hold Up until y<=exit_y. `hop` = Up+Jump to
     catch a rope whose base is above the floor. `stall_ok` = also succeed when she has
     climbed then stopped rising (arrived at a ledge). Releases Up before returning;
-    returns True iff the segment completed."""
+    returns True iff the segment completed. Climb-detection is CUMULATIVE from the
+    segment's first read (a real climb is ~1px/frame, so a per-frame gate never latches)."""
     if not walk_to_x(grab_x, tol=1):
         kb.safe_release_all(); return False
     kb.safe_press(Key.up)
     if hop:
         kb.safe_press(JUMP); time.sleep(0.08); kb.safe_release(JUMP)
-    last_y, no_grab, stalled, climbing, reached = None, 0, 0, False, False
+    y_start, last_y, no_grab, stalled, climbing, reached = None, None, 0, 0, False, False
     t0 = time.time()
     while time.time() - t0 < cap:
         if kb.pause:
             break
         x, y = get_character_full()
         if y >= 0:
+            if y_start is None:
+                y_start = y                          # first valid read = climb baseline
             if y <= exit_y:
                 reached = True; break
-            if last_y is not None and y <= last_y - 6:        # rose >=6px -> climbing
-                climbing = True; stalled = 0
-            elif last_y is not None and y >= last_y - 1:      # not rising this frame
-                if climbing:
+            if y <= y_start - 6:                      # risen >=6px FROM START -> climbing
+                climbing = True
+            if climbing:
+                # once climbing, HOLD Up to the target; a transient non-rising frame is
+                # NOT a failure. With stall_ok, a sustained stall = arrived at a ledge.
+                if last_y is not None and y >= last_y - 1:
                     stalled += 1
-                    if stall_ok and stalled >= 3:             # arrived at the ledge
+                    if stall_ok and stalled >= 3:
                         reached = True; break
                 else:
+                    stalled = 0
+            else:
+                if last_y is not None and y >= last_y - 1:   # not rising & not yet climbing
                     no_grab += 1
-                    if no_grab >= 3:                          # never grabbed -> give up
+                    if no_grab >= 6:                  # never grabbed -> give up (re-align)
                         break
+                else:
+                    no_grab = 0                      # reset on any real rise
             last_y = y
         time.sleep(0.08)
     kb.safe_release(Key.up)
