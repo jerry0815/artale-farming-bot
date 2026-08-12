@@ -17,3 +17,6 @@ Thumbs.db
 .DS_Store
 .vscode/
 .idea/
+
+# Generated trajectory data
+climb_traj.jsonl

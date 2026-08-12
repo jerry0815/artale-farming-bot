@@ -991,6 +991,21 @@ def break_cycle(idle_seconds=30):
     return ok
 
 
+def record_climb_attempt(cap=20.0):
+    """Data collection ONLY (sense-only, presses NO keys): while the USER manually
+    climbs bottom->top, poll get_character_full() at ~30Hz into reads=[[t,x,y],...].
+    Stops on F8 (kb.pause) or `cap` seconds. Zero-risk: never moves the character."""
+    reads, t0 = [], time.time()
+    while time.time() - t0 < cap:
+        if kb.pause:
+            break
+        x, y = get_character_full()
+        if x >= 0:
+            reads.append([round(time.time() - t0, 3), int(x), int(y)])
+        time.sleep(0.03)
+    return {"reads": reads}
+
+
 def recover_to_farming(max_rounds=8):   # extra rounds: a dragon can hit her mid-climb
     """Fallen -> farming: walk to the rope x, climb, up-jump. Retries a few times;
     bails safely (releases keys) rather than risking a blind fall."""
@@ -1056,6 +1071,19 @@ if __name__ == "__main__":
             print("RESULT:", recover_to_farming())
         finally:
             kb.safe_release_all(); lis.stop()
+    elif cmd == "record-climb":
+        import json as _json
+        if not focus():
+            print("no focus"); sys.exit(1)
+        lis = Listener(on_press=kb.on_press); lis.start()      # F8 stops
+        print("[record-climb] manually climb bottom->top; press F8 to stop")
+        try:
+            tr = record_climb_attempt()
+        finally:
+            kb.safe_release_all(); lis.stop()
+        with open("climb_traj.jsonl", "a", encoding="utf-8") as fh:
+            fh.write(_json.dumps(tr) + "\n")
+        print(f"[record-climb] wrote {len(tr['reads'])} reads to climb_traj.jsonl")
     elif cmd == "drop":
         if not focus():
             print("could not focus"); sys.exit(1)
