@@ -337,6 +337,42 @@ def _climb_plan(y0):
     return ["MID->TOP"]
 
 
+def _climb_segment(grab_x, exit_y, hop, stall_ok=False, cap=ROPE_CLIMB_MAX):
+    """Align to grab_x, grab the rope, hold Up until y<=exit_y. `hop` = Up+Jump to
+    catch a rope whose base is above the floor. `stall_ok` = also succeed when she has
+    climbed then stopped rising (arrived at a ledge). Releases Up before returning;
+    returns True iff the segment completed."""
+    if not walk_to_x(grab_x, tol=1):
+        kb.safe_release_all(); return False
+    kb.safe_press(Key.up)
+    if hop:
+        kb.safe_press(JUMP); time.sleep(0.08); kb.safe_release(JUMP)
+    last_y, no_grab, stalled, climbing, reached = None, 0, 0, False, False
+    t0 = time.time()
+    while time.time() - t0 < cap:
+        if kb.pause:
+            break
+        x, y = get_character_full()
+        if y >= 0:
+            if y <= exit_y:
+                reached = True; break
+            if last_y is not None and y <= last_y - 6:        # rose >=6px -> climbing
+                climbing = True; stalled = 0
+            elif last_y is not None and y >= last_y - 1:      # not rising this frame
+                if climbing:
+                    stalled += 1
+                    if stall_ok and stalled >= 3:             # arrived at the ledge
+                        reached = True; break
+                else:
+                    no_grab += 1
+                    if no_grab >= 3:                          # never grabbed -> give up
+                        break
+            last_y = y
+        time.sleep(0.08)
+    kb.safe_release(Key.up)
+    return reached
+
+
 def climb_and_jump():
     """Press Up to climb the rope; if she reaches the top, up-jump onto the platform.
     Returns True only if she actually climbed to the top -- if Up did nothing (she was
