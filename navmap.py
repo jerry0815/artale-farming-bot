@@ -38,9 +38,11 @@ EDGES = [
     {"src": "REST",         "dst": "BOTTOM_FARM", "kind": "downjump", "rope": None},
     {"src": "REST",         "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_L"},
     {"src": "MID",          "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_L"},
-    # NOTE: the R_C edges are logical "recover-macro" edges. Physically the center rope
-    # only reaches the MID ledge; recovery.climb_and_jump then shifts LEFT and climbs the
-    # R_L rope to the top. The graph keeps a single BOTTOM_FARM->TOP_FARM edge (executed by
+    # NOTE: the R_C edges are logical "recover-macro" edges. Physically the bottom rope-
+    # LADDER and the upper CHAIN are STACKED in the same minimap column (verified via synced
+    # screen+minimap capture) with a vertical jump between them at the ladder top (~y124) --
+    # NOT a horizontal gap. recovery.climb_and_jump rides both by holding Up (bridging the
+    # gap with one jump if it stalls). The graph keeps a single BOTTOM_FARM->TOP_FARM edge (executed by
     # recover_to_farming) so navmap.travel needs no per-rope executor. Do not split it into
     # BOTTOM_FARM->MID without also adding an EDGE_ACTIONS executor for that hop.
     {"src": "BOTTOM_FARM",  "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_C"},

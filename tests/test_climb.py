@@ -26,22 +26,11 @@ def test_record_climb_builds_reads(monkeypatch):
     assert isinstance(tr, dict) and tr["reads"]
     assert tr["reads"][0][1:] == [95, 143]      # first (x,y)
 
-def test_climb_plan_from_bottom_is_two_stage():
+def test_climb_constants_present():
     recovery = _skip_if_no_recovery()
-    assert recovery._climb_plan(143) == ["R_C->MID", "MID->TOP"]
-    assert recovery._climb_plan(recovery.BOTTOM_Y_MIN) == ["R_C->MID", "MID->TOP"]
-
-def test_climb_plan_from_mid_or_rest_is_one_stage():
-    recovery = _skip_if_no_recovery()
-    assert recovery._climb_plan(120) == ["MID->TOP"]                    # MID ledge
-    assert recovery._climb_plan(105) == ["MID->TOP"]                    # REST platform
-    assert recovery._climb_plan(recovery.BOTTOM_Y_MIN - 1) == ["MID->TOP"]
-
-def test_climb_constants_present_and_ordered():
-    recovery = _skip_if_no_recovery()
-    assert recovery.R_C_X > recovery.R_L_X          # center rope is right of the left rope
-    assert recovery.MID_Y_MIN <= recovery.MID_LEDGE_Y <= recovery.MID_Y_MAX
     assert recovery.TOP_EXIT_Y == recovery.ROPE_EXIT_TOP_Y
+    assert recovery.BRIDGE_Y_MIN < recovery.BRIDGE_Y_MAX
+    assert 80 <= recovery.ROPE_X <= 100                  # the single climb column
 
 def _patch_climb(monkeypatch, recovery, ys, x=95):
     it = iter(ys)
@@ -76,36 +65,9 @@ def test_climb_segment_walk_fail_is_false(monkeypatch):
 def test_climb_segment_transient_stall_does_not_abort(monkeypatch):
     recovery = _skip_if_no_recovery()
     # climbs 140->130->124, stalls briefly (124->124), resumes (124->118->...->92);
-    # with stall_ok=False, transient stall must NOT abort -> continues and reaches exit_y
+    # with stall_ok=False and NO bridge_band, a transient stall must NOT abort.
     _patch_climb(monkeypatch, recovery, [140, 130, 124, 124, 118, 110, 100, 92])
     assert recovery._climb_segment(95, 92, hop=True, stall_ok=False) is True
-
-def test_climb_and_jump_two_stage_from_bottom(monkeypatch):
-    recovery = _skip_if_no_recovery()
-    # first read = bottom (y143) -> two-stage plan; after stage 1, read = MID ledge (y118)
-    pos = iter([(95, 143), (100, 118)])
-    monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: next(pos, (100, 118)))
-    seg_calls, walks = [], []
-    monkeypatch.setattr(recovery, "_climb_segment",
-                        lambda grab_x, exit_y, hop, **k: seg_calls.append(grab_x) or True)
-    monkeypatch.setattr(recovery, "walk_to_x", lambda x, **k: walks.append(x) or True)
-    monkeypatch.setattr(recovery, "kb", _FakeKB())
-    monkeypatch.setattr(recovery.time, "sleep", lambda *a: None)
-    assert recovery.climb_and_jump() is True
-    assert seg_calls == [recovery.R_C_X, recovery.R_L_X]     # center rope, then left rope
-    assert recovery.R_L_X in walks                           # the LEFT shift happened
-
-def test_climb_and_jump_one_stage_from_mid(monkeypatch):
-    recovery = _skip_if_no_recovery()
-    monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: (91, 120))  # on MID
-    seg_calls = []
-    monkeypatch.setattr(recovery, "_climb_segment",
-                        lambda grab_x, exit_y, hop, **k: seg_calls.append(grab_x) or True)
-    monkeypatch.setattr(recovery, "walk_to_x", lambda *a, **k: True)
-    monkeypatch.setattr(recovery, "kb", _FakeKB())
-    monkeypatch.setattr(recovery.time, "sleep", lambda *a: None)
-    assert recovery.climb_and_jump() is True
-    assert seg_calls == [recovery.R_L_X]                      # only the left rope
 
 def test_climb_segment_slow_climb_survives_flat_frames(monkeypatch):
     recovery = _skip_if_no_recovery()
@@ -116,16 +78,50 @@ def test_climb_segment_slow_climb_survives_flat_frames(monkeypatch):
     _patch_climb(monkeypatch, recovery, [118, 115, 112, 112, 112, 112, 108, 104, 100, 96, 92])
     assert recovery._climb_segment(91, 92, hop=False, stall_ok=False) is True
 
-
-def test_climb_and_jump_bails_if_not_on_ledge_after_stage1(monkeypatch):
+def test_climb_segment_bridges_when_stalled_at_ladder_top(monkeypatch):
     recovery = _skip_if_no_recovery()
-    # bottom start, but after stage 1 she is NOT in the MID band (fell to y145)
-    pos = iter([(95, 143), (95, 145)])
-    monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: next(pos, (95, 145)))
-    monkeypatch.setattr(recovery, "_climb_segment", lambda *a, **k: True)
-    walks = []
-    monkeypatch.setattr(recovery, "walk_to_x", lambda x, **k: walks.append(x) or True)
+    # climbs to the ladder top (y124), STALLS there (inside bridge band 118-130), then a
+    # bridge jump fires and she resumes onto the chain to reach exit_y. Asserts BOTH that a
+    # JUMP was pressed mid-climb and that the segment succeeds.
+    presses = []
+    class RecKB:
+        pause = False
+        def safe_press(self, k): presses.append(k)
+        def safe_release(self, k): pass
+        def safe_release_all(self): pass
+    ys = iter([136, 130, 124, 124, 124, 110, 100, 92])
+    monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: (91, next(ys, 92)))
+    monkeypatch.setattr(recovery, "walk_to_x", lambda *a, **k: True)
+    monkeypatch.setattr(recovery, "kb", RecKB())
+    monkeypatch.setattr(recovery.time, "sleep", lambda *a: None)
+    ok = recovery._climb_segment(91, 92, hop=False, bridge_band=(118, 130))
+    assert ok is True
+    assert presses.count(recovery.JUMP) == 1             # exactly one bridge jump (hop=False)
+
+def test_climb_and_jump_single_continuous_from_bottom(monkeypatch):
+    recovery = _skip_if_no_recovery()
+    monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: (91, 143))   # bottom
+    calls = []
+    def fake_seg(grab_x, exit_y, hop, **kw):
+        calls.append(dict(grab_x=grab_x, exit_y=exit_y, hop=hop, bridge=kw.get("bridge_band")))
+        return True
+    monkeypatch.setattr(recovery, "_climb_segment", fake_seg)
     monkeypatch.setattr(recovery, "kb", _FakeKB())
     monkeypatch.setattr(recovery.time, "sleep", lambda *a: None)
+    assert recovery.climb_and_jump() is True
+    assert len(calls) == 1                                        # ONE continuous climb
+    assert calls[0]["grab_x"] == recovery.ROPE_X                  # the single column
+    assert calls[0]["hop"] is True                               # from the bottom platform
+    assert calls[0]["bridge"] == (recovery.BRIDGE_Y_MIN, recovery.BRIDGE_Y_MAX)
+
+def test_climb_and_jump_false_when_segment_misses(monkeypatch):
+    recovery = _skip_if_no_recovery()
+    monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: (91, 143))
+    monkeypatch.setattr(recovery, "_climb_segment", lambda *a, **k: False)
+    released = {"all": False}
+    class KB(_FakeKB):
+        def safe_release_all(self, *a): released["all"] = True
+    monkeypatch.setattr(recovery, "kb", KB())
+    monkeypatch.setattr(recovery.time, "sleep", lambda *a: None)
     assert recovery.climb_and_jump() is False
-    assert recovery.R_L_X not in walks                       # never attempted the left shift
+    assert released["all"] is True                                # keys released on the miss

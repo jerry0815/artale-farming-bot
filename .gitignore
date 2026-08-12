@@ -20,3 +20,4 @@ Thumbs.db
 
 # Generated trajectory data
 climb_traj.jsonl
+climb_frames/

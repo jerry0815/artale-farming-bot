@@ -36,15 +36,13 @@ RECOVER_Y_MAX = 156      # covers rest (~110), bottom farming (~143), AND the cl
                          # rejected. Rope connects the levels, so climbing up reaches the top
 ROPE_EXIT_TOP_Y = 92     # climb until y<=this before the up-jump (live-proven)
 ROPE_CLIMB_MAX = 6.0     # bottom->top is a longer climb (y~143 up to ~85)
-# --- two-stage climb geometry (bottom -> MID ledge -> top). SEEDED from the current
-# single-rope constants + navmap MID band; refine from `record-climb` (Task 1). ---
-R_C_X = 95                     # center rope x (bottom -> MID ledge); cf. BOTTOM_ROPE_X
-R_L_X = 91                     # left rope x   (MID/REST -> top);      cf. ROPE_X
-MID_Y_MIN, MID_Y_MAX = 111, 131   # MID ledge y-band (mirrors navmap)
-MID_LEDGE_Y = 118              # y at the top of the center rope (on the MID ledge)
-MID_LAND_X = 100               # x where the center rope drops her on the ledge (pre-shift)
-TOP_EXIT_Y = ROPE_EXIT_TOP_Y   # 92; then up-jump onto the top platform
-R_L_HOP = False                # does grabbing the left rope from the ledge need a hop?
+# --- rope climb geometry (bottom -> top). Cross-checked against synced screen+minimap
+# capture (record_climb_frames.py): the bottom rope-LADDER and the upper CHAIN are STACKED
+# in the SAME minimap column (~ROPE_X) with a VERTICAL jump between them at the ladder top
+# (~y124) -- NOT a horizontal gap. Holding Up rides both; a stall at the ladder top needs
+# one jump to bridge onto the chain. ---
+TOP_EXIT_Y = ROPE_EXIT_TOP_Y   # 92; climb until y<=this, then up-jump onto the top platform
+BRIDGE_Y_MIN, BRIDGE_Y_MAX = 118, 130   # ladder-top band: a stall here -> jump onto the chain
 JUMP = Key.alt_l
 FALL_ABORT_DY = 18       # if y jumps this much more than expected mid-walk -> abort
 DROP_X = 67              # narrow drop-through gap: down-jump here drops straight down to
@@ -329,26 +327,21 @@ def walk_to_x(target_x, tol=2, timeout=7.0, coarse=5):
     return x >= 0 and abs(x - target_x) <= tol + 2
 
 
-def _climb_plan(y0):
-    """Rope segments to climb from starting height y0. Bottom/lower -> center rope to
-    the MID ledge, then left rope to the top. Mid/rest -> just the left rope to top."""
-    if y0 >= BOTTOM_Y_MIN:
-        return ["R_C->MID", "MID->TOP"]
-    return ["MID->TOP"]
-
-
-def _climb_segment(grab_x, exit_y, hop, stall_ok=False, cap=ROPE_CLIMB_MAX):
-    """Align to grab_x, grab the rope, hold Up until y<=exit_y. `hop` = Up+Jump to
-    catch a rope whose base is above the floor. `stall_ok` = also succeed when she has
-    climbed then stopped rising (arrived at a ledge). Releases Up before returning;
-    returns True iff the segment completed. Climb-detection is CUMULATIVE from the
-    segment's first read (a real climb is ~1px/frame, so a per-frame gate never latches)."""
+def _climb_segment(grab_x, exit_y, hop, stall_ok=False, bridge_band=None, cap=ROPE_CLIMB_MAX):
+    """Align to grab_x, grab the rope, hold Up until y<=exit_y. `hop` = Up+Jump to catch a
+    rope whose base is above the floor. `stall_ok` = also succeed when she has climbed then
+    stopped rising (arrived at a ledge). `bridge_band` = (lo,hi): if she STALLS while
+    climbing inside this y-band (the ladder->chain gap), fire ONE Up+Jump to bridge onto the
+    next rope, then keep holding Up. Releases Up before returning; True iff the segment
+    completed. Climb-detection is CUMULATIVE from the first read (a real climb is ~1px/frame,
+    so a per-frame gate never latches)."""
     if not walk_to_x(grab_x, tol=1):
         kb.safe_release_all(); return False
     kb.safe_press(Key.up)
     if hop:
         kb.safe_press(JUMP); time.sleep(0.08); kb.safe_release(JUMP)
     y_start, last_y, no_grab, stalled, climbing, reached = None, None, 0, 0, False, False
+    bridged = False
     t0 = time.time()
     while time.time() - t0 < cap:
         if kb.pause:
@@ -366,7 +359,12 @@ def _climb_segment(grab_x, exit_y, hop, stall_ok=False, cap=ROPE_CLIMB_MAX):
                 # NOT a failure. With stall_ok, a sustained stall = arrived at a ledge.
                 if last_y is not None and y >= last_y - 1:
                     stalled += 1
-                    if stall_ok and stalled >= 3:
+                    if bridge_band and not bridged and stalled >= 2 \
+                            and bridge_band[0] <= y <= bridge_band[1]:
+                        # stalled at the ladder top -> jump onto the chain, keep climbing
+                        kb.safe_press(JUMP); time.sleep(0.08); kb.safe_release(JUMP)
+                        bridged = True; stalled = 0
+                    elif stall_ok and stalled >= 3:
                         reached = True; break
                 else:
                     stalled = 0
@@ -384,22 +382,15 @@ def _climb_segment(grab_x, exit_y, hop, stall_ok=False, cap=ROPE_CLIMB_MAX):
 
 
 def climb_and_jump():
-    """Climb the rope(s) to the top farming platform, then up-jump onto it. From the
-    bottom she must climb the CENTER rope to the MID ledge, shift LEFT, and climb the
-    LEFT rope to the top; from MID/REST only the left rope remains. Returns True only if
-    she reached the top -- on any missed stage releases keys and returns False so the
-    caller (recover_to_farming) re-localizes and retries."""
-    x0, y0 = get_character_full()
-    stages = _climb_plan(y0)
-    if "R_C->MID" in stages:                              # center rope: bottom -> MID ledge
-        if not _climb_segment(R_C_X, MID_LEDGE_Y, hop=True, stall_ok=True):
-            kb.safe_release_all(); return False
-        _xm, ym = get_character_full()
-        if not (MID_Y_MIN <= ym <= MID_Y_MAX):            # not on the ledge -> bail, don't shift
-            kb.safe_release_all(); return False
-        if not walk_to_x(R_L_X, tol=1):                   # the measured LEFT shift to the left rope
-            kb.safe_release_all(); return False
-    if not _climb_segment(R_L_X, TOP_EXIT_Y, hop=R_L_HOP):  # left rope: MID -> top
+    """Climb the rope column to the top farming platform, then up-jump onto it. The bottom
+    rope-LADDER and the upper CHAIN sit in the SAME minimap column (~ROPE_X); holding Up
+    rides both, and if she stalls at the ladder top (BRIDGE band) a single jump bridges her
+    onto the chain. Returns True only if she reached the top -- on a miss releases keys and
+    returns False so the caller (recover_to_farming) re-localizes and retries."""
+    _x0, y0 = get_character_full()
+    hop = y0 >= BOTTOM_Y_MIN                              # bottom platform: rope base above floor
+    if not _climb_segment(ROPE_X, TOP_EXIT_Y, hop=hop,
+                          bridge_band=(BRIDGE_Y_MIN, BRIDGE_Y_MAX)):
         kb.safe_release_all(); return False
     kb.safe_press(JUMP); time.sleep(0.15); kb.safe_release(JUMP); time.sleep(0.12)
     kb.safe_release_all(); time.sleep(0.1)

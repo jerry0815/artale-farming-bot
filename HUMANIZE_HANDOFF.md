@@ -460,12 +460,17 @@ success.
   template scale (reference sprites vs Artale 150%-DPI grab), and `monsters.DEFAULT_ROI`.
 - Design + plan: docs/superpowers/specs/ and docs/superpowers/plans/ (2026-08-10).
 
-### Two-stage rope climb (bottom -> MID -> top) — 2026-08-11
-- Problem: climb_and_jump held Up on ONE rope bottom->top, but the center rope (R_C)
-  only reaches the MID ledge; she must shift LEFT to the left rope (R_L) to reach the top.
-- Fix: climb_and_jump now runs _climb_plan(y0) -> _climb_segment(R_C_X, MID_LEDGE_Y) then
-  walk_to_x(R_L_X) then _climb_segment(R_L_X, TOP_EXIT_Y). MID/REST starts do one segment.
-- Geometry constants (R_C_X, R_L_X, MID_LEDGE_Y, MID_Y_MIN/MAX, MID_LAND_X, R_L_HOP) are
-  measured via `python recovery.py record-climb` (sense-only) -> climb_traj.jsonl (ignored).
+### Rope climb (bottom -> top) — 2026-08-11
+- A first pass modeled this as two ropes with a horizontal MID-ledge shift. Cross-comparing
+  synced screen+minimap capture (record_climb_frames.py) DISPROVED that: the bottom rope-
+  LADDER and the upper CHAIN are STACKED in the SAME minimap column (~ROPE_X x91) with a
+  VERTICAL jump between them at the ladder top (~y124). There is NO horizontal gap; a
+  sideways walk mid-rope makes her fall to the rest platform.
+- Fix: climb_and_jump is a SINGLE continuous climb -- _climb_segment(ROPE_X, TOP_EXIT_Y,
+  hop=<from bottom>, bridge_band=(BRIDGE_Y_MIN,BRIDGE_Y_MAX)) then up-jump. Holding Up rides
+  ladder->chain; if she stalls in the ladder-top band a single jump bridges onto the chain.
+  Climb-detection is cumulative-from-start with a no_grab reset (a real climb is ~1px/frame).
+- Recorders (both sense-only, no keys): `python recovery.py record-climb` (minimap traj) and
+  `python record_climb_frames.py` (screen frames + minimap, for cross-compare).
 - recover_to_farming and both farming loops are unchanged; navmap graph deliberately NOT
-  split (would need a per-hop executor).
+  split (would need a per-hop executor). NEEDS live validation via `python recovery.py recover`.
