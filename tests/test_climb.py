@@ -25,3 +25,20 @@ def test_record_climb_builds_reads(monkeypatch):
     tr = recovery.record_climb_attempt(cap=1.0)
     assert isinstance(tr, dict) and tr["reads"]
     assert tr["reads"][0][1:] == [95, 143]      # first (x,y)
+
+def test_climb_plan_from_bottom_is_two_stage():
+    recovery = _skip_if_no_recovery()
+    assert recovery._climb_plan(143) == ["R_C->MID", "MID->TOP"]
+    assert recovery._climb_plan(recovery.BOTTOM_Y_MIN) == ["R_C->MID", "MID->TOP"]
+
+def test_climb_plan_from_mid_or_rest_is_one_stage():
+    recovery = _skip_if_no_recovery()
+    assert recovery._climb_plan(120) == ["MID->TOP"]                    # MID ledge
+    assert recovery._climb_plan(105) == ["MID->TOP"]                    # REST platform
+    assert recovery._climb_plan(recovery.BOTTOM_Y_MIN - 1) == ["MID->TOP"]
+
+def test_climb_constants_present_and_ordered():
+    recovery = _skip_if_no_recovery()
+    assert recovery.R_C_X > recovery.R_L_X          # center rope is right of the left rope
+    assert recovery.MID_Y_MIN <= recovery.MID_LEDGE_Y <= recovery.MID_Y_MAX
+    assert recovery.TOP_EXIT_Y == recovery.ROPE_EXIT_TOP_Y

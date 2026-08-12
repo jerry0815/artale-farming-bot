@@ -36,6 +36,15 @@ RECOVER_Y_MAX = 156      # covers rest (~110), bottom farming (~143), AND the cl
                          # rejected. Rope connects the levels, so climbing up reaches the top
 ROPE_EXIT_TOP_Y = 92     # climb until y<=this before the up-jump (live-proven)
 ROPE_CLIMB_MAX = 6.0     # bottom->top is a longer climb (y~143 up to ~85)
+# --- two-stage climb geometry (bottom -> MID ledge -> top). SEEDED from the current
+# single-rope constants + navmap MID band; refine from `record-climb` (Task 1). ---
+R_C_X = 95                     # center rope x (bottom -> MID ledge); cf. BOTTOM_ROPE_X
+R_L_X = 91                     # left rope x   (MID/REST -> top);      cf. ROPE_X
+MID_Y_MIN, MID_Y_MAX = 111, 131   # MID ledge y-band (mirrors navmap)
+MID_LEDGE_Y = 118              # y at the top of the center rope (on the MID ledge)
+MID_LAND_X = 100               # x where the center rope drops her on the ledge (pre-shift)
+TOP_EXIT_Y = ROPE_EXIT_TOP_Y   # 92; then up-jump onto the top platform
+R_L_HOP = False                # does grabbing the left rope from the ledge need a hop?
 JUMP = Key.alt_l
 FALL_ABORT_DY = 18       # if y jumps this much more than expected mid-walk -> abort
 DROP_X = 67              # narrow drop-through gap: down-jump here drops straight down to
@@ -318,6 +327,14 @@ def walk_to_x(target_x, tol=2, timeout=7.0, coarse=5):
         time.sleep(0.05)
     x, y = get_character_color()
     return x >= 0 and abs(x - target_x) <= tol + 2
+
+
+def _climb_plan(y0):
+    """Rope segments to climb from starting height y0. Bottom/lower -> center rope to
+    the MID ledge, then left rope to the top. Mid/rest -> just the left rope to top."""
+    if y0 >= BOTTOM_Y_MIN:
+        return ["R_C->MID", "MID->TOP"]
+    return ["MID->TOP"]
 
 
 def climb_and_jump():
