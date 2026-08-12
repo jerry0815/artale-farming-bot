@@ -72,3 +72,10 @@ def test_climb_segment_walk_fail_is_false(monkeypatch):
     monkeypatch.setattr(recovery, "kb", _FakeKB())
     monkeypatch.setattr(recovery.time, "sleep", lambda *a: None)
     assert recovery._climb_segment(95, 92, hop=True) is False
+
+def test_climb_segment_transient_stall_does_not_abort(monkeypatch):
+    recovery = _skip_if_no_recovery()
+    # climbs 140->130->124, stalls briefly (124->124), resumes (124->118->...->92);
+    # with stall_ok=False, transient stall must NOT abort -> continues and reaches exit_y
+    _patch_climb(monkeypatch, recovery, [140, 130, 124, 124, 118, 110, 100, 92])
+    assert recovery._climb_segment(95, 92, hop=True, stall_ok=False) is True
