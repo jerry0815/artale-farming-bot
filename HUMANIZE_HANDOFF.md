@@ -459,3 +459,13 @@ success.
 - STILL LIVE-TUNE: node y-bands, the three rope x-columns, monster `diff_thres` /
   template scale (reference sprites vs Artale 150%-DPI grab), and `monsters.DEFAULT_ROI`.
 - Design + plan: docs/superpowers/specs/ and docs/superpowers/plans/ (2026-08-10).
+
+### Two-stage rope climb (bottom -> MID -> top) — 2026-08-11
+- Problem: climb_and_jump held Up on ONE rope bottom->top, but the center rope (R_C)
+  only reaches the MID ledge; she must shift LEFT to the left rope (R_L) to reach the top.
+- Fix: climb_and_jump now runs _climb_plan(y0) -> _climb_segment(R_C_X, MID_LEDGE_Y) then
+  walk_to_x(R_L_X) then _climb_segment(R_L_X, TOP_EXIT_Y). MID/REST starts do one segment.
+- Geometry constants (R_C_X, R_L_X, MID_LEDGE_Y, MID_Y_MIN/MAX, MID_LAND_X, R_L_HOP) are
+  measured via `python recovery.py record-climb` (sense-only) -> climb_traj.jsonl (ignored).
+- recover_to_farming and both farming loops are unchanged; navmap graph deliberately NOT
+  split (would need a per-hop executor).
