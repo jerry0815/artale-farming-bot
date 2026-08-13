@@ -917,6 +917,7 @@ def farming_loop_split(exp_check=None, enemy_check=None, panic=None,
                     phase = "top"                    # couldn't get down -> farm top
                 continue
             heal_skill()
+            _face_right()   
             if farm_bottom(_r.uniform(*bottom_secs)):
                 print("[split] bottom stint done -> climb to top")
                 if recover_to_farming():
@@ -932,26 +933,49 @@ FARM_CTX = {
                         home_y=143, edge=BOTTOM_FAR_X + 6, cap=2.2),
 }
 
-def _stand_shoot(node, seconds):
+DEPLETED = "DEPLETED"   # _stand_shoot sentinel: platform ran dry mid-shoot -> rotate now
+
+
+def _reactive_deplete(low_streak, count, threshold, debounce):
+    """Debounce for the in-shoot count. A single-frame `count` below `threshold`
+    extends `low_streak`; `debounce` consecutive lows -> rotate. Any healthy count,
+    or a failed read (count is None), resets the streak. Returns (streak, rotate?)."""
+    if count is not None and count < threshold:
+        low_streak += 1
+        return low_streak, low_streak >= debounce
+    return 0, False
+
+
+def _stand_shoot(node, seconds, count_fn=None, threshold=2, check_every=0.5, debounce=2):
     """STAND_SHOOT state: parked at home, fire in place for a beat. Returns False if
-    she fell off the platform; walks back to home if knocked toward the right edge."""
+    she fell off the platform (walks back to home if knocked toward the right edge).
+
+    If `count_fn` is given (a fast single-frame YOLO count), it is polled every
+    `check_every`s while firing; `debounce` consecutive reads below `threshold`
+    return DEPLETED so the caller rotates immediately. No key-release/count-pause is
+    needed -- YOLO ignores the flying arrows, so we keep shooting between checks."""
     c = FARM_CTX[node]
     t0, last = time.time(), (c["home"], c["home_y"])
+    next_check, low = t0 + check_every, 0
     while time.time() - t0 < seconds:
         if kb.pause:
             break
         _shoot()
         r = _plausible_read(last)                     # rejects buff-glow phantom reads
-        if r is None:
-            continue
-        last = r
-        if r[1] >= c["fall_y"]:
-            kb.safe_release_all(); print(f"[stand] fell to {r}"); return False
-        if r[0] >= c["edge"]:                          # knocked toward the edge -> return home
-            if not _walk_shoot(Key.left, c["home"], going_right=False,
-                               seed=(c["edge"], c["home_y"]), cap=c["cap"], fall_y=c["fall_y"]):
-                return False
-            _face_right(); last = (c["home"], c["home_y"])
+        if r is not None:
+            last = r
+            if r[1] >= c["fall_y"]:
+                kb.safe_release_all(); print(f"[stand] fell to {r}"); return False
+            if r[0] >= c["edge"]:                      # knocked toward the edge -> return home
+                if not _walk_shoot(Key.left, c["home"], going_right=False,
+                                   seed=(c["edge"], c["home_y"]), cap=c["cap"], fall_y=c["fall_y"]):
+                    return False
+                _face_right(); last = (c["home"], c["home_y"])
+        if count_fn is not None and time.time() >= next_check:
+            next_check = time.time() + check_every
+            low, rotate = _reactive_deplete(low, count_fn(), threshold, debounce)
+            if rotate:
+                kb.safe_release_all(); print(f"[stand] {node} depleted -> rotate"); return DEPLETED
     kb.safe_release_all()
     return True
 
@@ -989,6 +1013,18 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
     next_skill = [time.time() + _r.uniform(*skill_interval)]
     current = "TOP_FARM"
     farm_state = navmap.STAND_SHOOT
+
+    # Reactive deplete-check: with a YOLO model loaded we poll a fast single-frame
+    # count WHILE shooting and rotate the instant the platform runs dry. Without a
+    # model we fall back to the old motion count at the end of each move.
+    model = monsters.load_dragon_model()
+    reactive = model is not None
+    print(f"[nav] reactive deplete-check: {'YOLO (single-frame)' if reactive else 'off -> motion fallback'}")
+
+    def one_count(nd):
+        roi = monsters.MOTION_ROI_BY_NODE.get(nd, monsters.DEFAULT_MOTION_ROI)
+        f = capture()
+        return None if f is None else len(monsters.detect_dragons_yolo(f, model, roi))
 
     def heal_skill():
         kb.safe_press('h'); time.sleep(0.08); kb.safe_release('h')
@@ -1040,27 +1076,40 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
         if farm_state == navmap.WALK_SHOOT:
             ok = _walk_shoot_sweep(node)
         else:
-            ok = _stand_shoot(node, _r.uniform(*stand_secs))
-        if not ok:
+            ok = _stand_shoot(node, _r.uniform(*stand_secs),
+                              count_fn=(lambda: one_count(node)) if reactive else None,
+                              threshold=deplete_threshold)
+        if ok is False:
             farm_state = navmap.STAND_SHOOT          # fell -> re-locate/recover, reset state
             continue
         heal_skill()
 
-        # count window: release keys (no flying arrows) so motion-subtraction sees
-        # only the dragons, then decide the next state.
-        kb.safe_release_all()
-        n = monsters.count_dragons_best(capture, node)
-        nxt = navmap.next_farm_state(farm_state, n, threshold=deplete_threshold)
-        print(f"[nav] {node} {farm_state} dragons~{n} -> {nxt}")
-        if nxt == navmap.ROTATE:
-            target = navmap.next_farm_target(node, n, threshold=deplete_threshold)
+        # decide: rotate when the platform is depleted, else alternate stand<->walk.
+        if ok is DEPLETED:                            # STAND's in-shoot poll already saw it dry
+            depleted = True
+        elif reactive:
+            # STAND stayed populated for the whole beat; give WALK one cheap end-of-sweep check.
+            if farm_state == navmap.WALK_SHOOT:
+                n = one_count(node)
+                depleted = n is not None and n < deplete_threshold
+            else:
+                depleted = False
+        else:
+            # no model: motion count needs static frames -> release keys, take the median count
+            kb.safe_release_all()
+            n = monsters.count_dragons_best(capture, node)
+            print(f"[nav] {node} {farm_state} dragons~{n}")
+            depleted = n < deplete_threshold
+
+        if depleted:
+            target = navmap.next_farm_target(node, 0, threshold=deplete_threshold)
             if target:
-                print(f"[nav] {node} depleted ({n} < {deplete_threshold}) -> travel to {target}")
+                print(f"[nav] {node} depleted -> travel to {target}")
                 if go(target):
                     current = target
             farm_state = navmap.STAND_SHOOT          # start fresh on the new platform
         else:
-            farm_state = nxt
+            farm_state = navmap.WALK_SHOOT if farm_state == navmap.STAND_SHOOT else navmap.STAND_SHOOT
 
 
 def break_cycle(idle_seconds=30):

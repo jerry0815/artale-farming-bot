@@ -39,3 +39,15 @@ def test_pick_char_blob_falls_back_when_none_in_box():
 
 def test_pick_char_blob_empty_is_none():
     assert recovery._pick_char_blob([]) is None
+
+
+def test_reactive_deplete_debounce():
+    # healthy count (>= threshold) resets the streak, never rotates
+    assert recovery._reactive_deplete(1, 5, 2, 2) == (0, False)
+    assert recovery._reactive_deplete(1, 2, 2, 2) == (0, False)   # == threshold is healthy
+    # first low read: streak advances, no rotate yet
+    assert recovery._reactive_deplete(0, 1, 2, 2) == (1, False)
+    # second consecutive low read: rotate
+    assert recovery._reactive_deplete(1, 0, 2, 2) == (2, True)
+    # a failed frame (count is None) resets the streak (conservative, no rotate)
+    assert recovery._reactive_deplete(1, None, 2, 2) == (0, False)
