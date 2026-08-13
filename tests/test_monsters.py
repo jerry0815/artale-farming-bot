@@ -116,3 +116,13 @@ def test_motion_roi_by_node_covers_farm_nodes():
 def test_count_dragons_motion_bails_without_enough_frames():
     # capture returns None -> fewer than 3 frames -> returns 0, never divides
     assert monsters.count_dragons_motion(lambda: None, samples=2, interval=0) == 0
+
+def test_box_center_in_roi_inside_and_outside():
+    assert monsters.box_center_in_roi((0, 0, 10, 10), (0, 0, 50, 50)) is True
+    assert monsters.box_center_in_roi((100, 100, 110, 110), (0, 0, 50, 50)) is False
+
+def test_detect_dragons_yolo_keeps_only_in_band(monkeypatch):
+    raw = [(0, 0, 10, 10, 0.9), (100, 100, 110, 110, 0.8)]
+    monkeypatch.setattr(monsters, "run_yolo", lambda model, frame, conf=0.35: raw)
+    out = monsters.detect_dragons_yolo(frame=object(), model=object(), roi=(0, 0, 50, 50))
+    assert out == [(0, 0, 10, 10, 0.9)]

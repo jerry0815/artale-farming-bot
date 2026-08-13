@@ -177,6 +177,33 @@ def count_dragons_motion(capture_fn, roi=DEFAULT_MOTION_ROI, samples=12, interva
     areas.sort()
     return estimate_count(areas[len(areas) // 2], dragon_area)
 
+# ---------------------------------------------------------------------------
+# YOLO detection (primary once a model exists). Boxes -> count now, positions
+# later. ultralytics/torch are imported LAZILY so offline tests never need them.
+# ---------------------------------------------------------------------------
+DRAGON_MODEL_PATH = os.path.join("models", "dragon_yolo.pt")
+
+def box_center_in_roi(box, roi):
+    x1, y1, x2, y2 = box[:4]
+    cx = (x1 + x2) / 2.0
+    cy = (y1 + y2) / 2.0
+    rx0, ry0, rx1, ry1 = roi
+    return rx0 <= cx <= rx1 and ry0 <= cy <= ry1
+
+def run_yolo(model, frame, conf=0.35):
+    """Raw dragon boxes from the YOLO model: [(x1,y1,x2,y2,score), ...]."""
+    res = model.predict(frame, conf=conf, verbose=False)[0]
+    out = []
+    for b in res.boxes:
+        x1, y1, x2, y2 = (int(v) for v in b.xyxy[0].tolist())
+        out.append((x1, y1, x2, y2, float(b.conf[0])))
+    return out
+
+def detect_dragons_yolo(frame, model, roi, conf=0.35):
+    """YOLO boxes whose CENTER falls inside `roi` — the center filter replaces the
+    old ROI mask and drops the other platform's dragons that leak into frame."""
+    return [b for b in run_yolo(model, frame, conf) if box_center_in_roi(b, roi)]
+
 if __name__ == "__main__":
     import sys
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
