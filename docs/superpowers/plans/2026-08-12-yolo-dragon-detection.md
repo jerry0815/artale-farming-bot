@@ -719,7 +719,7 @@ labelImg datasets/dragons/images datasets/dragons/classes.txt
 # 4. Train (writes models/dragon_yolo.pt)
 python train_dragons.py
 ```
-Expected: `models/dragon_yolo.pt` exists and `runs/detect/dragon_yolo/results.png` shows mAP climbing. Once the file exists, `count_dragons_best` (already wired in Task 7) auto-switches from motion to YOLO — no code change needed.
+Expected: `models/dragon_yolo.pt` exists and `runs/detect/dragon_yolo/results.png` shows mAP climbing. Once the file exists, `count_dragons_best` (already wired in Task 7) uses YOLO instead of motion — no code change needed. Note: `load_dragon_model` caches its result per process, so a bot that was already running when you trained keeps using the motion fallback until you **restart it**; a fresh `python recovery.py …` run picks up the new model automatically.
 
 - [ ] **Step 7: MANUAL — live acceptance check**
 
