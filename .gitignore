@@ -38,3 +38,11 @@ datasets/dragons/val.txt
 datasets/dragons/dragons.yaml
 models/*.pt
 runs/
+
+# YOLO weights (pretrained downloads + trained) and dataset scratch pools
+*.pt
+weights/
+datasets/dragons/_pool/
+datasets/dragons/_done/
+datasets/dragons/_unlabeled/
+datasets/dragons/labels.cache
