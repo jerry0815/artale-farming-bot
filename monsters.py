@@ -219,6 +219,36 @@ def count_dragons_yolo(capture_fn, model, roi, samples=3, interval=0.06, conf=0.
     counts.sort()
     return counts[len(counts) // 2]
 
+_MODEL_CACHE = {}
+
+def load_dragon_model(path=DRAGON_MODEL_PATH):
+    """Lazy-load the YOLO model once and cache it. Returns None (never raises) if
+    the weights are missing or ultralytics/torch cannot load them, so callers can
+    fall back to the motion counter."""
+    if path in _MODEL_CACHE:
+        return _MODEL_CACHE[path]
+    model = None
+    if os.path.exists(path):
+        try:
+            from ultralytics import YOLO       # lazy: keeps offline import light
+            model = YOLO(path)
+        except Exception as e:
+            print(f"[yolo] could not load {path}: {e}")
+            model = None
+    else:
+        print(f"[yolo] model {path} not found -> motion fallback")
+    _MODEL_CACHE[path] = model
+    return model
+
+def count_dragons_best(capture_fn, node, model_path=DRAGON_MODEL_PATH):
+    """Preferred dragon count: YOLO when a model is available, else the motion
+    counter. Uses the per-node ROI band either way."""
+    roi = MOTION_ROI_BY_NODE.get(node, DEFAULT_MOTION_ROI)
+    model = load_dragon_model(model_path)
+    if model is None:
+        return count_dragons_motion(capture_fn, roi=roi)
+    return count_dragons_yolo(capture_fn, model, roi)
+
 if __name__ == "__main__":
     import sys
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""

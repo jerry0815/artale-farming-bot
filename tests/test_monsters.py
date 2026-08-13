@@ -143,3 +143,17 @@ def test_count_dragons_yolo_zero_when_no_frames():
     n = monsters.count_dragons_yolo(lambda: None, model=object(), roi=(0,0,10,10),
                                     samples=3, interval=0)
     assert n == 0
+
+def test_load_dragon_model_missing_file_returns_none():
+    monsters._MODEL_CACHE.clear()
+    assert monsters.load_dragon_model(path="does/not/exist.pt") is None
+
+def test_count_dragons_best_falls_back_to_motion_when_no_model(monkeypatch):
+    monkeypatch.setattr(monsters, "load_dragon_model", lambda *a, **k: None)
+    monkeypatch.setattr(monsters, "count_dragons_motion", lambda cap, roi=None, **k: 42)
+    assert monsters.count_dragons_best(lambda: None, "TOP_FARM") == 42
+
+def test_count_dragons_best_uses_yolo_when_model_present(monkeypatch):
+    monkeypatch.setattr(monsters, "load_dragon_model", lambda *a, **k: object())
+    monkeypatch.setattr(monsters, "count_dragons_yolo", lambda cap, model, roi, **k: 7)
+    assert monsters.count_dragons_best(lambda: None, "BOTTOM_FARM") == 7
