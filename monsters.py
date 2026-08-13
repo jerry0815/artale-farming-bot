@@ -204,6 +204,21 @@ def detect_dragons_yolo(frame, model, roi, conf=0.35):
     old ROI mask and drops the other platform's dragons that leak into frame."""
     return [b for b in run_yolo(model, frame, conf) if box_center_in_roi(b, roi)]
 
+def count_dragons_yolo(capture_fn, model, roi, samples=3, interval=0.06, conf=0.35):
+    """Grab a few frames, count in-band dragon boxes per frame, return the median.
+    Returns 0 if no frames could be captured."""
+    counts = []
+    for i in range(samples):
+        f = capture_fn()
+        if f is not None:
+            counts.append(len(detect_dragons_yolo(f, model, roi, conf)))
+        if i < samples - 1 and interval:
+            time.sleep(interval)
+    if not counts:
+        return 0
+    counts.sort()
+    return counts[len(counts) // 2]
+
 if __name__ == "__main__":
     import sys
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""

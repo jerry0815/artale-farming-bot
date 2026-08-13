@@ -126,3 +126,20 @@ def test_detect_dragons_yolo_keeps_only_in_band(monkeypatch):
     monkeypatch.setattr(monsters, "run_yolo", lambda model, frame, conf=0.35: raw)
     out = monsters.detect_dragons_yolo(frame=object(), model=object(), roi=(0, 0, 50, 50))
     assert out == [(0, 0, 10, 10, 0.9)]
+
+def test_count_dragons_yolo_is_median_of_box_counts(monkeypatch):
+    # per-frame detections of length 3, 3, 0 -> sorted [0,3,3] -> median 3
+    seq = iter([[(0,0,1,1,0.9)]*3, [(0,0,1,1,0.9)]*3, []])
+    monkeypatch.setattr(monsters, "detect_dragons_yolo", lambda *a, **k: next(seq))
+    grabbed = {"n": 0}
+    def fake_capture():
+        grabbed["n"] += 1
+        return object()
+    n = monsters.count_dragons_yolo(fake_capture, model=object(), roi=(0,0,10,10),
+                                    samples=3, interval=0)
+    assert n == 3 and grabbed["n"] == 3
+
+def test_count_dragons_yolo_zero_when_no_frames():
+    n = monsters.count_dragons_yolo(lambda: None, model=object(), roi=(0,0,10,10),
+                                    samples=3, interval=0)
+    assert n == 0
