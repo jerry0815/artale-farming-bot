@@ -39,7 +39,7 @@ RECOVER_Y_MAX = 156      # covers rest (~110), bottom farming (~143), AND the cl
                          # bottom ledge (~150) she sometimes drops to; deep falls (200+) still
                          # rejected. Rope connects the levels, so climbing up reaches the top
 ROPE_EXIT_TOP_Y = 92     # climb until y<=this before the up-jump (live-proven)
-ROPE_CLIMB_MAX = 8.0     # bottom->top spans the pinned scroll-zone; give it room
+ROPE_CLIMB_MAX = 12.0    # bottom->top spans the pinned scroll-zone; give one call room to finish
 # --- rope climb (bottom -> top). The minimap SCROLLS to keep the character centered, so in
 # the map's middle the dot is PINNED at ~(ROPE_X,136) while the terrain scrolls. Climb
 # PROGRESS is therefore read from the terrain scroll (minimap_scroll), not the pinned dot;
@@ -48,7 +48,7 @@ TOP_EXIT_Y = ROPE_EXIT_TOP_Y   # 92; climb until y<=this, then up-jump onto the 
 SCROLL_RISE_PX = 3.0     # net upward terrain-scroll (px) that counts as real climb progress
 CLIMB_STALL_S = 0.7      # s with no net rise in one grab -> release, RE-ALIGN, and re-grab
                          # (each rope->rope gap: realign to the column before the next jump)
-MAX_GRABS = 5            # align+jump+climb attempts per climb (bottom->mid->top needs ~2-3)
+MAX_GRABS = 7            # align+jump+climb attempts per climb (bottom->mid->top needs ~2-3)
 JUMP = Key.alt_l
 FALL_ABORT_DY = 18       # if y jumps this much more than expected mid-walk -> abort
 DROP_X = 67              # narrow drop-through gap: down-jump here drops straight down to
@@ -377,6 +377,7 @@ def _climb_to_top(grab_x, hop, cap=ROPE_CLIMB_MAX, bridge_x=None):
     if bridge_x is None:
         bridge_x = ROPE_X                                # the upper ropes sit on the climb column
     t0 = time.time()
+    best_y = 999                                          # closest-to-top y reached (diag)
     for attempt in range(MAX_GRABS):
         if kb.pause or time.time() - t0 >= cap:
             break
@@ -398,6 +399,8 @@ def _climb_to_top(grab_x, hop, cap=ROPE_CLIMB_MAX, bridge_x=None):
             if img is None:
                 time.sleep(0.05); continue
             x, y = get_character_full(img)
+            if 0 <= y < best_y:
+                best_y = y
             crop = _minimap(img)
             if 0 <= y <= FARMING_Y_MAX:                   # on the top platform (matches is_farming;
                 kb.safe_release(Key.up); return True       # TOP_EXIT_Y=92 was stricter -> wasted a round)
@@ -417,6 +420,8 @@ def _climb_to_top(grab_x, hop, cap=ROPE_CLIMB_MAX, bridge_x=None):
         if not stalled:                                   # ended by cap/pause, not a gap stall
             break
         time.sleep(0.2)                                   # settle on the ledge before realigning
+    reason = "cap" if time.time() - t0 >= cap else ("pause" if kb.pause else "max_grabs")
+    print(f"[climb] gave up: reason={reason} grabs={attempt + 1} t={time.time() - t0:.1f}s best_y={best_y}")
     return False
 
 
