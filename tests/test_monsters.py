@@ -116,3 +116,44 @@ def test_motion_roi_by_node_covers_farm_nodes():
 def test_count_dragons_motion_bails_without_enough_frames():
     # capture returns None -> fewer than 3 frames -> returns 0, never divides
     assert monsters.count_dragons_motion(lambda: None, samples=2, interval=0) == 0
+
+def test_box_center_in_roi_inside_and_outside():
+    assert monsters.box_center_in_roi((0, 0, 10, 10), (0, 0, 50, 50)) is True
+    assert monsters.box_center_in_roi((100, 100, 110, 110), (0, 0, 50, 50)) is False
+
+def test_detect_dragons_yolo_keeps_only_in_band(monkeypatch):
+    raw = [(0, 0, 10, 10, 0.9), (100, 100, 110, 110, 0.8)]
+    monkeypatch.setattr(monsters, "run_yolo", lambda model, frame, conf=0.35: raw)
+    out = monsters.detect_dragons_yolo(frame=object(), model=object(), roi=(0, 0, 50, 50))
+    assert out == [(0, 0, 10, 10, 0.9)]
+
+def test_count_dragons_yolo_is_median_of_box_counts(monkeypatch):
+    # per-frame detections of length 3, 3, 0 -> sorted [0,3,3] -> median 3
+    seq = iter([[(0,0,1,1,0.9)]*3, [(0,0,1,1,0.9)]*3, []])
+    monkeypatch.setattr(monsters, "detect_dragons_yolo", lambda *a, **k: next(seq))
+    grabbed = {"n": 0}
+    def fake_capture():
+        grabbed["n"] += 1
+        return object()
+    n = monsters.count_dragons_yolo(fake_capture, model=object(), roi=(0,0,10,10),
+                                    samples=3, interval=0)
+    assert n == 3 and grabbed["n"] == 3
+
+def test_count_dragons_yolo_zero_when_no_frames():
+    n = monsters.count_dragons_yolo(lambda: None, model=object(), roi=(0,0,10,10),
+                                    samples=3, interval=0)
+    assert n == 0
+
+def test_load_dragon_model_missing_file_returns_none():
+    monsters._MODEL_CACHE.clear()
+    assert monsters.load_dragon_model(path="does/not/exist.pt") is None
+
+def test_count_dragons_best_falls_back_to_motion_when_no_model(monkeypatch):
+    monkeypatch.setattr(monsters, "load_dragon_model", lambda *a, **k: None)
+    monkeypatch.setattr(monsters, "count_dragons_motion", lambda cap, roi=None, **k: 42)
+    assert monsters.count_dragons_best(lambda: None, "TOP_FARM") == 42
+
+def test_count_dragons_best_uses_yolo_when_model_present(monkeypatch):
+    monkeypatch.setattr(monsters, "load_dragon_model", lambda *a, **k: object())
+    monkeypatch.setattr(monsters, "count_dragons_yolo", lambda cap, model, roi, **k: 7)
+    assert monsters.count_dragons_best(lambda: None, "BOTTOM_FARM") == 7

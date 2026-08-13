@@ -1049,8 +1049,7 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
         # count window: release keys (no flying arrows) so motion-subtraction sees
         # only the dragons, then decide the next state.
         kb.safe_release_all()
-        n = monsters.count_dragons_motion(
-            capture, roi=monsters.MOTION_ROI_BY_NODE.get(node, monsters.DEFAULT_MOTION_ROI))
+        n = monsters.count_dragons_best(capture, node)
         nxt = navmap.next_farm_state(farm_state, n, threshold=deplete_threshold)
         print(f"[nav] {node} {farm_state} dragons~{n} -> {nxt}")
         if nxt == navmap.ROTATE:

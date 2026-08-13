@@ -30,3 +30,11 @@ debug_mm*.png
 
 # git worktrees for isolated feature work
 .worktrees/
+
+# YOLO dragon detector — large binaries & generated files (labels are tracked)
+datasets/dragons/images/
+datasets/dragons/train.txt
+datasets/dragons/val.txt
+datasets/dragons/dragons.yaml
+models/*.pt
+runs/

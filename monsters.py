@@ -177,6 +177,78 @@ def count_dragons_motion(capture_fn, roi=DEFAULT_MOTION_ROI, samples=12, interva
     areas.sort()
     return estimate_count(areas[len(areas) // 2], dragon_area)
 
+# ---------------------------------------------------------------------------
+# YOLO detection (primary once a model exists). Boxes -> count now, positions
+# later. ultralytics/torch are imported LAZILY so offline tests never need them.
+# ---------------------------------------------------------------------------
+DRAGON_MODEL_PATH = os.path.join("models", "dragon_yolo.pt")
+
+def box_center_in_roi(box, roi):
+    x1, y1, x2, y2 = box[:4]
+    cx = (x1 + x2) / 2.0
+    cy = (y1 + y2) / 2.0
+    rx0, ry0, rx1, ry1 = roi
+    return rx0 <= cx <= rx1 and ry0 <= cy <= ry1
+
+def run_yolo(model, frame, conf=0.35):
+    """Raw dragon boxes from the YOLO model: [(x1,y1,x2,y2,score), ...]."""
+    res = model.predict(frame, conf=conf, verbose=False)[0]
+    out = []
+    for b in res.boxes:
+        x1, y1, x2, y2 = (int(v) for v in b.xyxy[0].tolist())
+        out.append((x1, y1, x2, y2, float(b.conf[0])))
+    return out
+
+def detect_dragons_yolo(frame, model, roi, conf=0.35):
+    """YOLO boxes whose CENTER falls inside `roi` — the center filter replaces the
+    old ROI mask and drops the other platform's dragons that leak into frame."""
+    return [b for b in run_yolo(model, frame, conf) if box_center_in_roi(b, roi)]
+
+def count_dragons_yolo(capture_fn, model, roi, samples=3, interval=0.06, conf=0.35):
+    """Grab a few frames, count in-band dragon boxes per frame, return the median.
+    Returns 0 if no frames could be captured."""
+    counts = []
+    for i in range(samples):
+        f = capture_fn()
+        if f is not None:
+            counts.append(len(detect_dragons_yolo(f, model, roi, conf)))
+        if i < samples - 1 and interval:
+            time.sleep(interval)
+    if not counts:
+        return 0
+    counts.sort()
+    return counts[len(counts) // 2]
+
+_MODEL_CACHE = {}
+
+def load_dragon_model(path=DRAGON_MODEL_PATH):
+    """Lazy-load the YOLO model once and cache it. Returns None (never raises) if
+    the weights are missing or ultralytics/torch cannot load them, so callers can
+    fall back to the motion counter."""
+    if path in _MODEL_CACHE:
+        return _MODEL_CACHE[path]
+    model = None
+    if os.path.exists(path):
+        try:
+            from ultralytics import YOLO       # lazy: keeps offline import light
+            model = YOLO(path)
+        except Exception as e:
+            print(f"[yolo] could not load {path}: {e}")
+            model = None
+    else:
+        print(f"[yolo] model {path} not found -> motion fallback")
+    _MODEL_CACHE[path] = model
+    return model
+
+def count_dragons_best(capture_fn, node, model_path=DRAGON_MODEL_PATH):
+    """Preferred dragon count: YOLO when a model is available, else the motion
+    counter. Uses the per-node ROI band either way."""
+    roi = MOTION_ROI_BY_NODE.get(node, DEFAULT_MOTION_ROI)
+    model = load_dragon_model(model_path)
+    if model is None:
+        return count_dragons_motion(capture_fn, roi=roi)
+    return count_dragons_yolo(capture_fn, model, roi)
+
 if __name__ == "__main__":
     import sys
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
