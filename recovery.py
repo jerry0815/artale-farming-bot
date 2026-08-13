@@ -995,7 +995,7 @@ def _walk_shoot_sweep(node):
 
 def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
                      stand_secs=(6, 8), break_every=(8 * 60, 15 * 60),
-                     rest_range=(30, 120), skill_interval=(260, 340),
+                     rest_range=(30, 120), skill_interval=(240, 300),
                      deplete_threshold=2, max_seconds=None):
     """Node-graph farming loop with a STAND/WALK state machine. Each iteration runs
     ONE state move on the current platform (STAND_SHOOT or WALK_SHOOT), then counts
@@ -1027,11 +1027,15 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
         return None if f is None else len(monsters.detect_dragons_yolo(f, model, roi))
 
     def heal_skill():
+        # Throttled to skill_interval (240-300s): called after every move but only
+        # fires when due, so heal/buffs aren't spammed each ~6-8s stint. Casts the
+        # potion + both skills together (as in split), starting from the first stint.
+        if time.time() < next_skill[0]:
+            return
+        next_skill[0] = time.time() + _r.uniform(*skill_interval)
         kb.safe_press('h'); time.sleep(0.08); kb.safe_release('h')
-        if time.time() >= next_skill[0]:                          # cast both skills (as in split)
-            kb.safe_press('a'); time.sleep(0.4); kb.safe_release('a')
-            kb.safe_press('j'); time.sleep(0.4); kb.safe_release('j')
-            next_skill[0] = time.time() + _r.uniform(*skill_interval)
+        kb.safe_press('a'); time.sleep(0.4); kb.safe_release('a')
+        kb.safe_press('j'); time.sleep(0.4); kb.safe_release('j')
 
     def go(dst):
         return navmap.travel(dst, locate_fn=_nav_locate, execute_fn=execute_edge)
