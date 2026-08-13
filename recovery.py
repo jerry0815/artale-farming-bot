@@ -1010,7 +1010,7 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
     print("[nav] state machine (stand/walk) + motion-based dragon counting")
     t_start = time.time()
     next_break = time.time() + _r.uniform(*break_every)
-    next_skill = [time.time() + _r.uniform(*skill_interval)]
+    next_skill = [time.time()]                    # cast skills from the first stint (as in split)
     current = "TOP_FARM"
     farm_state = navmap.STAND_SHOOT
 
@@ -1028,8 +1028,9 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
 
     def heal_skill():
         kb.safe_press('h'); time.sleep(0.08); kb.safe_release('h')
-        if time.time() >= next_skill[0]:
+        if time.time() >= next_skill[0]:                          # cast both skills (as in split)
             kb.safe_press('a'); time.sleep(0.4); kb.safe_release('a')
+            kb.safe_press('j'); time.sleep(0.4); kb.safe_release('j')
             next_skill[0] = time.time() + _r.uniform(*skill_interval)
 
     def go(dst):
