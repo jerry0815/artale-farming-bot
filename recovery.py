@@ -9,6 +9,7 @@ CLI:
   python recovery.py focus                      # bring game to foreground (verify)
 """
 import sys, time, ctypes
+from ctypes import wintypes
 import cv2
 import numpy as np
 from PIL import Image
@@ -24,7 +25,10 @@ import navmap
 
 # --- recovery map constants (calibrated 2026-08-09, full-minimap frame) ---
 ROPE_X = 91              # rope minimap x (climbs to farming platform)
+BOTTOM_ROPE_X = 95
 FARMING_Y_MAX = 95       # y <= this (and x in patrol range) == on farming platform
+ON_PLATFORM_Y = 88       # y <= this == STANDING on the top platform (settles ~85); the rope
+                         # top reads ~90-95, so this distinguishes "mounted" from "still hanging"
 FALLEN_Y_MIN = 96        # y >= this == below the farming platform (fallen reads ~99-110,
                          # farming reads ~76-90; boundary ~95 with no dead-zone)
 PATROL_X_L, PATROL_X_R = 66, 161
@@ -35,14 +39,16 @@ RECOVER_Y_MAX = 156      # covers rest (~110), bottom farming (~143), AND the cl
                          # bottom ledge (~150) she sometimes drops to; deep falls (200+) still
                          # rejected. Rope connects the levels, so climbing up reaches the top
 ROPE_EXIT_TOP_Y = 92     # climb until y<=this before the up-jump (live-proven)
-ROPE_CLIMB_MAX = 6.0     # bottom->top is a longer climb (y~143 up to ~85)
-# --- rope climb geometry (bottom -> top). Cross-checked against synced screen+minimap
-# capture (record_climb_frames.py): the bottom rope-LADDER and the upper CHAIN are STACKED
-# in the SAME minimap column (~ROPE_X) with a VERTICAL jump between them at the ladder top
-# (~y124) -- NOT a horizontal gap. Holding Up rides both; a stall at the ladder top needs
-# one jump to bridge onto the chain. ---
+ROPE_CLIMB_MAX = 8.0     # bottom->top spans the pinned scroll-zone; give it room
+# --- rope climb (bottom -> top). The minimap SCROLLS to keep the character centered, so in
+# the map's middle the dot is PINNED at ~(ROPE_X,136) while the terrain scrolls. Climb
+# PROGRESS is therefore read from the terrain scroll (minimap_scroll), not the pinned dot;
+# success is the dot resolving onto the top platform (y<=TOP_EXIT_Y) in the top clamp zone. ---
 TOP_EXIT_Y = ROPE_EXIT_TOP_Y   # 92; climb until y<=this, then up-jump onto the top platform
-BRIDGE_Y_MIN, BRIDGE_Y_MAX = 118, 130   # ladder-top band: a stall here -> jump onto the chain
+SCROLL_RISE_PX = 3.0     # net upward terrain-scroll (px) that counts as real climb progress
+CLIMB_STALL_S = 0.7      # s with no net rise in one grab -> release, RE-ALIGN, and re-grab
+                         # (each rope->rope gap: realign to the column before the next jump)
+MAX_GRABS = 5            # align+jump+climb attempts per climb (bottom->mid->top needs ~2-3)
 JUMP = Key.alt_l
 FALL_ABORT_DY = 18       # if y jumps this much more than expected mid-walk -> abort
 DROP_X = 67              # narrow drop-through gap: down-jump here drops straight down to
@@ -50,8 +56,10 @@ DROP_X = 67              # narrow drop-through gap: down-jump here drops straigh
 RIGHT_EDGE_SAFETY = 128  # if detected at/beyond this x, force a left-return NOW
                          # (right edge/gap is ~x140; keeps a safe margin)
 TOP_HOME_X = 74          # top farming home (park-left spot); recovery ends here facing right
-BOTTOM_Y_MIN = 132       # y >= this == on the bottom farming platform (settles ~143;
-                         # reads as low as ~133 mid-landing; rest platform is ~109)
+BOTTOM_Y_MIN = 140       # y >= this == start the climb's BOTTOM grab (vs the mid ledge ~136);
+                         # kept high so the mid ledge grabs the upper column, not the base
+ON_BOTTOM_Y = 133        # y >= this == DETECTED on the bottom platform (settles ~143 but bobs
+                         # to ~133 when dragons jostle her); tolerant so detection doesn't flap
 BOTTOM_HOME_X, BOTTOM_FAR_X = 63, 90   # bottom park-left home & conservative sweep-right
 BOTTOM_FALL_Y = 160      # y >= this == fell well BELOW the bottom (the ~150 lower ledge is
                          # still tolerated/recoverable, not treated as a fatal fall)
@@ -70,36 +78,49 @@ CHAR_TPL = "assets/minimap_character/"
 # (lower ledge). Heavy buff-glow spawns phantom yellow blobs at the minimap
 # CORNERS/EDGES -- documented at (22,232),(2,242),(36,153),(28,235),(122,188) --
 # all outside this box. Used to prefer the real dot over glow phantoms.
-MAP_X_MIN, MAP_X_MAX = 50, 170
+MAP_X_MIN, MAP_X_MAX = 60, 170
 MAP_Y_MIN, MAP_Y_MAX = 65, 175
 
 
-def capture():
+def _window_box():
+    """The game window's screen rect as an mss grab box, or None. Prefers pygetwindow;
+    falls back to the Win32 finder focus() uses (FindWindowW + GetWindowRect). Does NOT
+    require the window to sit fully inside one monitor -- a maximized / monitor-straddling
+    window used to make capture() return None (character read (-1,-1) -> recovery bailed)."""
     win = gw.getWindowsWithTitle(TITLE)
-    if not win:
+    if win:
+        w = win[0]
+        box = {"left": w.left, "top": w.top, "width": w.width, "height": w.height}
+    else:                                                # pygetwindow missed the title -> Win32
+        hwnd = ctypes.windll.user32.FindWindowW(None, TITLE)
+        if not hwnd:
+            return None
+        r = wintypes.RECT()
+        ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(r))
+        box = {"left": r.left, "top": r.top, "width": r.right - r.left, "height": r.bottom - r.top}
+    if box["width"] <= 0 or box["height"] <= 0:
         return None
-    w = win[0]
-    for m in get_monitors():
-        if w.left >= m.x and w.right <= m.x + m.width and w.bottom >= m.y and w.top <= m.y + m.height:
-            with mss.mss() as sct:
-                shot = sct.grab({"left": w.left, "top": w.top, "width": w.width, "height": w.height})
-                return cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
-    return None
+    return box
+
+
+def capture():
+    box = _window_box()
+    if box is None:
+        return None
+    with mss.mss() as sct:
+        shot = sct.grab(box)
+        return cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
 
 
 def capture_pil_np():
     """Capture returning (PIL RGB, np BGR) -- get_exp() needs the PIL image."""
-    win = gw.getWindowsWithTitle(TITLE)
-    if not win:
+    box = _window_box()
+    if box is None:
         return None, None
-    w = win[0]
-    for m in get_monitors():
-        if w.left >= m.x and w.right <= m.x + m.width and w.bottom >= m.y and w.top <= m.y + m.height:
-            with mss.mss() as sct:
-                shot = sct.grab({"left": w.left, "top": w.top, "width": w.width, "height": w.height})
-                pil = Image.frombytes("RGB", shot.size, shot.rgb)
-                return pil, cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
-    return None, None
+    with mss.mss() as sct:
+        shot = sct.grab(box)
+        pil = Image.frombytes("RGB", shot.size, shot.rgb)
+        return pil, cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
 
 
 # --- game-logic safety, ported faithfully from the notebook (screen reads, no keys) ---
@@ -199,6 +220,23 @@ def get_character_full(np_img=None, near=None):
     if centers:
         return centers[0][0], centers[0][1]
     return -1, -1
+
+
+def minimap_scroll(prev_crop, cur_crop, min_resp=0.4):
+    """Vertical scroll of the minimap TERRAIN between two full-minimap crops (from
+    `_minimap`), via phase correlation with the yellow dot masked out so only terrain
+    drives it. Returns (dy, resp): dy > 0 == the character ROSE (calibrated on a known
+    ascent); resp is the 0..1 correlation confidence. The minimap scrolls to keep the
+    character centered, so in the map's middle the dot is pinned (~95,136) while the
+    terrain scrolls -- this recovers climb progress the pinned dot cannot show."""
+    def _prep(mm):
+        hsv = cv2.cvtColor(mm, cv2.COLOR_BGR2HSV)
+        dot = cv2.inRange(hsv, np.array([18, 120, 120]), np.array([45, 255, 255]))
+        g = cv2.cvtColor(mm, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        g[dot > 0] = 0                                    # drop the dot -> terrain only
+        return g * cv2.createHanningWindow((g.shape[1], g.shape[0]), cv2.CV_32F)
+    (_sx, sy), resp = cv2.phaseCorrelate(_prep(prev_crop), _prep(cur_crop))
+    return (sy if resp >= min_resp else 0.0), resp
 
 
 def focus():
@@ -327,74 +365,88 @@ def walk_to_x(target_x, tol=2, timeout=7.0, coarse=5):
     return x >= 0 and abs(x - target_x) <= tol + 2
 
 
-def _climb_segment(grab_x, exit_y, hop, stall_ok=False, bridge_band=None, cap=ROPE_CLIMB_MAX):
-    """Align to grab_x, grab the rope, hold Up until y<=exit_y. `hop` = Up+Jump to catch a
-    rope whose base is above the floor. `stall_ok` = also succeed when she has climbed then
-    stopped rising (arrived at a ledge). `bridge_band` = (lo,hi): if she STALLS while
-    climbing inside this y-band (the ladder->chain gap), fire ONE Up+Jump to bridge onto the
-    next rope, then keep holding Up. Releases Up before returning; True iff the segment
-    completed. Climb-detection is CUMULATIVE from the first read (a real climb is ~1px/frame,
-    so a per-frame gate never latches)."""
-    if not walk_to_x(grab_x, tol=1):
-        kb.safe_release_all(); return False
-    kb.safe_press(Key.up)
-    if hop:
-        kb.safe_press(JUMP); time.sleep(0.08); kb.safe_release(JUMP)
-    y_start, last_y, no_grab, stalled, climbing, reached = None, None, 0, 0, False, False
-    bridged = False
+def _climb_to_top(grab_x, hop, cap=ROPE_CLIMB_MAX, bridge_x=None):
+    """Climb to the TOP farming platform as a sequence of ALIGN -> jump-grab -> climb attempts.
+    The minimap pins the dot (~ROPE_X,136) through the map's middle, so climb PROGRESS is read
+    from the terrain SCROLL (minimap_scroll) -- net upward scroll == she is rising -- plus the
+    dot dropping once it resolves in the top clamp. Within a grab she holds Up while she keeps
+    rising; when she stalls at a rope->rope gap (CLIMB_STALL_S with no net rise) she RELEASES,
+    walks back to the rope column, and re-grabs -- so every jump happens ALIGNED, not flailing
+    mid-air. Success == the dot resolves onto the top platform (y<=TOP_EXIT_Y). Returns False
+    after MAX_GRABS attempts or the cap (so the caller retries)."""
+    if bridge_x is None:
+        bridge_x = ROPE_X                                # the upper ropes sit on the climb column
     t0 = time.time()
-    while time.time() - t0 < cap:
-        if kb.pause:
+    for attempt in range(MAX_GRABS):
+        if kb.pause or time.time() - t0 >= cap:
             break
-        x, y = get_character_full()
-        if y >= 0:
-            if y_start is None:
-                y_start = y                          # first valid read = climb baseline
-            if y <= exit_y:
-                reached = True; break
-            if y <= y_start - 6:                      # risen >=6px FROM START -> climbing
-                climbing = True
-            if climbing:
-                # once climbing, HOLD Up to the target; a transient non-rising frame is
-                # NOT a failure. With stall_ok, a sustained stall = arrived at a ledge.
-                if last_y is not None and y >= last_y - 1:
-                    stalled += 1
-                    if bridge_band and not bridged and stalled >= 2 \
-                            and bridge_band[0] <= y <= bridge_band[1]:
-                        # stalled at the ladder top -> jump onto the chain, keep climbing
-                        kb.safe_press(JUMP); time.sleep(0.08); kb.safe_release(JUMP)
-                        bridged = True; stalled = 0
-                    elif stall_ok and stalled >= 3:
-                        reached = True; break
-                else:
-                    stalled = 0
-            else:
-                if last_y is not None and y >= last_y - 1:   # not rising & not yet climbing
-                    no_grab += 1
-                    if no_grab >= 6:                  # never grabbed -> give up (re-align)
-                        break
-                else:
-                    no_grab = 0                      # reset on any real rise
-            last_y = y
-        time.sleep(0.08)
-    kb.safe_release(Key.up)
-    return reached
+        align_x = grab_x if attempt == 0 else bridge_x   # first grab at the base; bridges realign
+        if not walk_to_x(align_x, tol=1):
+            cx, _cy = get_character_full()
+            # walk_to_x can't move her while she's HANGING on the rope -- that's fine if she's
+            # already on the column (just hold Up); only bail if she's genuinely off to the side.
+            if not (cx >= 0 and abs(cx - align_x) <= 5):
+                kb.safe_release_all(); return False
+        kb.safe_press(Key.up)
+        if attempt > 0 or hop:                           # jump-grab the rope (first grab honors hop)
+            kb.safe_press(JUMP); time.sleep(0.08); kb.safe_release(JUMP)
+        prev_crop, scroll_acc, last_y, last_progress, stalled = None, 0.0, None, time.time(), False
+        while time.time() - t0 < cap:
+            if kb.pause:
+                break
+            img = capture()
+            if img is None:
+                time.sleep(0.05); continue
+            x, y = get_character_full(img)
+            crop = _minimap(img)
+            if 0 <= y <= FARMING_Y_MAX:                   # on the top platform (matches is_farming;
+                kb.safe_release(Key.up); return True       # TOP_EXIT_Y=92 was stricter -> wasted a round)
+            rose_dot = (last_y is not None and 0 <= y < last_y - 1)   # dot dropped (clamp zone)
+            if prev_crop is not None:
+                dy, _resp = minimap_scroll(prev_crop, crop)
+                scroll_acc += dy                         # net signed rise since last progress
+            prev_crop = crop
+            if y >= 0:
+                last_y = y
+            if rose_dot or scroll_acc >= SCROLL_RISE_PX:  # real upward progress (dot or scroll)
+                last_progress = time.time(); scroll_acc = 0.0
+            if time.time() - last_progress > CLIMB_STALL_S:
+                stalled = True; break                     # stuck at a gap -> release, realign, regrab
+            time.sleep(0.08)
+        kb.safe_release(Key.up)
+        if not stalled:                                   # ended by cap/pause, not a gap stall
+            break
+        time.sleep(0.2)                                   # settle on the ledge before realigning
+    return False
 
 
 def climb_and_jump():
-    """Climb the rope column to the top farming platform, then up-jump onto it. The bottom
-    rope-LADDER and the upper CHAIN sit in the SAME minimap column (~ROPE_X); holding Up
-    rides both, and if she stalls at the ladder top (BRIDGE band) a single jump bridges her
-    onto the chain. Returns True only if she reached the top -- on a miss releases keys and
-    returns False so the caller (recover_to_farming) re-localizes and retries."""
+    """Climb to the top farming platform, then up-jump onto it. Progress is tracked by the
+    minimap terrain scroll (the dot is pinned mid-map -- see _climb_to_top). Returns True only
+    if she reached the top; on a miss releases keys and returns False so the caller
+    (recover_to_farming) re-localizes and retries."""
     _x0, y0 = get_character_full()
-    hop = y0 >= BOTTOM_Y_MIN                              # bottom platform: rope base above floor
-    if not _climb_segment(ROPE_X, TOP_EXIT_Y, hop=hop,
-                          bridge_band=(BRIDGE_Y_MIN, BRIDGE_Y_MAX)):
+    # the bottom rope BASE sits at ~BOTTOM_ROPE_X (x95); the minimap only reads the climb
+    # column (~ROPE_X x90) once she is ON the rope. Align the bottom grab to the BASE.
+    grab_x = BOTTOM_ROPE_X if y0 >= BOTTOM_Y_MIN else ROPE_X
+    # ALWAYS hop-grab: the rope base is above the floor from the bottom, and from the mid
+    # ledge (y~136) she must JUMP onto the rope too -- a plain Up never catches it there.
+    if not _climb_to_top(grab_x, hop=True):
         kb.safe_release_all(); return False
-    kb.safe_press(JUMP); time.sleep(0.15); kb.safe_release(JUMP); time.sleep(0.12)
-    kb.safe_release_all(); time.sleep(0.1)
-    return True
+    # MOUNT the platform: from the chain top (y~90-95) an up-jump carries her onto the top
+    # platform (y~85). VERIFY she's actually standing on it (y<=ON_PLATFORM_Y) -- a plain
+    # y<=FARMING_Y_MAX check would pass while she's still hanging at the rope top. Retry the
+    # up-jump a few times; only report success once she's truly mounted.
+    for _ in range(3):
+        if kb.pause:
+            break
+        kb.safe_press(Key.up); kb.safe_press(JUMP); time.sleep(0.15)
+        kb.safe_release(JUMP); kb.safe_release(Key.up); time.sleep(0.3)
+        _mx, my = stable_char(2)
+        if 0 <= my <= ON_PLATFORM_Y:
+            kb.safe_release_all(); time.sleep(0.1); return True
+    kb.safe_release_all()
+    return False                                          # never mounted -> caller retries
 
 
 def drop_to_fallen(drop_x=DROP_X):
@@ -482,6 +534,7 @@ def farm_bottom(seconds, x_home=BOTTOM_HOME_X, x_far=BOTTOM_FAR_X, stand=12.0):
     """Bottom-platform farm: park left (x~63) and shoot, periodic right->back-left
     sweep. Uses bottom y-context (fell only if y >= BOTTOM_FALL_Y, since here she
     normally sits at y~143). Dragons are to the right, same as the top."""
+    _face_right()   
     print(f"[farm_bottom] {seconds}s")
     t0 = time.time()
     home = (x_home, 143)
@@ -599,7 +652,7 @@ def go_to_bottom():
     _down_jump()                                   # rest -> bottom
     time.sleep(0.4)                                # let her settle before verifying
     x, y = stable_char(5)
-    on_bottom = y >= BOTTOM_Y_MIN
+    on_bottom = y >= ON_BOTTOM_Y
     print(f"[bottom] after 2nd down-jump ({x},{y}) on_bottom={on_bottom}")
     kb.safe_release_all()
     return on_bottom
@@ -658,7 +711,7 @@ def rest_to_bottom(drop_x=DROP_X):
     _down_jump()
     time.sleep(0.4)
     x, y = stable_char(5)
-    on_bottom = y >= BOTTOM_Y_MIN
+    on_bottom = y >= ON_BOTTOM_Y
     print(f"[rest->bottom] after down-jump ({x},{y}) on_bottom={on_bottom}")
     kb.safe_release_all()
     return on_bottom
@@ -792,7 +845,7 @@ def farming_loop(exp_check=None, enemy_check=None, panic=None,
 
 
 def farming_loop_split(exp_check=None, enemy_check=None, panic=None,
-                       top_secs=(60, 150), bottom_secs=(60, 150),
+                       top_secs=(80, 120), bottom_secs=(80, 120),
                        break_every=(8 * 60, 15 * 60), rest_range=(30, 120),
                        skill_interval=(260, 340), max_seconds=None):
     """Top<->bottom split farming. Farm top a while -> go_to_bottom -> farm bottom a
@@ -852,19 +905,19 @@ def farming_loop_split(exp_check=None, enemy_check=None, panic=None,
                 if not recover_to_farming() and panic:
                     panic(); time.sleep(1)
                 continue
+            heal_skill()
             if farm(_r.uniform(*top_secs)):          # farm a stint (False if she fell)
-                heal_skill()
                 print("[split] top stint done -> go to bottom")
                 if go_to_bottom():
                     phase = "bottom"
         else:  # bottom
-            if y < BOTTOM_Y_MIN:
+            if y < ON_BOTTOM_Y:                          # tolerant: bottom bobs ~133-143
                 print(f"[split] not on bottom ({x},{y}) -> reposition")
                 if not (recover_to_farming() and go_to_bottom()):
                     phase = "top"                    # couldn't get down -> farm top
                 continue
+            heal_skill()
             if farm_bottom(_r.uniform(*bottom_secs)):
-                heal_skill()
                 print("[split] bottom stint done -> climb to top")
                 if recover_to_farming():
                     phase = "top"
@@ -917,7 +970,7 @@ def _walk_shoot_sweep(node):
 
 
 def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
-                     stand_secs=(4, 8), break_every=(8 * 60, 15 * 60),
+                     stand_secs=(6, 8), break_every=(8 * 60, 15 * 60),
                      rest_range=(30, 120), skill_interval=(260, 340),
                      deplete_threshold=2, max_seconds=None):
     """Node-graph farming loop with a STAND/WALK state machine. Each iteration runs
@@ -1056,46 +1109,37 @@ def recover_to_farming(max_rounds=8):   # extra rounds: a dragon can hit her mid
         print(f"[recover] round {rnd+1}: at ({x},{y})")
         if x < 0:
             print("[recover] position unknown -> bail"); kb.safe_release_all(); return False
-        if is_farming(x, y):
+        if is_farming(x, y) and y <= ON_PLATFORM_Y:      # STANDING on the platform (not rope-top)
             print("[recover] on top -> move to left home, face right")
             walk_to_x(TOP_HOME_X, tol=3)         # land at the park-left home...
             _face_right()                        # ...facing right (toward the dragons)
             x2, y2 = stable_char(3)
-            if is_farming(x2, y2):
+            if is_farming(x2, y2) and y2 <= ON_PLATFORM_Y:
                 kb.safe_release_all(); return True
             print(f"[recover] slipped off top during home-walk ({x2},{y2}) -> retry")
             kb.safe_release_all(); time.sleep(0.2); continue
-        if y < FALLEN_Y_MIN:
-            print(f"[recover] y={y} between levels/ambiguous -> bail to be safe")
-            kb.safe_release_all(); return False
+        if y < FALLEN_Y_MIN:                              # 89-95: HANGING at the rope top just below
+            print(f"[recover] at rope top ({x},{y}) -> up-jump onto platform")
+            if not climb_and_jump():                      # climb_and_jump up-jumps + verifies mount
+                print("[recover] mount from rope top failed -> retry")
+                kb.safe_release_all(); time.sleep(0.2); continue
+            time.sleep(0.1); continue
         # ONLY the fallen platforms beside the rope are rope-recoverable. If she's
         # deeper or off to the side, walking toward the rope just cascades her further
         # down -- STOP instead (caller escapes to Free Market / stops).
         if not (RECOVER_X_MIN <= x <= RECOVER_X_MAX and y <= RECOVER_Y_MAX):
             print(f"[recover] ({x},{y}) outside recoverable region -> cannot rope-recover, bail")
             kb.safe_release_all(); return False
-        # LOWER ledge: the rope doesn't reach it -> hop UP onto the bottom platform first,
-        # then the next round does the normal bottom->top climb.
-        if y >= LOWER_LEDGE_Y:
-            print(f"[recover] on lower ledge ({x},{y}) -> jump up to bottom platform")
-            kb.safe_press(JUMP); time.sleep(0.12); kb.safe_release(JUMP)
-            time.sleep(0.4)
-            kb.safe_release_all(); continue
-        # line up ON the rope (aim 1px right of the grab x), then climb+jump. Reliable
-        # but takes a few retries -- crisp de-steppy attempts all regressed, reverted.
-        if not walk_to_x(ROPE_X + 1, tol=1):
-            x2, y2 = stable_char(3)
-            if not (RECOVER_X_MIN <= x2 <= RECOVER_X_MAX and FALLEN_Y_MIN <= y2 <= RECOVER_Y_MAX):
-                print(f"[recover] slid to ({x2},{y2}) outside recoverable region -> bail")
-                kb.safe_release_all(); return False
-            print("[recover] walk to rope aborted (glitch) -> retry"); kb.safe_release_all()
-            time.sleep(0.3); continue
+        # LOWER ledge / rope / fallen platform beside the rope: climb_and_jump does its own
+        # align + jump-grab + climb (and tolerates already HANGING on the rope, where a
+        # horizontal walk can't move her). Don't pre-walk here -- that walk aborts on the rope
+        # and used to spin recover forever ("walk to rope aborted -> retry").
         if not climb_and_jump():
-            print("[recover] Up didn't climb -> re-align & retry")
+            print("[recover] climb didn't reach top -> re-align & retry")
             kb.safe_release_all(); time.sleep(0.2); continue
         time.sleep(0.1)
     x, y = get_character_full()
-    ok = is_farming(x, y)
+    ok = is_farming(x, y) and 0 <= y <= ON_PLATFORM_Y     # truly mounted, not hanging at rope top
     print(f"[recover] final ({x},{y}) farming={ok}")
     kb.safe_release_all()
     return ok

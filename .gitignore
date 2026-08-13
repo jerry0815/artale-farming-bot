@@ -21,6 +21,12 @@ Thumbs.db
 # Generated trajectory data
 climb_traj.jsonl
 climb_frames/
+climb_cont*/
+rope_traj.jsonl
+rope_model.json
+
+# Diagnostic minimap dumps (debug_minimap.py)
+debug_mm*.png
 
 # git worktrees for isolated feature work
 .worktrees/
