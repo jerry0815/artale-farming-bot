@@ -34,7 +34,8 @@ FALLEN_Y_MIN = 96        # y >= this == below the farming platform (fallen reads
 PATROL_X_L, PATROL_X_R = 66, 161
 # The rope only reaches the fallen platforms directly beside it. Outside this box she
 # is somewhere the rope-climb can't fix (deeper/other platform) -> DON'T flail; stop/panic.
-RECOVER_X_MIN, RECOVER_X_MAX = 55, 152   # right fallen platform reads up to ~x148
+RECOVER_X_MIN, RECOVER_X_MAX = 55, 172   # right-side drop ledge reads to ~x155 (live median
+                                         # (155,131)); was 152 -> rejected it as unrecoverable
 RECOVER_Y_MAX = 156      # covers rest (~110), bottom farming (~143), AND the close LOWER
                          # bottom ledge (~150) she sometimes drops to; deep falls (200+) still
                          # rejected. Rope connects the levels, so climbing up reaches the top
@@ -764,6 +765,7 @@ EDGE_ACTIONS = {
     ("REST", "BOTTOM_FARM"):     lambda: rest_to_bottom(),
     ("REST", "TOP_FARM"):        lambda: recover_to_farming(),
     ("MID", "TOP_FARM"):         lambda: recover_to_farming(),
+    ("MID_R", "TOP_FARM"):       lambda: recover_to_farming(),   # right drop ledge -> rope up
     ("BOTTOM_FARM", "TOP_FARM"): lambda: recover_to_farming(),
     ("LOWER_LEDGE", "TOP_FARM"): lambda: recover_to_farming(),
 }

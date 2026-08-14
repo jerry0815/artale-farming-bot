@@ -12,6 +12,25 @@ def test_classify_band_boundaries():
     assert navmap.classify_node(77, 96) == "REST"        # y==96 -> REST (no dead zone)
     assert navmap.classify_node(63, 132) == "BOTTOM_FARM"
 
+def test_classify_right_drop_ledge():
+    # RIGHT-side drop ledge reads at MID height but far right (live median ~(155,131)),
+    # off the right end of MID (x<=140). Used to match no band -> classify_node None ->
+    # the nav loop spun on `sleep(0.2); continue` forever (loop "stopped"). Must be a node.
+    assert navmap.classify_node(155, 131) == "MID_R"
+    assert navmap.classify_node(150, 140) == "MID_R"      # tolerate the idle bob
+    # the real MID platform (x<=140) must still classify as MID, not MID_R
+    assert navmap.classify_node(135, 120) == "MID"
+
+def test_plan_recovery_from_right_drop_ledge_uses_rope_up():
+    # right drop ledge is rope-recoverable ONLY (walk left to the rope, climb) -- never a
+    # downjump. Path to TOP must climb; path to BOTTOM must go UP first, then down.
+    up = navmap.plan("MID_R", "TOP_FARM")
+    assert up is not None and up[-1]["dst"] == "TOP_FARM"
+    assert any(e["kind"] == "rope" for e in up)
+    down = navmap.plan("MID_R", "BOTTOM_FARM")
+    assert down is not None and down[0]["src"] == "MID_R"
+    assert down[0]["dst"] == "TOP_FARM"          # recover up first, never downjump from here
+
 def test_classify_unknown_returns_none():
     assert navmap.classify_node(-1, -1) is None          # not detected
     assert navmap.classify_node(74, 250) is None         # deep fall, off-map

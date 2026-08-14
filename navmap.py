@@ -8,14 +8,21 @@ Node y-bands are in the minimap frame that recovery.get_character_color()
 returns (offset 20,171 -> ROPE_X=91). They mirror recovery.py constants.
 """
 
-NODES = ["TOP_FARM", "REST", "MID", "BOTTOM_FARM", "LOWER_LEDGE"]
+NODES = ["TOP_FARM", "REST", "MID", "MID_R", "BOTTOM_FARM", "LOWER_LEDGE"]
 FARM_NODES = ["TOP_FARM", "BOTTOM_FARM"]
 
 # (name, y_lo, y_hi, x_lo, x_hi) inclusive bands; ordered so the first match wins.
+# MID_R is the RIGHT-side ledge the character drops onto: it reads at MID height but far
+# right (live median ~(155,131)), off the right end of the MID band (x<=140). Without it
+# a right-drop read matched no band -> classify_node None -> the nav loop spun on
+# `sleep(0.2); continue` forever ("loop stop"). Placed AFTER MID so the real mid platform
+# (x<=140) still classifies as MID; MID_R only catches the far-right x>140 reads. It is
+# rope-recoverable only (walk left to the central rope, climb) -> recover_to_farming.
 _BANDS = [
     ("TOP_FARM",     0,  95, 60, 140),
     ("REST",        96, 110, 60, 100),
     ("MID",        111, 131, 80, 140),
+    ("MID_R",      111, 150,141, 172),   # right-side drop ledge (recover UP the rope only)
     ("BOTTOM_FARM",132, 156, 55, 100),
     ("LOWER_LEDGE",157, 200, 40, 160),
 ]
@@ -38,6 +45,9 @@ EDGES = [
     {"src": "REST",         "dst": "BOTTOM_FARM", "kind": "downjump", "rope": None},
     {"src": "REST",         "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_L"},
     {"src": "MID",          "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_L"},
+    # RIGHT-side drop ledge: rope-recoverable only. No downjump edge OUT of it, so any
+    # plan to BOTTOM_FARM routes MID_R->TOP_FARM->BOTTOM_FARM (recover up first, safe).
+    {"src": "MID_R",        "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_L"},
     # NOTE: the R_C edges are logical "recover-macro" edges. Physically the bottom rope-
     # LADDER and the upper CHAIN are STACKED in the same minimap column (verified via synced
     # screen+minimap capture) with a vertical jump between them at the ladder top (~y124) --
