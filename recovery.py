@@ -932,10 +932,13 @@ def farming_loop_split(exp_check=None, enemy_check=None, panic=None,
 # Per-node farming context for the state machine (home/far x, the y that counts as
 # a fall off THIS platform, the resting y, and the right-edge safety x).
 FARM_CTX = {
-    "TOP_FARM":    dict(home=74, far=112, fall_y=FALLEN_Y_MIN, home_y=85,
-                        edge=RIGHT_EDGE_SAFETY, cap=3.5),
-    "BOTTOM_FARM": dict(home=BOTTOM_HOME_X, far=BOTTOM_FAR_X, fall_y=BOTTOM_FALL_Y,
-                        home_y=143, edge=BOTTOM_FAR_X + 6, cap=2.2),
+    # `home` = where she parks and fires; `left`/`edge` = the LEFT/RIGHT boundaries
+    # that, if crossed (knocked by a dragon), send her walking back to home instead of
+    # off the platform. LIVE-TUNE `home`/`left` to the leftmost x that is still safe.
+    "TOP_FARM":    dict(home=65, far=112, fall_y=FALLEN_Y_MIN, home_y=85,
+                        left=63, edge=RIGHT_EDGE_SAFETY, cap=3.5),
+    "BOTTOM_FARM": dict(home=64, far=BOTTOM_FAR_X, fall_y=BOTTOM_FALL_Y,
+                        home_y=143, left=62, edge=BOTTOM_FAR_X + 6, cap=2.2),
 }
 
 DEPLETED = "DEPLETED"   # _stand_shoot sentinel: platform ran dry mid-shoot -> rotate now
@@ -955,25 +958,35 @@ def _stand_shoot(node, seconds, count_fn=None, threshold=2, check_every=0.5, deb
     """STAND_SHOOT state: parked at home, fire in place for a beat. Returns False if
     she fell off the platform (walks back to home if knocked toward the right edge).
 
-    If `count_fn` is given (a fast single-frame YOLO count), it is polled every
-    `check_every`s while firing; `debounce` consecutive reads below `threshold`
-    return DEPLETED so the caller rotates immediately. No key-release/count-pause is
-    needed -- YOLO ignores the flying arrows, so we keep shooting between checks."""
+    If `count_fn` is given (a fast single-frame YOLO count) it is polled every
+    `check_every`s while the attack is HELD; `debounce` consecutive reads below
+    `threshold` return DEPLETED so the caller rotates immediately. The attack key
+    stays held across the count capture, so counting never interrupts firing."""
     c = FARM_CTX[node]
+    walk_to_x(c["home"], tol=2)                        # reposition to the LEFT home...
+    _face_right()                                     # ...facing right (dragons are to the right)
     t0, last = time.time(), (c["home"], c["home_y"])
     next_check, low = t0 + check_every, 0
     while time.time() - t0 < seconds:
         if kb.pause:
             break
-        _shoot()
+        kb.safe_press('c'); time.sleep(0.1)           # HOLD attack (continuous, not tapped)
         r = _plausible_read(last)                     # rejects buff-glow phantom reads
         if r is not None:
             last = r
             if r[1] >= c["fall_y"]:
                 kb.safe_release_all(); print(f"[stand] fell to {r}"); return False
-            if r[0] >= c["edge"]:                      # knocked toward the edge -> return home
+            if r[0] >= c["edge"]:                      # knocked past the RIGHT edge -> walk left home
+                kb.safe_release('c')
                 if not _walk_shoot(Key.left, c["home"], going_right=False,
                                    seed=(c["edge"], c["home_y"]), cap=c["cap"], fall_y=c["fall_y"]):
+                    return False
+                _face_right(); last = (c["home"], c["home_y"])
+            elif r[0] <= c["left"]:                     # knocked past the LEFT boundary -> walk right home
+                kb.safe_release('c')
+                if not _walk_shoot(Key.right, c["home"], going_right=True,
+                                   seed=(c["left"], c["home_y"]), cap=c["cap"],
+                                   fall_y=c["fall_y"], edge_safety=c["edge"]):
                     return False
                 _face_right(); last = (c["home"], c["home_y"])
         if count_fn is not None and time.time() >= next_check:
@@ -1024,6 +1037,10 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
     # model we fall back to the old motion count at the end of each move.
     model = monsters.load_dragon_model()
     reactive = model is not None
+    if reactive:                                  # warm CUDA once so the first in-loop check is fast
+        _f0 = capture()
+        if _f0 is not None:
+            monsters.detect_dragons_yolo(_f0, model, monsters.DEFAULT_MOTION_ROI)
     print(f"[nav] reactive deplete-check: {'YOLO (single-frame)' if reactive else 'off -> motion fallback'}")
 
     def one_count(nd):
