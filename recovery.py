@@ -1076,7 +1076,24 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
         # locate; recover onto a farm node if off-map
         node = _nav_locate()
         if node is None:
-            time.sleep(0.2); continue
+            # Not in any mapped node band. Two cases: (a) a transient bad read (buff
+            # glow, mid-fall) -> no clean position -> wait; or (b) a REACHABLE platform
+            # we haven't added a node for -> a stable read. Never spin here: hand any
+            # stable position to recover_to_farming (it has its own on-top / rope-top /
+            # in-envelope / bail logic) and escape to safety only if it truly can't
+            # climb out. This kills the whole "unmapped spot -> loop stops" bug class.
+            x, y = stable_char(3)
+            if x < 0:
+                time.sleep(0.2); continue                 # no clean read -> tolerate, wait
+            print(f"[nav] unmapped position ({x},{y}) -> recover to top")
+            if recover_to_farming():
+                current = "TOP_FARM"
+            elif panic:
+                print("[nav] unmapped & unrecoverable -> panic")
+                panic(); time.sleep(1)
+            else:
+                time.sleep(1)                             # no panic hook -> avoid tight retry
+            continue
         if node not in navmap.FARM_NODES:
             print(f"[nav] on {node} -> travel to {current}")
             if not go(current) and panic:
