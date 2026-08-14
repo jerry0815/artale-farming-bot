@@ -502,12 +502,14 @@ def _shoot(n=1):
         kb.safe_press('c'); time.sleep(0.06); kb.safe_release('c'); time.sleep(0.06)
 
 
-def _face_right():
+def _face_right(dur=0.1):
     """Brief right tap so she faces right (dragons are to the right) after a left return
-    -- mirrors the origin loop's click_press(Key.right, 0.1)."""
+    -- mirrors the origin loop's click_press(Key.right, 0.1). `dur` controls the tap
+    length: a shorter tap still flips her facing but drifts her fewer px (used when
+    parking at a left boundary, where the drift would push her off the home spot)."""
     if kb.pause:
         return
-    kb.safe_press(Key.right); time.sleep(0.1); kb.safe_release(Key.right)
+    kb.safe_press(Key.right); time.sleep(dur); kb.safe_release(Key.right)
 
 
 def _walk_shoot(key, target_x, going_right, seed=None, cap=3.5, fall_y=FALLEN_Y_MIN, edge_safety=RIGHT_EDGE_SAFETY):
@@ -935,8 +937,8 @@ FARM_CTX = {
     # `home` = where she parks and fires; `left`/`edge` = the LEFT/RIGHT boundaries
     # that, if crossed (knocked by a dragon), send her walking back to home instead of
     # off the platform. LIVE-TUNE `home`/`left` to the leftmost x that is still safe.
-    "TOP_FARM":    dict(home=65, far=112, fall_y=FALLEN_Y_MIN, home_y=85,
-                        left=63, edge=RIGHT_EDGE_SAFETY, cap=3.5),
+    "TOP_FARM":    dict(home=63, far=112, fall_y=FALLEN_Y_MIN, home_y=85,
+                        left=61, edge=RIGHT_EDGE_SAFETY, cap=3.5),
     "BOTTOM_FARM": dict(home=64, far=BOTTOM_FAR_X, fall_y=BOTTOM_FALL_Y,
                         home_y=143, left=62, edge=BOTTOM_FAR_X + 6, cap=2.2),
 }
@@ -964,7 +966,7 @@ def _stand_shoot(node, seconds, count_fn=None, threshold=2, check_every=0.5, deb
     stays held across the count capture, so counting never interrupts firing."""
     c = FARM_CTX[node]
     walk_to_x(c["home"], tol=2)                        # reposition to the LEFT home...
-    _face_right()                                     # ...facing right (dragons are to the right)
+    _face_right(0.04)                                 # ...facing right (short tap = minimal drift off home)
     t0, last = time.time(), (c["home"], c["home_y"])
     next_check, low = t0 + check_every, 0
     while time.time() - t0 < seconds:
@@ -983,6 +985,7 @@ def _stand_shoot(node, seconds, count_fn=None, threshold=2, check_every=0.5, deb
                     return False
                 _face_right(); last = (c["home"], c["home_y"])
             elif r[0] <= c["left"]:                     # knocked past the LEFT boundary -> walk right home
+                print(f"[stand] {node}: left-guard fired @ x={r[0]} (<= {c['left']}) -> walk right to {c['home']}")
                 kb.safe_release('c')
                 if not _walk_shoot(Key.right, c["home"], going_right=True,
                                    seed=(c["left"], c["home_y"]), cap=c["cap"],
@@ -1014,7 +1017,7 @@ def _walk_shoot_sweep(node):
 def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
                      stand_secs=(6, 8), break_every=(8 * 60, 15 * 60),
                      rest_range=(30, 120), skill_interval=(240, 300),
-                     deplete_threshold=2, max_seconds=None):
+                     deplete_threshold=1, max_seconds=None):
     """Node-graph farming loop with a STAND/WALK state machine. Each iteration runs
     ONE state move on the current platform (STAND_SHOOT or WALK_SHOOT), then counts
     dragons at the resulting standstill; a low count (< deplete_threshold) rotates to
@@ -1185,9 +1188,9 @@ def recover_to_farming(max_rounds=8):   # extra rounds: a dragon can hit her mid
         if x < 0:
             print("[recover] position unknown -> bail"); kb.safe_release_all(); return False
         if is_farming(x, y) and y <= ON_PLATFORM_Y:      # STANDING on the platform (not rope-top)
-            print("[recover] on top -> move to left home, face right")
-            walk_to_x(TOP_HOME_X, tol=3)         # land at the park-left home...
-            _face_right()                        # ...facing right (toward the dragons)
+            print("[recover] on top -> move to farm home, face right")
+            walk_to_x(FARM_CTX["TOP_FARM"]["home"], tol=2)   # go straight to the farm home (one pass)...
+            _face_right(0.04)                    # ...facing right (short tap = minimal drift off home)
             x2, y2 = stable_char(3)
             if is_farming(x2, y2) and y2 <= ON_PLATFORM_Y:
                 kb.safe_release_all(); return True
