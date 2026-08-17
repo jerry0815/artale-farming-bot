@@ -24,8 +24,8 @@ PROPOSED = [
     ("TOP_FARM",     0,  95, 60, 140),
     ("REST",        96, 110, 60, 100),
     ("MID",        111, 131, 80, 140),
-    ("MID_R",      129, 143, 144, 166),   # right-rope top / central-reachable (X>=144)
-    ("L4_RIGHT",   142, 155, 125, 143),   # portal-rope landing (X<=143, separate by X)
+    ("MID_R",      129, 142, 145, 166),   # UPPER ledge, central-reachable
+    ("L4_RIGHT",   143, 154, 128, 163),   # LOWER WIDE ledge (under MID_R's right half); needs rope
     ("BOTTOM_FARM",132, 156, 55, 100),
     ("PORTAL_BOT", 178, 190, 108, 162),   # NEW: before LOWER_LEDGE (carved out)
     ("LOWER_LEDGE",157, 200, 40, 160),

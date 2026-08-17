@@ -51,8 +51,8 @@ Measured facts:
 - `(146,136)` already falls inside the `MID_R` region, whose recovery is the
   central-rope climb — so the right rope's terminus needs **no new node**.
 - **Verified extents** (live `verify_bands.py`, edge-to-edge walks): `PORTAL_BOT`
-  x112–159 y183–185; `L4_RIGHT` x132–140 y143–151; `MID_R` x146–158 y131–142. The
-  two upper ledges are ~1 tile apart in height but clearly split in x (gap ~x141–145).
+  x112–159 y183–185; `L4_RIGHT` x133–159 y148–149 (wide); `MID_R` x146–158 y131–142
+  (upper, over `L4_RIGHT`'s right half). The two are stacked ~1 tile apart in height.
 
 ## Design
 
@@ -61,19 +61,19 @@ Measured facts:
 | Node | band (`y_lo,y_hi,x_lo,x_hi`) | placement / rationale |
 |---|---|---|
 | `PORTAL_BOT` | `178,190,108,162` | placed **before** `LOWER_LEDGE` (carved out of it); live walk runs left to x112 |
-| `L4_RIGHT` | `142,155,125,143` | portal-rope landing ledge; isolated (not central-reachable) |
-| `MID_R` (edit) | `129,143,144,166` | right-rope top / central-reachable; separated from `L4_RIGHT` by **x** |
+| `MID_R` (edit) | `129,142,145,166` | **upper** ledge, central-reachable (right-rope top) |
+| `L4_RIGHT` | `143,154,128,163` | **lower, wide** ledge (portal-rope landing); needs the right rope |
 
-**Separate `L4_RIGHT` and `MID_R` by x, not y (load-bearing).** Live verification
-showed the two ledges sit at nearly the **same height** (`L4_RIGHT` y143–151,
-`MID_R` y131–142 — y-ranges almost touch) but at **different x** (`L4_RIGHT`
-x132–140, `MID_R` x146–158, with a physical gap ~x141–145 between them). My first
-guess split them at y142/143, which cut straight through a single walked platform.
-The correct seam is **x143 | x144**, sitting in the real gap. Bias is safe: an
-ambiguous middle read falls to `L4_RIGHT` (which climbs the right rope — harmless
-if she was already central-reachable), never to `MID_R` (which would walk left
-into the gap `L4_RIGHT` sits behind). The old committed `MID_R` (`111,150,141,172`)
-is replaced by this tighter band.
+**The two ledges are stacked; separate by y at 142/143 (load-bearing).** Live
+verification showed `L4_RIGHT` is a **wide** ledge (x128–163) at **y≈148–149**, and
+`MID_R` sits **directly above its right half** (x146–158) at **y≈131–142**. They
+overlap in x and separate by **height**, with a physical gap at y143–147 between
+them. The seam sits at **y142 | y143**, inside that gap: `y≤142` on the right is the
+upper central-reachable ledge (`MID_R`), `y≥143` is the lower rope-only ledge
+(`L4_RIGHT`). Bias is safe — an ambiguous read at the seam falls to `L4_RIGHT`
+(climb the right rope; harmless if she was already central-reachable), never to
+`MID_R` (which would walk left into the gap the lower ledge sits behind). The old
+committed `MID_R` (`111,150,141,172`) is replaced by this tighter band.
 
 ### New edges (rope) + executors
 
