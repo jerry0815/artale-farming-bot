@@ -48,24 +48,32 @@ Measured facts:
   (no side dismount) on `(146,136)`.
 - `(146,136)` is a genuine standing ledge (6/6 identical `sense` reads) and is
   **central-reachable** (user confirmed: walk left to the central rope, no gap).
-- `(146,136)` already falls inside the existing `MID_R` band, whose recovery is
-  the central-rope climb — so the right rope's terminus needs **no new node**.
+- `(146,136)` already falls inside the `MID_R` region, whose recovery is the
+  central-rope climb — so the right rope's terminus needs **no new node**.
+- **Verified extents** (live `verify_bands.py`, edge-to-edge walks): `PORTAL_BOT`
+  x112–159 y183–185; `L4_RIGHT` x132–140 y143–151; `MID_R` x146–158 y131–142. The
+  two upper ledges are ~1 tile apart in height but clearly split in x (gap ~x141–145).
 
 ## Design
 
 ### New `navmap` nodes (bands: `y_lo,y_hi,x_lo,x_hi`, first match wins)
 
-| Node | band | placement / rationale |
+| Node | band (`y_lo,y_hi,x_lo,x_hi`) | placement / rationale |
 |---|---|---|
-| `PORTAL_BOT` | `176,195,140,168` | placed **before** `LOWER_LEDGE` (carved out of it) so the portal-bottom reads as its own node |
-| `L4_RIGHT` | `143,156,120,172` | the portal-rope landing ledge; isolated (not central-reachable) |
-| `MID_R` (edit) | `111,`**`142`**`,141,172` | narrow y `150→142` so a `L4_RIGHT` read (y149) can't fall into `MID_R` |
+| `PORTAL_BOT` | `178,190,108,162` | placed **before** `LOWER_LEDGE` (carved out of it); live walk runs left to x112 |
+| `L4_RIGHT` | `142,155,125,143` | portal-rope landing ledge; isolated (not central-reachable) |
+| `MID_R` (edit) | `129,143,144,166` | right-rope top / central-reachable; separated from `L4_RIGHT` by **x** |
 
-**Why the `MID_R` narrowing is load-bearing:** `L4_RIGHT` (y149) and `MID_R`
-(y131–136) are different heights. If `MID_R` still spanned to y150, a `L4_RIGHT`
-read would classify as `MID_R`, and `MID_R` recovery walks left toward the central
-rope — straight into the gap `L4_RIGHT` sits behind. Splitting at y142/143 keeps
-the isolated ledge (needs the right rope) apart from the central-reachable one.
+**Separate `L4_RIGHT` and `MID_R` by x, not y (load-bearing).** Live verification
+showed the two ledges sit at nearly the **same height** (`L4_RIGHT` y143–151,
+`MID_R` y131–142 — y-ranges almost touch) but at **different x** (`L4_RIGHT`
+x132–140, `MID_R` x146–158, with a physical gap ~x141–145 between them). My first
+guess split them at y142/143, which cut straight through a single walked platform.
+The correct seam is **x143 | x144**, sitting in the real gap. Bias is safe: an
+ambiguous middle read falls to `L4_RIGHT` (which climbs the right rope — harmless
+if she was already central-reachable), never to `MID_R` (which would walk left
+into the gap `L4_RIGHT` sits behind). The old committed `MID_R` (`111,150,141,172`)
+is replaced by this tighter band.
 
 ### New edges (rope) + executors
 
