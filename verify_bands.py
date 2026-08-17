@@ -24,15 +24,15 @@ PROPOSED = [
     ("TOP_FARM",     0,  95, 60, 140),
     ("REST",        96, 110, 60, 100),
     ("MID",        111, 131, 80, 140),
-    ("MID_R",      129, 142, 145, 166),   # UPPER ledge, central-reachable
-    ("L4_RIGHT",   143, 154, 128, 163),   # LOWER WIDE ledge (under MID_R's right half); needs rope
+    ("BOTTOM_R",   129, 142, 141, 166),   # right twin of BOTTOM_FARM (central-reachable)
+    ("LOWER_R",    143, 154, 128, 163),   # right twin of LOWER_LEDGE (portal-rope landing; needs rope)
     ("BOTTOM_FARM",132, 156, 55, 100),
     ("PORTAL_BOT", 178, 190, 108, 162),   # NEW: before LOWER_LEDGE (carved out)
     ("LOWER_LEDGE",157, 200, 40, 160),
 ]
 
 # Labels we're actively calibrating -> highlighted in the live line.
-NEW = {"PORTAL_BOT", "L4_RIGHT", "MID_R"}
+NEW = {"PORTAL_BOT", "LOWER_R", "BOTTOM_R"}
 
 
 def classify(x, y):

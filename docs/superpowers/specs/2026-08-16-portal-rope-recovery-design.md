@@ -2,147 +2,134 @@
 
 ## Problem
 
-The character can be knocked down the **right side** of the map onto platforms
-the recovery graph doesn't cover. The mid-right ledge (`~155,131`) was fixed by
-the `MID_R` node + the recover-or-panic fallback. But the **deepest** right spot —
-the **portal-bottom platform** (`~153,183`, near the map's blue portal) — cannot
-reach the central rope at all: walking left toward `ROPE_X (91)` from there drops
-into a gap.
+The character can be knocked down the **right side** of the map onto ledges the
+recovery graph doesn't cover. The mid-right ledge was patched earlier (a `MID_R`
+node + the recover-or-panic fallback), but the **deepest** right spot — the
+**portal-bottom platform** (`~153,183`, by the map's blue portal) — can't reach the
+central rope at all: walking left toward `ROPE_X (91)` from there drops into a gap.
 
 Today `classify_node(153,183)` returns `LOWER_LEDGE`, whose recovery
-(`recover_to_farming`) bails immediately (`y=183 > RECOVER_Y_MAX=156`), so the
-loop **panics to Free Market**. That's safe (no freeze) but ends farming on a
-fall that is physically recoverable — via a **two-rope right-side climb** the bot
-doesn't yet know about.
+(`recover_to_farming`) bails immediately (`y=183 > RECOVER_Y_MAX=156`), so the loop
+**panics to Free Market**. Safe (no freeze) but it ends farming on a fall that is
+physically recoverable — via a **right-side rope chain** the bot doesn't yet model.
 
 ## Goal
 
-Make the portal-bottom fall recoverable by encoding the right-side rope chain as
-`navmap` nodes/edges and adding one new climb primitive, so `travel()` chains the
-hops back to `TOP_FARM`. Do it without regressing the central-rope recovery the
-whole farming loop depends on, and without reintroducing any freeze (a failed hop
-must still degrade to today's panic-to-safety).
+Recover the portal-bottom fall by encoding the right-side ledges/ropes as `navmap`
+nodes + edges and adding one climb primitive, so `travel()` chains the hops back to
+`TOP_FARM`. Reuse the central-rope recovery unchanged as the final leg. A failed hop
+must still degrade to today's panic-to-safety (no new freeze path).
 
-## Non-Goals
+## The map (left/central stack has right-side counterparts)
 
-- No change to central-rope recovery (`recover_to_farming` / `climb_and_jump` /
-  `_climb_to_top`) — it is reused unchanged as the final hop.
-- No farming *on* the right-side platforms; these nodes are recovery-only.
-- No handling of falls deeper than the portal-bottom (none observed); those keep
-  the recover-or-panic fallback.
-
-## Calibrated map (live `record-climb` + `sense`, 2026-08-16, bot minimap frame)
+The right side mirrors the central stack by height. The `_R` suffix means
+"right-side counterpart, reached via the **right ropes**" (recovers differently from
+its left twin, so it is a distinct node):
 
 ```
-PORTAL_BOT (153,183) --portal rope: walk left to x132, climb, dismount RIGHT--> L4_RIGHT (140,149)
-L4_RIGHT   (140,149) --right rope:  walk right to x147, climb, step off at top--> MID_R (146,136)
-MID_R      (146,136) --[EXISTING] recover_to_farming: walk left to central rope, climb--> TOP_FARM
+   height        central/left        right counterpart
+   ------        ------------        -----------------
+   y0–95         TOP_FARM            (shared top)
+   y111–131      MID                 (shared — BOTH sides climb up to the one MID)
+   y132–156      BOTTOM_FARM         BOTTOM_R   (was MID_R)
+   y157–200      LOWER_LEDGE         LOWER_R    (was L4_RIGHT)
+   (deepest)     —                   PORTAL_BOT (by the portal)
 ```
 
-Measured facts:
-- `PORTAL_BOT`: start dwell `(153,183)` (also read `(145,184)` earlier).
-- Portal rope climb column `x≈132`; climb `y 184→148` (~36px, a real level);
-  dismount **right** (column 132 → ledge x140).
-- `L4_RIGHT`: dwell `(140,149)` (run-1 end) / `(137,149)` (run-2 start).
-- Right rope grab column `x≈147`; climb `y 149→136`; lands **at the rope top**
-  (no side dismount) on `(146,136)`.
-- `(146,136)` is a genuine standing ledge (6/6 identical `sense` reads) and is
-  **central-reachable** (user confirmed: walk left to the central rope, no gap).
-- `(146,136)` already falls inside the `MID_R` region, whose recovery is the
-  central-rope climb — so the right rope's terminus needs **no new node**.
-- **Sampled reads** (live, not yet full edge-to-edge on every ledge): `PORTAL_BOT`
-  x112–159 y183–185; `L4_RIGHT` (portal-rope landing, shorter) ~x133–159 y148–149;
-  `MID_R` (distinct, central-reachable, wider than sampled) reads x146–158 y131–142.
-  Exact left/right extents of `L4_RIGHT` and `MID_R` are finalized in step 1.
+There is exactly **one `MID`**. The left climb (`BOTTOM_FARM → MID → TOP`) and the
+right climb (`BOTTOM_R → MID → TOP`) both top out onto it. `MID_R` is deleted — the
+readings once called `MID_R` (146,136 / 155,131 / 158,136) are the **right end of
+`MID`** / the `BOTTOM_R` ledge that climbs onto it.
+
+## Recovery chain
+
+```
+PORTAL_BOT --portal rope: walk left to x~132, climb, dismount RIGHT--> LOWER_R
+LOWER_R    --right rope:  walk right to x~147, climb onto the ledge--> BOTTOM_R
+BOTTOM_R   --[EXISTING] recover_to_farming: walk left to central rope, climb--> TOP_FARM
+```
+
+`BOTTOM_R → TOP_FARM` mirrors the existing `BOTTOM_FARM → TOP_FARM` edge exactly —
+same `recover_to_farming`, which climbs the central rope up through `MID` to the top
+in one pass (live-verified from the right end at `(158,131)/(158,136)`).
 
 ## Design
 
-### New `navmap` nodes (bands: `y_lo,y_hi,x_lo,x_hi`, first match wins)
+### Nodes (bands `y_lo,y_hi,x_lo,x_hi`, first match wins — **PROVISIONAL**, finalized live)
 
-| Node | band (`y_lo,y_hi,x_lo,x_hi`) — **PROVISIONAL** | placement / rationale |
+| Node | provisional band | note |
 |---|---|---|
 | `PORTAL_BOT` | `178,190,108,162` | placed **before** `LOWER_LEDGE` (carved out of it); wide bottom ledge by the portal |
-| `MID_R` (edit) | *finalize live* | **distinct** upper ledge, central-reachable; wide, roughly aligned over `PORTAL_BOT`'s x |
-| `L4_RIGHT` | *finalize live* | **shorter** intermediate ledge (portal-rope landing); needs the right rope |
+| `LOWER_R` | `143,154,128,163` | portal-rope landing; right twin of `LOWER_LEDGE`; needs the right rope |
+| `BOTTOM_R` | `129,142,141,166` | right rope's top; right twin of `BOTTOM_FARM`; central-reachable. **Replaces** the committed `MID_R` |
 
-**Band numbers are PROVISIONAL and finalized live (implementation step 1).** Four
-chat-driven revisions from piecemeal walks kept mis-sizing these from
-under-sampling; the design never changed, only the pixels. Step 1 runs
-`verify_bands.py` with the character standing on each ledge (instant feedback) to
-set the final bands. Confirmed structure from live screenshot + walks: `PORTAL_BOT`
-(wide, bottom) → `L4_RIGHT` (**shorter** intermediate) → `MID_R` (**distinct**,
-wide, central-reachable, roughly above `PORTAL_BOT`).
+Band numbers are **provisional** — four chat-driven guesses mis-sized them from
+under-sampling. They're finalized live in implementation **step 1** (`verify_bands.py`,
+character standing on each ledge). The `_R` nodes are **distinct** from their left
+twins (`LOWER_LEDGE`, `BOTTOM_FARM`) because left/right recover via different ropes;
+merging would make one edge try to serve both sides.
 
-**Separation rule (load-bearing, independent of exact pixels).** `L4_RIGHT` and
-`MID_R` are stacked and read close in y (bob overlaps), so the seam must **bias to
-`L4_RIGHT`**: an ambiguous read routes to `L4_RIGHT` (climb the right rope —
-harmless even if she was already central-reachable), **never** to `MID_R` (whose
-recovery walks left toward the central rope and would drop into the gap the lower
-ledge sits behind). Step 1 sets the seam in the measured gap with this bias. The
-old committed `MID_R` (`111,150,141,172`) is replaced.
+**Separation rule (pixel-independent, load-bearing).** `LOWER_R` (y~149) and
+`BOTTOM_R` (y~136) are stacked and read close in y (bob overlaps). Bias the seam to
+`LOWER_R`: an ambiguous read routes to `LOWER_R` (climb the right rope up — harmless
+even if already higher), **never** to `BOTTOM_R` (whose recovery walks left toward
+the central rope and would drop into the gap the lower ledge sits behind).
 
-### New edges (rope) + executors
+### Edges (rope) + executors
 
 | edge | executor |
 |---|---|
-| `PORTAL_BOT → L4_RIGHT` | `climb_rope_hop(grab_x=132, target="L4_RIGHT", dismount="right")` |
-| `L4_RIGHT → MID_R` | `climb_rope_hop(grab_x=147, target="MID_R", dismount=None)` |
-| `MID_R → TOP_FARM` | **existing** `recover_to_farming` (already wired) |
+| `PORTAL_BOT → LOWER_R` | `climb_rope_hop(grab_x=132, target="LOWER_R", dismount="right")` |
+| `LOWER_R → BOTTOM_R` | `climb_rope_hop(grab_x=147, target="BOTTOM_R", dismount=None)` |
+| `BOTTOM_R → TOP_FARM` | **existing** `recover_to_farming` (mirrors `BOTTOM_FARM → TOP_FARM`) |
 
-`plan(PORTAL_BOT, TOP_FARM)` (BFS over `EDGES`) returns all three hops; `travel()`
-executes them in order. A partial fall that lands on `L4_RIGHT` naturally plans
-from there — no special-casing.
+`plan(PORTAL_BOT, TOP_FARM)` (BFS over `EDGES`) returns the three hops; `travel()`
+runs them in order. A partial fall onto `LOWER_R` or `BOTTOM_R` naturally plans from
+there — no special-casing.
 
 ### New primitive — `climb_rope_hop(grab_x, target, dismount, cap)`
 
-A **bounded, single-rope** sibling of `_climb_to_top` (which always rides the
-central column to the top). Contract:
+A **bounded, single-rope** sibling of `_climb_to_top` (which always rides the central
+column to the top). Contract:
 
-1. `walk_to_x(grab_x)` to reach the rope base (direction is implied: left for the
-   portal rope, right for the right rope).
-2. Press `Up` + a hop-jump to grab the rope (as `climb_and_jump` does).
-3. Hold `Up` while rising. These hops are short (13–36px) and end at/above y136,
-   so progress is read from the **true dot-y** (they don't reach the long-climb
-   scroll-pin regime); track `y` decreasing toward the target band's `y_lo`.
-4. On reaching the target level, if `dismount` is `"left"`/`"right"` tap that
-   direction to step onto the ledge; if `None`, the rope tops out on the ledge
-   (right rope) so just release `Up`.
-5. Verify she settled inside `target`'s band (`classify_node == target`).
-   Return `True`; otherwise `safe_release_all()` and return `False`.
-
-Bounded by `cap` seconds / a grab count so it can never hang.
+1. `walk_to_x(grab_x)` to the rope base (direction implied: left for the portal rope,
+   right for the right rope).
+2. `Up` + a hop-jump to grab the rope (as `climb_and_jump` does).
+3. Hold `Up` while rising. These hops are short (~13–36px) and end at/above y136, so
+   progress reads from the **true dot-y** (they don't reach the long-climb scroll-pin
+   regime); track y decreasing toward `target`'s `y_lo`.
+4. On reaching the target level: if `dismount` is `"left"`/`"right"`, tap it to step
+   onto the ledge; if `None`, the rope tops out on the ledge — release `Up`.
+5. Verify she settled in `target`'s band (`classify_node == target`); return `True`,
+   else `safe_release_all()` and return `False`. Bounded by `cap` / a grab count.
 
 ### Error handling — no new failure mode
 
-If any `climb_rope_hop` can't reach its target it returns `False` → its
-`EDGE_ACTIONS` entry returns `False` → `travel()` exhausts `max_rounds` and returns
-`False` → the nav loop calls `panic()`. That is **exactly today's outcome** for the
-portal-bottom, so a flaky new hop degrades to the current safe behavior and cannot
-reintroduce a freeze. The central-rope recovery is untouched.
+A hop that can't reach its target returns `False` → its `EDGE_ACTIONS` entry returns
+`False` → `travel()` exhausts `max_rounds` → the nav loop calls `panic()`. That is
+exactly today's outcome for the portal-bottom, so a flaky new hop degrades to the
+current safe behavior and cannot reintroduce a freeze. Central recovery is untouched.
 
 ## Testing
 
-**`navmap` unit tests** (pure, no live game — extend `tests/test_navmap.py`):
-- `classify_node(153,183) == "PORTAL_BOT"`, `(140,149) == "L4_RIGHT"`,
-  `(146,136) == "MID_R"`.
-- Regression on the narrowing: `(150,140) == "MID_R"` (still), and a `L4_RIGHT`
-  read like `(140,149)` is **not** `MID_R`.
-- `plan("PORTAL_BOT","TOP_FARM")` returns 3 hops ending at `TOP_FARM`, all `rope`.
-- `test_every_edge_has_an_executor` covers the 2 new edges (already asserts this
-  for all `EDGES`).
+**`navmap` unit tests** (pure — extend `tests/test_navmap.py`):
+- `classify_node` for `PORTAL_BOT`, `LOWER_R`, `BOTTOM_R` (once bands are final).
+- `BOTTOM_R`/`LOWER_R` seam biases to `LOWER_R` at the ambiguous y.
+- `plan("PORTAL_BOT","TOP_FARM")` returns 3 hops ending at `TOP_FARM`.
+- `test_every_edge_has_an_executor` covers the 2 new edges.
+- Regression: the old `MID_R` node/tests are removed; its former reads now classify
+  as `BOTTOM_R` (or `MID`) and still recover.
 
-**`climb_rope_hop` mechanics**: live-tested only (screen/keys), like
-`climb_and_jump`. Verify each hop in isolation, then the full
-`recover` from portal-bottom → top. Not unit-testable here.
+**`climb_rope_hop` mechanics**: live-tested only (screen/keys), like `climb_and_jump`.
 
 ## Rollout
 
-1. **Finalize bands live (first).** Run `verify_bands.py`; stand on each of
-   `PORTAL_BOT`, `L4_RIGHT`, `MID_R` and walk edge-to-edge; set final bands from the
-   raw extents, applying the bias-to-`L4_RIGHT` seam rule. This resolves the
-   provisional numbers before any code depends on them.
-2. `navmap.py`: add `PORTAL_BOT`, `L4_RIGHT` nodes + finalized bands, replace `MID_R`,
-   add the two rope edges. Update `tests/test_navmap.py`. (pure — verify green)
-3. `recovery.py`: add `climb_rope_hop`; wire the two new `EDGE_ACTIONS`.
+1. **Finalize bands live (first).** `verify_bands.py`; stand on each of `PORTAL_BOT`,
+   `LOWER_R`, `BOTTOM_R`, walk edge-to-edge, set final bands with the bias-to-`LOWER_R`
+   seam. Resolves the provisional numbers before code depends on them.
+2. `navmap.py`: add `PORTAL_BOT`, `LOWER_R`, `BOTTOM_R` + finalized bands; **remove**
+   `MID_R`; add the two rope edges. Update `tests/test_navmap.py`. (pure — verify green)
+3. `recovery.py`: add `climb_rope_hop`; wire the two new `EDGE_ACTIONS`; drop the
+   `MID_R` executor.
 4. Live: verify each hop, then end-to-end `recover` from portal-bottom. Constants
    (`grab_x≈132`/`147`, `cap`, dismount taps) tuned against live runs.
