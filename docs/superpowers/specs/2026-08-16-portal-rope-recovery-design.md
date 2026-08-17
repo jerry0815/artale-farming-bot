@@ -50,30 +50,36 @@ Measured facts:
   **central-reachable** (user confirmed: walk left to the central rope, no gap).
 - `(146,136)` already falls inside the `MID_R` region, whose recovery is the
   central-rope climb — so the right rope's terminus needs **no new node**.
-- **Verified extents** (live `verify_bands.py`, edge-to-edge walks): `PORTAL_BOT`
-  x112–159 y183–185; `L4_RIGHT` x133–159 y148–149 (wide); `MID_R` x146–158 y131–142
-  (upper, over `L4_RIGHT`'s right half). The two are stacked ~1 tile apart in height.
+- **Sampled reads** (live, not yet full edge-to-edge on every ledge): `PORTAL_BOT`
+  x112–159 y183–185; `L4_RIGHT` (portal-rope landing, shorter) ~x133–159 y148–149;
+  `MID_R` (distinct, central-reachable, wider than sampled) reads x146–158 y131–142.
+  Exact left/right extents of `L4_RIGHT` and `MID_R` are finalized in step 1.
 
 ## Design
 
 ### New `navmap` nodes (bands: `y_lo,y_hi,x_lo,x_hi`, first match wins)
 
-| Node | band (`y_lo,y_hi,x_lo,x_hi`) | placement / rationale |
+| Node | band (`y_lo,y_hi,x_lo,x_hi`) — **PROVISIONAL** | placement / rationale |
 |---|---|---|
-| `PORTAL_BOT` | `178,190,108,162` | placed **before** `LOWER_LEDGE` (carved out of it); live walk runs left to x112 |
-| `MID_R` (edit) | `129,142,145,166` | **upper** ledge, central-reachable (right-rope top) |
-| `L4_RIGHT` | `143,154,128,163` | **lower, wide** ledge (portal-rope landing); needs the right rope |
+| `PORTAL_BOT` | `178,190,108,162` | placed **before** `LOWER_LEDGE` (carved out of it); wide bottom ledge by the portal |
+| `MID_R` (edit) | *finalize live* | **distinct** upper ledge, central-reachable; wide, roughly aligned over `PORTAL_BOT`'s x |
+| `L4_RIGHT` | *finalize live* | **shorter** intermediate ledge (portal-rope landing); needs the right rope |
 
-**The two ledges are stacked; separate by y at 142/143 (load-bearing).** Live
-verification showed `L4_RIGHT` is a **wide** ledge (x128–163) at **y≈148–149**, and
-`MID_R` sits **directly above its right half** (x146–158) at **y≈131–142**. They
-overlap in x and separate by **height**, with a physical gap at y143–147 between
-them. The seam sits at **y142 | y143**, inside that gap: `y≤142` on the right is the
-upper central-reachable ledge (`MID_R`), `y≥143` is the lower rope-only ledge
-(`L4_RIGHT`). Bias is safe — an ambiguous read at the seam falls to `L4_RIGHT`
-(climb the right rope; harmless if she was already central-reachable), never to
-`MID_R` (which would walk left into the gap the lower ledge sits behind). The old
-committed `MID_R` (`111,150,141,172`) is replaced by this tighter band.
+**Band numbers are PROVISIONAL and finalized live (implementation step 1).** Four
+chat-driven revisions from piecemeal walks kept mis-sizing these from
+under-sampling; the design never changed, only the pixels. Step 1 runs
+`verify_bands.py` with the character standing on each ledge (instant feedback) to
+set the final bands. Confirmed structure from live screenshot + walks: `PORTAL_BOT`
+(wide, bottom) → `L4_RIGHT` (**shorter** intermediate) → `MID_R` (**distinct**,
+wide, central-reachable, roughly above `PORTAL_BOT`).
+
+**Separation rule (load-bearing, independent of exact pixels).** `L4_RIGHT` and
+`MID_R` are stacked and read close in y (bob overlaps), so the seam must **bias to
+`L4_RIGHT`**: an ambiguous read routes to `L4_RIGHT` (climb the right rope —
+harmless even if she was already central-reachable), **never** to `MID_R` (whose
+recovery walks left toward the central rope and would drop into the gap the lower
+ledge sits behind). Step 1 sets the seam in the measured gap with this bias. The
+old committed `MID_R` (`111,150,141,172`) is replaced.
 
 ### New edges (rope) + executors
 
@@ -131,8 +137,12 @@ reintroduce a freeze. The central-rope recovery is untouched.
 
 ## Rollout
 
-1. `navmap.py`: add `PORTAL_BOT`, `L4_RIGHT` nodes + bands, narrow `MID_R`, add the
-   two rope edges. Update `tests/test_navmap.py`. (pure — verify green)
-2. `recovery.py`: add `climb_rope_hop`; wire the two new `EDGE_ACTIONS`.
-3. Live: calibrate/verify each hop, then end-to-end `recover` from portal-bottom.
-   Constants (`grab_x`, `cap`, dismount taps) tuned against live runs.
+1. **Finalize bands live (first).** Run `verify_bands.py`; stand on each of
+   `PORTAL_BOT`, `L4_RIGHT`, `MID_R` and walk edge-to-edge; set final bands from the
+   raw extents, applying the bias-to-`L4_RIGHT` seam rule. This resolves the
+   provisional numbers before any code depends on them.
+2. `navmap.py`: add `PORTAL_BOT`, `L4_RIGHT` nodes + finalized bands, replace `MID_R`,
+   add the two rope edges. Update `tests/test_navmap.py`. (pure — verify green)
+3. `recovery.py`: add `climb_rope_hop`; wire the two new `EDGE_ACTIONS`.
+4. Live: verify each hop, then end-to-end `recover` from portal-bottom. Constants
+   (`grab_x≈132`/`147`, `cap`, dismount taps) tuned against live runs.
