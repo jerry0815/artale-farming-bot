@@ -8,23 +8,28 @@ Node y-bands are in the minimap frame that recovery.get_character_color()
 returns (offset 20,171 -> ROPE_X=91). They mirror recovery.py constants.
 """
 
-NODES = ["TOP_FARM", "REST", "MID", "MID_R", "BOTTOM_FARM", "LOWER_LEDGE"]
+NODES = ["TOP_FARM", "REST", "MID", "BOTTOM_FARM", "LOWER_R", "PORTAL_BOT", "LOWER_LEDGE"]
 FARM_NODES = ["TOP_FARM", "BOTTOM_FARM"]
 
 # (name, y_lo, y_hi, x_lo, x_hi) inclusive bands; ordered so the first match wins.
-# MID_R is the RIGHT-side ledge the character drops onto: it reads at MID height but far
-# right (live median ~(155,131)), off the right end of the MID band (x<=140). Without it
-# a right-drop read matched no band -> classify_node None -> the nav loop spun on
-# `sleep(0.2); continue` forever ("loop stop"). Placed AFTER MID so the real mid platform
-# (x<=140) still classifies as MID; MID_R only catches the far-right x>140 reads. It is
-# rope-recoverable only (walk left to the central rope, climb) -> recover_to_farming.
+#
+# PORTAL_BOT and LOWER_R are the two RIGHT-side entry ledges of the portal-bottom
+# recovery chain (PORTAL_BOT -> LOWER_R -> TOP_FARM). They are the only right-side
+# ledges deliberately given bands: both sit well BELOW the overlapping/scroll-pinned
+# mid cluster, so they classify cleanly. The mid stretch above LOWER_R (where the old
+# MID_R lived) is intentionally NOT banded -- MID/BOTTOM_FARM/right-rope-top all read
+# ~y136-142 there and can't be separated by a rectangle, and the climb past it hits the
+# minimap scroll-pin. Reads in that zone fall to classify_node None and are handled by
+# the nav loop's recover-or-panic fallback (recover_to_farming is scroll-aware and walks
+# left to the central rope). See docs/superpowers/specs/2026-08-16-portal-rope-recovery-design.md.
 _BANDS = [
     ("TOP_FARM",     0,  95, 60, 140),
     ("REST",        96, 110, 60, 100),
     ("MID",        111, 131, 80, 140),
-    ("MID_R",      111, 150,141, 172),   # right-side drop ledge (recover UP the rope only)
     ("BOTTOM_FARM",132, 156, 55, 100),
-    ("LOWER_LEDGE",157, 200, 40, 160),
+    ("LOWER_R",    143, 151,128, 163),   # portal-rope landing; needs the right rope
+    ("PORTAL_BOT", 178, 190,108, 162),   # deep ledge by the portal; before LOWER_LEDGE
+    ("LOWER_LEDGE",152, 200, 40, 160),   # y_lo 157->152: rope-transit just below LOWER_R
 ]
 
 def classify_node(x, y):
@@ -45,9 +50,12 @@ EDGES = [
     {"src": "REST",         "dst": "BOTTOM_FARM", "kind": "downjump", "rope": None},
     {"src": "REST",         "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_L"},
     {"src": "MID",          "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_L"},
-    # RIGHT-side drop ledge: rope-recoverable only. No downjump edge OUT of it, so any
-    # plan to BOTTOM_FARM routes MID_R->TOP_FARM->BOTTOM_FARM (recover up first, safe).
-    {"src": "MID_R",        "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_L"},
+    # PORTAL-BOTTOM recovery chain (right side). PORTAL_BOT climbs the portal rope onto
+    # LOWER_R; LOWER_R climbs the right rope onto the mid stretch and then hands to the
+    # central recover (its executor is composite). No downjump edges OUT of either, so a
+    # plan only ever climbs UP out of them.
+    {"src": "PORTAL_BOT",   "dst": "LOWER_R",     "kind": "rope",     "rope": "R_PORTAL"},
+    {"src": "LOWER_R",      "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_RIGHT"},
     # NOTE: the R_C edges are logical "recover-macro" edges. Physically the bottom rope-
     # LADDER and the upper CHAIN are STACKED in the same minimap column (verified via synced
     # screen+minimap capture) with a vertical jump between them at the ladder top (~y124) --

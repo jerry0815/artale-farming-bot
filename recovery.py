@@ -756,18 +756,82 @@ def _nav_locate():
     x, y = stable_char(3)
     return navmap.classify_node(x, y)
 
+# --- portal-bottom recovery chain (right side) -----------------------------------
+# Two short rope hops lift the character from PORTAL_BOT up to the mid stretch, then
+# recover_to_farming finishes (walks left to the central rope, scroll-tracked climb to
+# top). These columns / y-targets are LIVE-TUNED in Task 3; the design rationale is in
+# docs/superpowers/specs/2026-08-16-portal-rope-recovery-design.md.
+PORTAL_ROPE_X = 132      # PORTAL_BOT -> LOWER_R climb column
+RIGHT_ROPE_X  = 147      # LOWER_R -> mid-stretch climb column
+LOWER_R_Y_MAX = 151      # climbed onto LOWER_R once y <= this (its band y_hi)
+MID_STRETCH_Y = 142      # risen off LOWER_R onto the mid stretch once y <= this
+
+
+def climb_rope_hop(grab_x, land_y_max, dismount=None, land_node=None, cap=8.0):
+    """Single, SHORT rope lift: walk to grab_x, hop-grab, hold Up until the dot rises to
+    y <= land_y_max, then dismount. Unlike _climb_to_top (which rides the central column to
+    the top and reads progress from terrain scroll), these hops stay BELOW the scroll-pin,
+    so progress is the true dot-y. If land_node is given, verify she settled on it. Returns
+    True on success; on any miss releases keys and returns False so the caller degrades to
+    panic. F8 (kb.pause) aborts."""
+    if not focus():
+        return False
+    if not walk_to_x(grab_x, tol=2):
+        cx, _cy = get_character_full()
+        if not (cx >= 0 and abs(cx - grab_x) <= 6):       # not on / beside the rope -> bail
+            kb.safe_release_all(); return False
+    kb.safe_press(Key.up); kb.safe_press(JUMP); time.sleep(0.08); kb.safe_release(JUMP)
+    t0, best, reached = time.time(), 999, False
+    while time.time() - t0 < cap:
+        if kb.pause:
+            break
+        x, y = get_character_full()
+        if 0 <= y < best:
+            best = y
+        if 0 <= y <= land_y_max:
+            reached = True; break
+        time.sleep(0.06)
+    kb.safe_release(Key.up)
+    if not reached:
+        print(f"[hop] rope x{grab_x}: rose to best_y={best}, target<= {land_y_max} -> miss")
+        kb.safe_release_all(); return False
+    if dismount in ("left", "right"):                     # step off onto the ledge
+        key = Key.left if dismount == "left" else Key.right
+        kb.safe_press(key); time.sleep(0.15); kb.safe_release(key)
+    time.sleep(0.2)
+    if land_node is not None:
+        x, y = stable_char(3)
+        ok = navmap.classify_node(x, y) == land_node
+        print(f"[hop] rope x{grab_x} -> ({x},{y}) {'on '+land_node if ok else 'NOT '+land_node}")
+        kb.safe_release_all(); return ok
+    kb.safe_release_all(); return True
+
+
+def _lower_r_to_top():
+    """LOWER_R -> TOP_FARM: climb the right rope up off LOWER_R onto the mid stretch, then
+    hand to recover_to_farming (which walks left to the central rope and climbs, scroll-
+    aware, through the pinned zone). The right rope tops out beside the mid stretch, so
+    dismount LEFT toward the central rope before recover takes the walk from there."""
+    if not climb_rope_hop(RIGHT_ROPE_X, MID_STRETCH_Y, dismount="left", land_node=None):
+        return False
+    return recover_to_farming()
+
+
 # (src,dst) -> a callable that performs the move using the tuned primitives.
 # Rope/up moves reuse recover_to_farming (it climbs any-below -> top). Downjumps
-# reuse the proven composites. Per-rope single-level moves are a live follow-up.
+# reuse the proven composites.
 EDGE_ACTIONS = {
     ("TOP_FARM", "REST"):        lambda: drop_to_fallen(),
     ("TOP_FARM", "BOTTOM_FARM"): lambda: go_to_bottom(),
     ("REST", "BOTTOM_FARM"):     lambda: rest_to_bottom(),
     ("REST", "TOP_FARM"):        lambda: recover_to_farming(),
     ("MID", "TOP_FARM"):         lambda: recover_to_farming(),
-    ("MID_R", "TOP_FARM"):       lambda: recover_to_farming(),   # right drop ledge -> rope up
     ("BOTTOM_FARM", "TOP_FARM"): lambda: recover_to_farming(),
     ("LOWER_LEDGE", "TOP_FARM"): lambda: recover_to_farming(),
+    # PORTAL-BOTTOM recovery chain (right side):
+    ("PORTAL_BOT", "LOWER_R"):   lambda: climb_rope_hop(PORTAL_ROPE_X, LOWER_R_Y_MAX,
+                                                        dismount="right", land_node="LOWER_R"),
+    ("LOWER_R", "TOP_FARM"):     lambda: _lower_r_to_top(),
 }
 
 def execute_edge(edge):
