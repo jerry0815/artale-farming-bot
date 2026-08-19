@@ -795,16 +795,29 @@ def climb_rope_hop(grab_x, land_y_max, dismount=None, land_node=None, cap=8.0):
     if not reached:
         print(f"[hop] rope x{grab_x}: rose to best_y={best}, target<= {land_y_max} -> miss")
         kb.safe_release_all(); return False
-    if dismount in ("left", "right"):                     # step off onto the ledge
+    # DISMOUNT: reaching the target y just means she's level with the ledge -- she is still
+    # HANGING on the rope (the dot's x is still the rope column). Hop OFF toward the ledge
+    # (direction + jump) and CONFIRM she left the rope column; retry a few times.
+    off = (dismount not in ("left", "right"))             # None = handled by the caller (recover)
+    if not off:
         key = Key.left if dismount == "left" else Key.right
-        kb.safe_press(key); time.sleep(0.15); kb.safe_release(key)
+        for _ in range(4):
+            if kb.pause:
+                break
+            kb.safe_press(key); kb.safe_press(JUMP); time.sleep(0.10)
+            kb.safe_release(JUMP); time.sleep(0.15); kb.safe_release(key)
+            time.sleep(0.25)
+            cx, _cy = get_character_full()
+            if cx >= 0 and abs(cx - grab_x) >= 5:         # stepped off the rope column onto the ledge
+                off = True; break
     time.sleep(0.2)
-    if land_node is not None:
-        x, y = stable_char(3)
-        ok = navmap.classify_node(x, y) == land_node
-        print(f"[hop] rope x{grab_x} -> ({x},{y}) {'on '+land_node if ok else 'NOT '+land_node}")
-        kb.safe_release_all(); return ok
-    kb.safe_release_all(); return True
+    x, y = stable_char(3)
+    ok = off and (land_node is None or navmap.classify_node(x, y) == land_node)
+    why = ("on " + land_node if ok else ("still on rope x" + str(grab_x) if not off
+                                         else "NOT " + str(land_node)))
+    print(f"[hop] rope x{grab_x} -> ({x},{y}) {why}")
+    kb.safe_release_all()
+    return ok
 
 
 def _lower_r_to_top():
@@ -1316,6 +1329,24 @@ if __name__ == "__main__":
             print("RESULT:", recover_to_farming())
         finally:
             kb.safe_release_all(); lis.stop()
+    elif cmd == "where":                                    # print current node classification
+        x, y = stable_char(4)
+        print(f"({x},{y}) -> {navmap.classify_node(x, y)}")
+    elif cmd == "hop":                                      # test one climb_rope_hop: hop GX LY [dismount]
+        gx, ly = int(sys.argv[2]), int(sys.argv[3])
+        dm = sys.argv[4] if len(sys.argv) > 4 else None
+        lis = Listener(on_press=kb.on_press); lis.start()   # F8 aborts
+        try:
+            print("RESULT:", climb_rope_hop(gx, ly, dismount=dm))
+        finally:
+            kb.safe_release_all(); lis.stop()
+    elif cmd == "portal":                                   # run the full nav chain -> TOP_FARM
+        lis = Listener(on_press=kb.on_press); lis.start()   # F8 aborts
+        try:
+            print("RESULT:", navmap.travel("TOP_FARM", locate_fn=_nav_locate,
+                                            execute_fn=execute_edge))
+        finally:
+            kb.safe_release_all(); lis.stop()
     elif cmd == "record-climb":
         import json as _json
         if not focus():
@@ -1378,18 +1409,9 @@ if __name__ == "__main__":
             kb.safe_release_all(); lis.stop()
     elif cmd in ("run", "runsplit"):
         # FULL production run. `run` = top-only; `runsplit` = top<->bottom split.
-        # Humanized farm + jittered breaks + auto-recovery + EXP-stuck/red-dot safety.
+        # Humanized farm + jittered breaks + auto-recovery + red-dot safety.
         # Starts PAUSED -- press F8 to begin/pause.
-        _exp_proc = ExpProcessor()
-        _started = [None]
-
-        def _exp_check():
-            if _started[0] is None:
-                _started[0] = time.time()
-            eg = get_exp(_exp_proc)
-            if eg is not None and eg[0] is not None:
-                return eg[0] < 4000 and (time.time() - _started[0]) > 180
-            return False
+        # EXP-low auto-pause removed per user (unreliable; monitored manually).
 
         def _enemy_check():
             return len(get_enemy()) > 0
@@ -1405,17 +1427,11 @@ if __name__ == "__main__":
         loop = farming_loop_split if cmd == "runsplit" else farming_loop
         print(f"FULL RUN ({cmd}) ready. Switch to the game and press F8 to start / pause.")
         try:
-            loop(exp_check=_exp_check, enemy_check=_enemy_check, panic=_panic)
+            loop(exp_check=None, enemy_check=_enemy_check, panic=_panic)
         finally:
             kb.safe_release_all(); lis.stop()
     elif cmd == "runnav":
-        _exp_proc = ExpProcessor(); _started = [None]
-        def _exp_check():
-            if _started[0] is None: _started[0] = time.time()
-            eg = get_exp(_exp_proc)
-            if eg is not None and eg[0] is not None:
-                return eg[0] < 4000 and (time.time() - _started[0]) > 180
-            return False
+        # EXP-low auto-pause removed per user (unreliable; monitored manually).
         def _enemy_check(): return len(get_enemy()) > 0
         def _panic():
             kb.safe_release_all()
@@ -1424,7 +1440,7 @@ if __name__ == "__main__":
         lis = Listener(on_press=kb.on_press); lis.start(); kb.pause = True
         print("FULL RUN (runnav) ready. Switch to the game and press F8 to start / pause.")
         try:
-            farming_loop_nav(exp_check=_exp_check, enemy_check=_enemy_check, panic=_panic)
+            farming_loop_nav(exp_check=None, enemy_check=_enemy_check, panic=_panic)
         finally:
             kb.safe_release_all(); lis.stop()
     elif cmd == "nav":
