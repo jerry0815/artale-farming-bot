@@ -762,36 +762,51 @@ def _nav_locate():
 # top). These columns / y-targets are LIVE-TUNED in Task 3; the design rationale is in
 # docs/superpowers/specs/2026-08-16-portal-rope-recovery-design.md.
 PORTAL_ROPE_X = 132      # PORTAL_BOT -> LOWER_R climb column
-RIGHT_ROPE_X  = 147      # LOWER_R -> mid-stretch climb column
+RIGHT_ROPE_X  = 149      # LOWER_R -> mid-stretch climb column (live-tuned +2)
 LOWER_R_Y_MAX = 151      # climbed onto LOWER_R once y <= this (its band y_hi)
 MID_STRETCH_Y = 142      # risen off LOWER_R onto the mid stretch once y <= this
 
 
-def climb_rope_hop(grab_x, land_y_max, dismount=None, land_node=None, cap=8.0):
-    """Single, SHORT rope lift: walk to grab_x, hop-grab, hold Up until the dot rises to
-    y <= land_y_max, then dismount. Unlike _climb_to_top (which rides the central column to
-    the top and reads progress from terrain scroll), these hops stay BELOW the scroll-pin,
-    so progress is the true dot-y. If land_node is given, verify she settled on it. Returns
-    True on success; on any miss releases keys and returns False so the caller degrades to
-    panic. F8 (kb.pause) aborts."""
+def climb_rope_hop(grab_x, land_y_max, dismount=None, land_node=None, cap=12.0):
+    """Single, SHORT rope lift with RE-GRAB. Walk to grab_x, hop-grab, hold Up while rising
+    to y <= land_y_max, then dismount. Like _climb_to_top's align->grab->climb loop, but a
+    bounded hop that reads progress from the true dot-y (it stays BELOW the scroll-pin). If
+    a monster knocks her off (no rise for CLIMB_STALL_S -> she's back on the platform),
+    release, re-walk to the rope, and re-grab -- up to MAX_GRABS attempts within cap. If
+    land_node is given, verify she settled on it. Returns True on success; on any miss
+    releases keys and returns False so the caller degrades to panic. F8 (kb.pause) aborts."""
     if not focus():
         return False
-    if not walk_to_x(grab_x, tol=2):
-        cx, _cy = get_character_full()
-        if not (cx >= 0 and abs(cx - grab_x) <= 6):       # not on / beside the rope -> bail
-            kb.safe_release_all(); return False
-    kb.safe_press(Key.up); kb.safe_press(JUMP); time.sleep(0.08); kb.safe_release(JUMP)
     t0, best, reached = time.time(), 999, False
-    while time.time() - t0 < cap:
-        if kb.pause:
+    for attempt in range(MAX_GRABS):
+        if kb.pause or time.time() - t0 >= cap:
             break
-        x, y = get_character_full()
-        if 0 <= y < best:
-            best = y
-        if 0 <= y <= land_y_max:
-            reached = True; break
-        time.sleep(0.06)
-    kb.safe_release(Key.up)
+        if not walk_to_x(grab_x, tol=2):
+            cx, _cy = get_character_full()
+            if not (cx >= 0 and abs(cx - grab_x) <= 6):   # not on / beside the rope -> bail
+                kb.safe_release_all(); return False
+        kb.safe_press(Key.up); kb.safe_press(JUMP); time.sleep(0.08); kb.safe_release(JUMP)
+        last_progress, prev_y, stalled = time.time(), None, False
+        while time.time() - t0 < cap:
+            if kb.pause:
+                break
+            x, y = get_character_full()
+            if 0 <= y < best:
+                best = y
+            if 0 <= y <= land_y_max:
+                reached = True; break
+            if prev_y is not None and 0 <= y < prev_y - 0.5:   # still rising -> progress
+                last_progress = time.time()
+            if 0 <= y:
+                prev_y = y
+            if time.time() - last_progress > CLIMB_STALL_S:    # knocked off / stuck -> re-grab
+                stalled = True; break
+            time.sleep(0.06)
+        kb.safe_release(Key.up)
+        if reached or not stalled:
+            break
+        print(f"[hop] rope x{grab_x}: knocked off / stalled -> re-grab ({attempt + 1})")
+        time.sleep(0.3)                                   # settle on the platform, then re-grab
     if not reached:
         print(f"[hop] rope x{grab_x}: rose to best_y={best}, target<= {land_y_max} -> miss")
         kb.safe_release_all(); return False
@@ -813,20 +828,41 @@ def climb_rope_hop(grab_x, land_y_max, dismount=None, land_node=None, cap=8.0):
     time.sleep(0.2)
     x, y = stable_char(3)
     ok = off and (land_node is None or navmap.classify_node(x, y) == land_node)
-    why = ("on " + land_node if ok else ("still on rope x" + str(grab_x) if not off
-                                         else "NOT " + str(land_node)))
+    if ok:
+        why = ("on " + land_node) if land_node else "off rope"
+    elif not off:
+        why = "still on rope x" + str(grab_x)
+    else:
+        why = "reached but NOT " + str(land_node)
     print(f"[hop] rope x{grab_x} -> ({x},{y}) {why}")
     kb.safe_release_all()
     return ok
 
 
+def _right_rope_to_mid():
+    """Climb the right rope up onto the mid stretch and dismount LEFT toward the central
+    rope. Leaves her central-reachable for recover_to_farming."""
+    return climb_rope_hop(RIGHT_ROPE_X, MID_STRETCH_Y, dismount="left", land_node=None)
+
+
 def _lower_r_to_top():
-    """LOWER_R -> TOP_FARM: climb the right rope up off LOWER_R onto the mid stretch, then
-    hand to recover_to_farming (which walks left to the central rope and climbs, scroll-
-    aware, through the pinned zone). The right rope tops out beside the mid stretch, so
-    dismount LEFT toward the central rope before recover takes the walk from there."""
-    if not climb_rope_hop(RIGHT_ROPE_X, MID_STRETCH_Y, dismount="left", land_node=None):
+    """LOWER_R -> TOP_FARM: right rope onto the mid stretch, then recover_to_farming."""
+    if not _right_rope_to_mid():
         return False
+    return recover_to_farming()
+
+
+def recover_from_portal():
+    """PORTAL_BOT -> TOP_FARM. Climb the portal rope up off PORTAL_BOT; if she's still on
+    the isolated LOWER_R ledge, climb the right rope up onto the mid stretch; then
+    recover_to_farming (walks left to the central rope, scroll-aware climb to top).
+    Adaptive: a hop that overshoots straight onto the mid stretch just skips ahead."""
+    if not climb_rope_hop(PORTAL_ROPE_X, LOWER_R_Y_MAX, dismount="right", land_node=None):
+        return False
+    x, y = stable_char(3)
+    if navmap.classify_node(x, y) == "LOWER_R":           # still on the isolated ledge
+        if not _right_rope_to_mid():
+            return False
     return recover_to_farming()
 
 
@@ -841,9 +877,9 @@ EDGE_ACTIONS = {
     ("MID", "TOP_FARM"):         lambda: recover_to_farming(),
     ("BOTTOM_FARM", "TOP_FARM"): lambda: recover_to_farming(),
     ("LOWER_LEDGE", "TOP_FARM"): lambda: recover_to_farming(),
-    # PORTAL-BOTTOM recovery chain (right side):
-    ("PORTAL_BOT", "LOWER_R"):   lambda: climb_rope_hop(PORTAL_ROPE_X, LOWER_R_Y_MAX,
-                                                        dismount="right", land_node="LOWER_R"),
+    # PORTAL-BOTTOM recovery (right side): adaptive composite from PORTAL_BOT; a partial
+    # fall onto LOWER_R climbs the right rope then recovers.
+    ("PORTAL_BOT", "TOP_FARM"):  lambda: recover_from_portal(),
     ("LOWER_R", "TOP_FARM"):     lambda: _lower_r_to_top(),
 }
 

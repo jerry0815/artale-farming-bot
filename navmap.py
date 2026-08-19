@@ -50,11 +50,12 @@ EDGES = [
     {"src": "REST",         "dst": "BOTTOM_FARM", "kind": "downjump", "rope": None},
     {"src": "REST",         "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_L"},
     {"src": "MID",          "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_L"},
-    # PORTAL-BOTTOM recovery chain (right side). PORTAL_BOT climbs the portal rope onto
-    # LOWER_R; LOWER_R climbs the right rope onto the mid stretch and then hands to the
-    # central recover (its executor is composite). No downjump edges OUT of either, so a
+    # PORTAL-BOTTOM recovery (right side). Both are "recover-macro" edges (like R_C):
+    # the executor climbs the rope(s) up to the central-reachable mid stretch and then
+    # recover_to_farming finishes to the top. PORTAL_BOT->TOP_FARM is adaptive (portal
+    # rope, then the right rope only if still on LOWER_R). No downjump edges OUT, so a
     # plan only ever climbs UP out of them.
-    {"src": "PORTAL_BOT",   "dst": "LOWER_R",     "kind": "rope",     "rope": "R_PORTAL"},
+    {"src": "PORTAL_BOT",   "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_PORTAL"},
     {"src": "LOWER_R",      "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_RIGHT"},
     # NOTE: the R_C edges are logical "recover-macro" edges. Physically the bottom rope-
     # LADDER and the upper CHAIN are STACKED in the same minimap column (verified via synced

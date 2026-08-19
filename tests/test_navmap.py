@@ -23,17 +23,16 @@ def test_classify_portal_recovery_entry_ledges():
     # the mid cluster is deliberately NOT banded -> None (handled by recover-or-panic fallback)
     assert navmap.classify_node(155, 131) is None
 
-def test_plan_portal_bottom_to_top_is_two_rope_hops():
-    # PORTAL_BOT -> LOWER_R -> TOP_FARM, both hops rope (climb up); no downjump out.
-    path = navmap.plan("PORTAL_BOT", "TOP_FARM")
-    assert path is not None
-    assert [e["src"] for e in path] == ["PORTAL_BOT", "LOWER_R"]
-    assert path[-1]["dst"] == "TOP_FARM"
-    assert all(e["kind"] == "rope" for e in path)
-    # a partial fall onto LOWER_R plans straight up
-    assert navmap.plan("LOWER_R", "TOP_FARM") == [
-        e for e in navmap.EDGES if e["src"] == "LOWER_R" and e["dst"] == "TOP_FARM"
-    ]
+def test_plan_portal_and_lower_r_recover_up():
+    # PORTAL_BOT -> TOP_FARM is a single adaptive recover-macro edge (rope, climbs up);
+    # the executor internally does the portal + right rope hops. No downjump out.
+    portal = navmap.plan("PORTAL_BOT", "TOP_FARM")
+    assert portal is not None and len(portal) == 1
+    assert portal[0]["src"] == "PORTAL_BOT" and portal[0]["dst"] == "TOP_FARM"
+    assert portal[0]["kind"] == "rope"
+    # a partial fall onto LOWER_R plans straight up too
+    lower = navmap.plan("LOWER_R", "TOP_FARM")
+    assert lower is not None and lower[-1]["dst"] == "TOP_FARM"
 
 def test_classify_unknown_returns_none():
     assert navmap.classify_node(-1, -1) is None          # not detected
