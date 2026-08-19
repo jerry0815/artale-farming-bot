@@ -1167,15 +1167,17 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
         return None if f is None else len(monsters.detect_dragons_yolo(f, model, roi))
 
     def heal_skill():
-        # Throttled to skill_interval (240-300s): called after every move but only
-        # fires when due, so heal/buffs aren't spammed each ~6-8s stint. Casts the
-        # potion + both skills together (as in split), starting from the first stint.
+        # Throttled to skill_interval (240-300s): the timed BUFFS A and J only. 'H' is
+        # NOT here -- it is cast before every STAND_SHOOT (see cast_h), per user.
         if time.time() < next_skill[0]:
             return
         next_skill[0] = time.time() + _r.uniform(*skill_interval)
-        kb.safe_press('h'); time.sleep(0.08); kb.safe_release('h')
         kb.safe_press('a'); time.sleep(0.4); kb.safe_release('a')
         kb.safe_press('j'); time.sleep(0.4); kb.safe_release('j')
+
+    def cast_h():
+        # 'H' (heal/potion) before every STAND_SHOOT -- not throttled, per user request.
+        kb.safe_press('h'); time.sleep(0.08); kb.safe_release('h')
 
     def go(dst):
         return navmap.travel(dst, locate_fn=_nav_locate, execute_fn=execute_edge)
@@ -1238,6 +1240,7 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
         if farm_state == navmap.WALK_SHOOT:
             ok = _walk_shoot_sweep(node)
         else:
+            cast_h()                                     # 'H' before every STAND_SHOOT
             ok = _stand_shoot(node, _r.uniform(*stand_secs),
                               count_fn=(lambda: one_count(node)) if reactive else None,
                               threshold=deplete_threshold)
