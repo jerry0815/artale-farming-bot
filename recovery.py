@@ -17,7 +17,10 @@ import numpy as np
 from PIL import Image
 import mss, pygetwindow as gw
 from screeninfo import get_monitors
-from detection import detect_character_on_minimap, detect_red_dots
+from detection import detect_character_on_minimap, detect_red_dots, detect_lie_check
+from alarm import Alarm, AlertController
+import os
+from glob import glob as _glob
 from exp_processor import ExpProcessor
 import pyautogui
 from pynput.keyboard import Key, Listener
@@ -124,6 +127,69 @@ def capture_pil_np():
         shot = sct.grab(box)
         pil = Image.frombytes("RGB", shot.size, shot.rgb)
         return pil, cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
+
+
+# --- lie-check alarm: beep when a "needs a human" screen appears (captcha / curse) ---
+# Two independent pipelines (each its own alarm, so cadences never fight):
+#   FAST: transparent-shape only -- ~40ms, so it can run INSIDE the 6-8s STAND_SHOOT
+#         and fire immediately. That screen gives ~3s, so latency must be ~1s.
+#   FULL: curse + monster -- heavier (wide banner), runs only at the loop top; those
+#         screens persist far longer so a slower, debounced check is fine.
+_LIE_DIR = "assets/lie_check/"
+_FAST_TEMPLATES = ["transparent_title.png"]     # 3s window -> checked in-state, immediate
+_FULL_TEMPLATES = ["curse_banner.png", "curse_lock.png", "monster_instr.png"]
+_lie_enabled = bool(_glob(os.path.join(_LIE_DIR, "*.png")))
+
+_fast_alarm = Alarm(freq=1000, beep_ms=350, gap_ms=150)
+_fast_alert = AlertController(_fast_alarm, trigger_consecutive=1, clear_consecutive=2)  # immediate
+_full_alarm = Alarm(freq=1000, beep_ms=350, gap_ms=150)
+_full_alert = AlertController(_full_alarm, trigger_consecutive=2, clear_consecutive=1)
+_last_fast_tick = [0.0]
+_last_full_tick = [0.0]
+if not _lie_enabled:
+    print(f"[lie-check] '{_LIE_DIR}' 沒有模板，警報停用。")
+
+def lie_check_fast_tick(interval=0.8):
+    """Cheap transparent-shape check (~40ms). Call it often -- inside STAND_SHOOT and
+    at the loop top -- so the 3s transparent screen alarms within ~1s. Immediate."""
+    if not _lie_enabled:
+        return
+    now = time.time()
+    if now - _last_fast_tick[0] < interval:
+        return
+    _last_fast_tick[0] = now
+    f = capture()
+    if f is None or not hasattr(f, "shape"):
+        return
+    hits = detect_lie_check(f, templates_folder=_LIE_DIR,
+                            template_filter=_FAST_TEMPLATES, work_width=520)
+    if _fast_alert.update(bool(hits)) and hits:
+        print(f"[lie-check] ⚠️ 透明圖形驗證 {[(n, round(s, 2)) for n, s in hits]} -- ALARM (F8 暫停)")
+
+def lie_check_full_tick(interval=1.5):
+    """Full check for the slower screens (curse / monster). Loop top only."""
+    if not _lie_enabled:
+        return
+    now = time.time()
+    if now - _last_full_tick[0] < interval:
+        return
+    _last_full_tick[0] = now
+    f = capture()
+    if f is None or not hasattr(f, "shape"):
+        return
+    hits = detect_lie_check(f, templates_folder=_LIE_DIR, template_filter=_FULL_TEMPLATES)
+    if _full_alert.update(bool(hits)) and hits:
+        print(f"[lie-check] ⚠️ 需真人處理畫面 {[(n, round(s, 2)) for n, s in hits]} -- ALARM (F8 暫停)")
+
+def lie_check_tick():
+    """Loop-top check: run both pipelines (fast covers transparent between states too)."""
+    lie_check_fast_tick()
+    lie_check_full_tick()
+
+def lie_check_silence():
+    """Stop both alarms (e.g. when the bot pauses -- a human is present)."""
+    _fast_alert.update(False)
+    _full_alert.update(False)
 
 
 # --- game-logic safety, ported faithfully from the notebook (screen reads, no keys) ---
@@ -305,6 +371,7 @@ def walk_to_x(target_x, tol=2, timeout=7.0, coarse=5):
             while time.time() - t0 < timeout:
                 if kb.pause:
                     return False
+                lie_check_fast_tick()      # transparent-shape check while walking (3s window)
                 x, y = get_character_color(near=(x, y))
                 if x < 0:
                     time.sleep(0.03); continue
@@ -371,6 +438,7 @@ def _climb_to_top(grab_x, hop, cap=ROPE_CLIMB_MAX, bridge_x=None):
         while time.time() - t0 < cap:
             if kb.pause:
                 break
+            lie_check_fast_tick()      # transparent-shape check while climbing (3s window)
             img = capture()
             if img is None:
                 time.sleep(0.05); continue
@@ -498,6 +566,7 @@ def _walk_shoot(key, target_x, going_right, seed=None, cap=3.5, fall_y=FALLEN_Y_
     while time.time() - t0 < cap:
         if kb.pause:
             break
+        lie_check_fast_tick()      # transparent-shape check while walk-shooting (3s window)
         r = _plausible_read(last)
         if r is not None:
             last = r
@@ -662,6 +731,7 @@ def _idle_on_fallen(seconds):
     while time.time() < end:
         if kb.pause:
             break
+        lie_check_fast_tick()      # transparent-shape check while resting on break (3s window)
         time.sleep(0.3)
 
 
@@ -703,6 +773,7 @@ def climb_rope_hop(grab_x, land_y_max, dismount=None, land_node=None, cap=12.0):
         while time.time() - t0 < cap:
             if kb.pause:
                 break
+            lie_check_fast_tick()      # transparent-shape check while rope-hopping (3s window)
             x, y = get_character_full()
             if 0 <= y < best:
                 best = y
@@ -870,6 +941,7 @@ def _stand_shoot(node, seconds, count_fn=None, threshold=2, check_every=0.5, deb
             low, rotate = _reactive_deplete(low, count_fn(), threshold, debounce)
             if rotate:
                 kb.safe_release_all(); print(f"[stand] {node} depleted -> rotate"); return DEPLETED
+        lie_check_fast_tick()      # cheap transparent-shape check while shooting (3s window)
     kb.safe_release_all()
     return True
 
@@ -944,7 +1016,8 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
         if max_seconds is not None and time.time() - t_start > max_seconds:
             kb.safe_release_all(); print("[nav] max_seconds -> stop"); return
         if kb.pause:
-            kb.safe_release_all(); time.sleep(0.1); continue
+            kb.safe_release_all(); lie_check_silence(); time.sleep(0.1); continue
+        lie_check_tick()
 
         # locate; recover onto a farm node if off-map
         node = _nav_locate()

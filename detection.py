@@ -235,6 +235,93 @@ def detect_rune(game_img, templates_folder='assets/runes/', threshold=0.8, debug
 
     return final_detections
 
+# 偵測人機驗證 / 詛咒等需要真人處理的畫面 (lie check)
+def detect_lie_check(game_img, templates_folder='assets/lie_check/', threshold=0.88,
+                     work_width=700, reference_width=2750.0,
+                     scale_min=0.8, scale_max=1.3, scale_step=0.06,
+                     template_filter=None, debug=False):
+    """
+    偵測「需要真人介入」的畫面 (人機驗證、詛咒符文警告等)。
+
+    做法：把畫面縮到固定工作寬度 (work_width)，再對每個模板做多比例
+    模板匹配。只要任一模板的最高分超過門檻，就視為偵測到。
+
+    關鍵：模板都是從「實際遊戲全螢幕截圖」(約 reference_width 寬) 裁下來的，
+    因此比對前會把每個模板依 work_width/reference_width 正規化，讓它在縮過的
+    畫面裡剛好是它應有的大小 (≈ scale 1.0)。這樣不論模板本身像素大小差多少
+    (整條橫幅 vs 小鎖頭)，都對齊到同一個比例，只需在 1.0 附近小幅掃描縮放
+    (scale_min..scale_max) 來吸收視窗大小/解析度的差異。
+
+    注意：正規化假設「畫面裡該介面所佔的比例」與模板來源截圖一致 (UI 會隨
+    視窗縮放，所以成立)。要新增/更新模板，請用實際遊戲全螢幕截圖裁切
+    (capture_lie_template.py)，不要用縮圖或局部放大的截圖。
+
+    Args:
+        game_img (np.array): 遊戲畫面影像 (BGR格式)。
+        templates_folder (str): 包含 lie-check 模板的資料夾。
+        threshold (float): 模板匹配的相似度閾值。
+        work_width (int): 比對前把畫面縮到的工作寬度 (畫面較窄時不放大)。
+        reference_width (float): 模板來源截圖的畫面寬度 (用來正規化模板大小)。
+        scale_min/scale_max/scale_step (float): 在 1.0 附近的縮放掃描範圍與步進。
+        template_filter (list|None): 只比對這些檔名的模板 (None = 全部)。用來讓
+            時間敏感的畫面 (透明圖形) 只跑單一便宜模板、快速偵測。
+        debug (bool): 是否印出每個模板的最高分。
+
+    Returns:
+        list: 命中的模板列表，每個元素為 (template_name, score)。沒有命中時回傳 []。
+    """
+    template_paths = glob(os.path.join(templates_folder, '*.png'))
+    if template_filter is not None:
+        allow = set(template_filter)
+        template_paths = [p for p in template_paths if os.path.basename(p) in allow]
+    if not template_paths:
+        return []
+
+    img_h, img_w = game_img.shape[:2]
+    # 縮到固定工作寬度 (只縮不放大)
+    f = min(1.0, work_width / img_w) if img_w > 0 else 1.0
+    search = game_img if f == 1.0 else cv2.resize(
+        game_img, (int(img_w * f), int(img_h * f)), interpolation=cv2.INTER_AREA)
+    sh, sw = search.shape[:2]
+    norm = sw / reference_width          # 模板正規化係數：來源寬 -> 目前工作寬
+
+    n_steps = int(round((scale_max - scale_min) / scale_step)) + 1
+    scales = [round(scale_min + i * scale_step, 4) for i in range(n_steps)]
+
+    hits = []
+    for template_path in template_paths:
+        tpl = cv2.imread(template_path, cv2.IMREAD_COLOR)
+        if tpl is None:
+            print(f"警告：無法讀取 lie-check 模板圖片：{template_path}")
+            continue
+        name = os.path.basename(template_path)
+        h0, w0 = tpl.shape[:2]
+        # 正規化到工作畫面的比例 (讓它在縮過的畫面裡是應有大小，掃描以此為中心)
+        base = cv2.resize(tpl, (max(1, int(w0 * norm)), max(1, int(h0 * norm))),
+                          interpolation=cv2.INTER_AREA if norm < 1.0 else cv2.INTER_LINEAR)
+        base_h, base_w = base.shape[:2]
+
+        best = -1.0
+        for s in scales:
+            tw, th = int(base_w * s), int(base_h * s)
+            if tw < 8 or th < 8 or tw > sw or th > sh:
+                continue  # 縮放後太小或超出畫面，跳過
+            scaled = cv2.resize(base, (tw, th),
+                        interpolation=cv2.INTER_AREA if s < 1.0 else cv2.INTER_LINEAR)
+            result = cv2.matchTemplate(search, scaled, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, _ = cv2.minMaxLoc(result)
+            if max_val > best:
+                best = max_val
+            if max_val >= threshold and not debug:
+                break  # 已達門檻即可提前結束此模板 (debug 模式仍掃完取最高分)
+
+        if debug:
+            print(f"lie-check 模板 {name}: 最高分 {best:.3f}")
+        if best >= threshold:
+            hits.append((name, float(best)))
+
+    return hits
+
 def detect_task_arrow(game_img, templates_folder='assets/task_arrows/', threshold=0.75, debug=False):
     raw_detections = []
     
