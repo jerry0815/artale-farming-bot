@@ -1,6 +1,6 @@
 @echo off
 :start
-python auto_train.py
+python recovery.py runnav
 if %errorlevel% neq 0 (
     echo Python script crashed. Restarting in 5 seconds...
     timeout /t 5 /nobreak

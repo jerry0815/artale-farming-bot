@@ -5,8 +5,10 @@ band crop misses) in the SAME coordinate frame as the existing calibration
 (offset 20,171 -> so ROPE_MINIMAP_X=91, PLATFORM_Y=101 stay valid).
 
 CLI:
-  python recovery.py sense <label> [samples]   # read-only: median pos + annotated map
+  python recovery.py runnav                     # full production farming run (F8 start/pause)
+  python recovery.py nav [secs]                 # bounded runnav test (default 90s)
   python recovery.py focus                      # bring game to foreground (verify)
+  (run with no/unknown cmd to print the full command list)
 """
 import sys, time, ctypes
 from ctypes import wintypes
@@ -253,33 +255,6 @@ def focus():
     u.AttachThreadInput(cur, gt, False)
     time.sleep(0.3)
     return u.GetForegroundWindow() == hwnd
-
-
-def _median(v):
-    return sorted(v)[len(v) // 2]
-
-
-def sense(label, samples=8):
-    xs, ys, last = [], [], None
-    for i in range(samples):
-        np_img = capture()
-        x, y = get_character_full(np_img)
-        print(f"  {label} {i+1}: ({x},{y})")
-        if x >= 0:
-            xs.append(x); ys.append(y); last = np_img
-        time.sleep(0.3)
-    if xs:
-        mx, my = _median(xs), _median(ys)
-        print(f"\n[{label}] median ({mx},{my})  x[{min(xs)}-{max(xs)}] y[{min(ys)}-{max(ys)}] n={len(xs)}")
-        mm = _minimap(last)
-        vis = cv2.resize(mm, (mm.shape[1]*3, mm.shape[0]*3), interpolation=cv2.INTER_NEAREST)
-        cv2.circle(vis, (mx*3, my*3), 8, (0, 0, 255), 2)
-        cv2.line(vis, (0, 145*3), (vis.shape[1], 145*3), (0, 255, 255), 1)  # old band cutoff
-        Image.fromarray(cv2.cvtColor(vis, cv2.COLOR_BGR2RGB)).save(SP + f"\\sense_{label}.png")
-        print(f"saved sense_{label}.png")
-        return mx, my
-    print(f"[{label}] not detected")
-    return -1, -1
 
 
 def stable_char(n=3):
@@ -666,49 +641,6 @@ def go_to_bottom():
     return on_bottom
 
 
-def _climb_from_bottom_continuous():
-    """Continuous bottom->top: walk right INTO the rope, then jump+up on the fly to grab
-    it (rope base is above the floor), climb, and up-jump onto the top. One smooth motion,
-    no stop-align-retry. Returns True if she reached the top."""
-    kb.safe_press(Key.right)
-    t0, last = time.time(), (BOTTOM_HOME_X, 143)
-    while time.time() - t0 < 3.5:                  # walk into the rope
-        if kb.pause:
-            kb.safe_release_all(); return False
-        r = _plausible_read(last)
-        if r is not None:
-            last = r
-            if r[0] >= ROPE_X:                     # reached the rope
-                break
-        time.sleep(0.04)
-    kb.safe_press(JUMP); kb.safe_press(Key.up)     # grab on the fly (jump+up)
-    time.sleep(0.1)
-    kb.safe_release(JUMP); kb.safe_release(Key.right)
-    last_y, stalled, t0, climbed = None, 0, time.time(), False
-    while time.time() - t0 < ROPE_CLIMB_MAX:       # climb (Up held)
-        if kb.pause:
-            break
-        x, y = get_character_full()
-        if y >= 0:
-            if y <= ROPE_EXIT_TOP_Y:
-                climbed = True; break
-            if last_y is not None and y >= last_y - 1:   # not rising this frame
-                if abs(x - ROPE_X) <= 2:                  # ...but she's ON the rope (x~91):
-                    stalled = 0                           # keep holding Up, she'll climb
-                else:
-                    stalled += 1                          # beside the rope -> not on it
-                    if stalled >= 5:
-                        break
-            else:
-                stalled = 0
-            last_y = y
-        time.sleep(0.08)
-    if climbed:
-        kb.safe_press(JUMP); time.sleep(0.15); kb.safe_release(JUMP); time.sleep(0.12)
-    kb.safe_release(Key.up); time.sleep(0.1)
-    return climbed
-
-
 def rest_to_bottom(drop_x=DROP_X):
     """Left fallen (rest) platform -> bottom farming platform: one down-jump. Verifies."""
     x, y = stable_char(3)
@@ -723,25 +655,6 @@ def rest_to_bottom(drop_x=DROP_X):
     print(f"[rest->bottom] after down-jump ({x},{y}) on_bottom={on_bottom}")
     kb.safe_release_all()
     return on_bottom
-
-
-def _align_to_rope(lo=ROPE_X, hi=ROPE_X + 1, max_taps=16):
-    """Tap left/right until x is in the tight rope grab-zone [91,92], using STABLE reads
-    (rejects transient/mid-rope reads -- the y-guard idea). Small taps so she doesn't
-    overshoot the ~2px zone the way walk_to_x (which accepts tol+2) did. True if aligned."""
-    for _ in range(max_taps):
-        if kb.pause:
-            return False
-        x, y = stable_char(2)
-        if x < 0:
-            continue
-        if lo <= x <= hi:
-            return True
-        key = Key.right if x < lo else Key.left
-        kb.safe_press(key); time.sleep(0.05); kb.safe_release(key)
-        time.sleep(0.08)
-    x, y = stable_char(2)
-    return x >= 0 and lo <= x <= hi
 
 
 def _idle_on_fallen(seconds):
@@ -889,161 +802,6 @@ def execute_edge(edge):
         print(f"[nav] no executor for {edge['src']}->{edge['dst']}")
         return False
     return bool(fn())
-
-
-def farming_loop(exp_check=None, enemy_check=None, panic=None,
-                 break_every=(8 * 60, 15 * 60), rest_range=(30, 120),
-                 farm_leg=(16, 34), skill_interval=(260, 340), max_seconds=None):
-    """Integrated human-like farming loop:
-      - farm short humanized stints (continuous patrol + shoot), heal each stint
-      - skill ('a') on a jittered cadence
-      - every break_every (jittered) take a break: drop to the fallen platform,
-        rest, then recover back up
-      - auto-recover if knocked off the platform
-      - safety callbacks (injected by the notebook, which owns the OCR/minimap logic):
-          enemy_check() -> True if another player is on the minimap  -> panic()
-          exp_check()   -> True if EXP too low (stuck)               -> panic()
-          panic()       -> goto_freemarket() (get to safety)
-      max_seconds bounds the run for testing (None = run forever). F8 pauses (kb.pause).
-    """
-    import random as _r
-    if not focus():
-        print("[loop] could not focus"); return
-    t_start = time.time()
-    next_break = time.time() + _r.uniform(*break_every)
-    next_skill = time.time() + _r.uniform(*skill_interval)
-    while True:
-        if max_seconds is not None and time.time() - t_start > max_seconds:
-            kb.safe_release_all(); print("[loop] max_seconds reached -> stop"); return
-        if kb.pause:
-            kb.safe_release_all(); time.sleep(0.1); continue
-
-        # 1. where is she? auto-recover if fallen / not clearly on the farming platform.
-        #    If recovery FAILS (she's somewhere the rope can't fix), DON'T loop-flail:
-        #    escape to Free Market if we can, otherwise stop and let the user look.
-        x, y = stable_char(3)
-        if y >= FALLEN_Y_MIN or (x >= 0 and not is_farming(x, y)):
-            print(f"[loop] off platform ({x},{y}) -> recover")
-            if not recover_to_farming():
-                print("[loop] recovery failed -> escape / stop (not flailing)")
-                kb.safe_release_all()
-                if panic:
-                    panic()
-                    time.sleep(1); continue
-                return                              # no escape callback -> stop safely
-            continue
-        if x < 0:
-            time.sleep(0.2); continue
-
-        # 2. safety (notebook-owned checks)
-        if enemy_check and enemy_check():
-            print("[loop] another player -> Free Market")
-            if panic: panic()
-            time.sleep(1); continue
-        if exp_check and exp_check():
-            print("[loop] EXP too low -> Free Market")
-            if panic: panic()
-            time.sleep(1); continue
-
-        # 3. scheduled human break: drop to the safe fallen platform, rest, recover
-        if time.time() >= next_break:
-            print("[loop] break due -> drop to fallen platform")
-            if drop_to_fallen():
-                rest = _r.uniform(*rest_range)
-                print(f"[loop] resting {int(rest)}s on fallen platform")
-                _idle_on_fallen(rest)
-                recover_to_farming()
-            next_break = time.time() + _r.uniform(*break_every)
-            continue
-
-        # 4. farm a humanized stint, then heal; skill on jittered cadence
-        farm(_r.uniform(*farm_leg))
-        kb.safe_press('h'); time.sleep(0.08); kb.safe_release('h')
-        if time.time() >= next_skill:
-            kb.safe_press('a'); time.sleep(0.4); kb.safe_release('a')
-            next_skill = time.time() + _r.uniform(*skill_interval)
-        if _r.random() < 0.15:                       # occasional micro-pause
-            time.sleep(_r.uniform(0.3, 1.5))
-
-
-def farming_loop_split(exp_check=None, enemy_check=None, panic=None,
-                       top_secs=(80, 120), bottom_secs=(80, 120),
-                       break_every=(8 * 60, 15 * 60), rest_range=(30, 120),
-                       skill_interval=(260, 340), max_seconds=None):
-    """Top<->bottom split farming. Farm top a while -> go_to_bottom -> farm bottom a
-    while -> recover to top -> repeat. Jittered breaks (drop to the left fallen platform
-    and rest), heal each stint, skill on a jittered cadence, EXP/red-dot safety, and
-    auto-recovery if knocked off. F8 pauses (kb.pause). max_seconds bounds it for testing."""
-    import random as _r
-    if not focus():
-        print("[split] could not focus"); return
-    t_start = time.time()
-    next_break = time.time() + _r.uniform(*break_every)
-    next_skill = [time.time()]
-    phase = "top"
-
-    def heal_skill():
-        time.sleep(0.2)
-        kb.safe_press('h'); time.sleep(0.08); kb.safe_release('h')
-        if time.time() >= next_skill[0]:
-            time.sleep(0.2)
-            kb.safe_press('a'); time.sleep(0.4); kb.safe_release('a')
-            kb.safe_press('j'); time.sleep(0.4); kb.safe_release('j')
-            next_skill[0] = time.time() + _r.uniform(*skill_interval)
-
-    while True:
-        if max_seconds is not None and time.time() - t_start > max_seconds:
-            kb.safe_release_all(); print("[split] max_seconds reached -> stop"); return
-        if kb.pause:
-            kb.safe_release_all(); time.sleep(0.1); continue
-
-        x, y = stable_char(3)
-        if x < 0:
-            time.sleep(0.2); continue
-        # if enemy_check and enemy_check():
-        #     print("[split] another player -> Free Market")
-        #     if panic: panic()
-        #     time.sleep(1); continue
-        # if exp_check and exp_check():
-        #     print("[split] EXP too low -> Free Market")
-        #     if panic: panic()
-        #     time.sleep(1); continue
-
-        # scheduled break: rest on the left fallen platform, then resume on top
-        if time.time() >= next_break:
-            print("[split] break -> left fallen platform, rest")
-            if not is_farming(x, y):
-                recover_to_farming()
-            if drop_to_fallen():
-                _idle_on_fallen(_r.uniform(*rest_range))
-            recover_to_farming()
-            next_break = time.time() + _r.uniform(*break_every)
-            phase = "top"
-            continue
-
-        if phase == "top":
-            if not is_farming(x, y):
-                print(f"[split] off top ({x},{y}) -> recover")
-                if not recover_to_farming() and panic:
-                    panic(); time.sleep(1)
-                continue
-            heal_skill()
-            if farm(_r.uniform(*top_secs)):          # farm a stint (False if she fell)
-                print("[split] top stint done -> go to bottom")
-                if go_to_bottom():
-                    phase = "bottom"
-        else:  # bottom
-            if y < ON_BOTTOM_Y:                          # tolerant: bottom bobs ~133-143
-                print(f"[split] not on bottom ({x},{y}) -> reposition")
-                if not (recover_to_farming() and go_to_bottom()):
-                    phase = "top"                    # couldn't get down -> farm top
-                continue
-            heal_skill()
-            _face_right()   
-            if farm_bottom(_r.uniform(*bottom_secs)):
-                print("[split] bottom stint done -> climb to top")
-                if recover_to_farming():
-                    phase = "top"
 
 
 # Per-node farming context for the state machine (home/far x, the y that counts as
@@ -1359,7 +1117,7 @@ def recover_to_farming(max_rounds=8):   # extra rounds: a dragon can hit her mid
 
 
 if __name__ == "__main__":
-    cmd = sys.argv[1] if len(sys.argv) > 1 else "sense"
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "help"
     if cmd == "focus":
         print("focused:", focus())
     elif cmd == "recover":
@@ -1437,38 +1195,6 @@ if __name__ == "__main__":
             print("RESULT:", farm_bottom(secs))
         finally:
             kb.safe_release_all(); lis.stop()
-    elif cmd == "loop":
-        # bounded integration test: short break interval so a full break happens
-        secs = int(sys.argv[2]) if len(sys.argv) > 2 else 50
-        lis = Listener(on_press=kb.on_press); lis.start()   # F8 aborts
-        try:
-            farming_loop(break_every=(35, 40), rest_range=(6, 8),
-                         farm_leg=(20, 30), max_seconds=secs)
-        finally:
-            kb.safe_release_all(); lis.stop()
-    elif cmd in ("run", "runsplit"):
-        # FULL production run. `run` = top-only; `runsplit` = top<->bottom split.
-        # Humanized farm + jittered breaks + auto-recovery + red-dot safety.
-        # Starts PAUSED -- press F8 to begin/pause.
-        # EXP-low auto-pause removed per user (unreliable; monitored manually).
-
-        def _enemy_check():
-            return len(get_enemy()) > 0
-
-        def _panic():
-            # Free Market escape DISABLED per user -- just stop safely and pause (F8 resumes).
-            kb.safe_release_all()
-            print("[safety] trigger -> releasing keys and PAUSING (no Free Market). F8 to resume.")
-            kb.pause = True
-
-        lis = Listener(on_press=kb.on_press); lis.start()
-        kb.pause = True
-        loop = farming_loop_split if cmd == "runsplit" else farming_loop
-        print(f"FULL RUN ({cmd}) ready. Switch to the game and press F8 to start / pause.")
-        try:
-            loop(exp_check=None, enemy_check=_enemy_check, panic=_panic)
-        finally:
-            kb.safe_release_all(); lis.stop()
     elif cmd == "runnav":
         # EXP-low auto-pause removed per user (unreliable; monitored manually).
         def _enemy_check(): return len(get_enemy()) > 0
@@ -1489,16 +1215,9 @@ if __name__ == "__main__":
             farming_loop_nav(break_every=(9999, 9999), stand_secs=(4, 8), max_seconds=secs)
         finally:
             kb.safe_release_all(); lis.stop()
-    elif cmd == "split":
-        # bounded split test: short stints, no break, so you see top->bottom->top quickly
-        secs = int(sys.argv[2]) if len(sys.argv) > 2 else 90
-        lis = Listener(on_press=kb.on_press); lis.start()   # F8 aborts
-        try:
-            farming_loop_split(top_secs=(14, 18), bottom_secs=(14, 18),
-                               break_every=(9999, 9999), max_seconds=secs)
-        finally:
-            kb.safe_release_all(); lis.stop()
     else:
-        label = sys.argv[2] if len(sys.argv) > 2 else "pos"
-        n = int(sys.argv[3]) if len(sys.argv) > 3 else 8
-        sense(label, n)
+        print("usage: python recovery.py <cmd>")
+        print("  run:   runnav          full production farming run (F8 to start/pause)")
+        print("  test:  nav [secs]      bounded runnav (default 90s)")
+        print("  nav debug: focus | where | hop GX LY [dismount] | portal | drop | gobottom | recover")
+        print("  other: farmbottom [s] | demo | break [s] | record-climb")
