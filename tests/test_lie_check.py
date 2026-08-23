@@ -12,7 +12,8 @@ import detection
 # Real production captures (full-screen), one per check screen.
 PRODUCTION_POSITIVES = [
     "datasets/lie_check/Screenshot 2026-08-20 013627.png",  # find-transparent-shape
-    "datasets/lie_check/rune_check_test.png",               # curse banner + lock
+    "datasets/lie_check/rune_check_test.png",               # curse (fullscreen ~2683w)
+    "datasets/lie_check/rune_check_live_test.png",          # curse (live windowed ~1914w)
     "datasets/lie_check/monster_intr_test.png",             # name-the-monster
 ]
 

@@ -235,11 +235,21 @@ def detect_rune(game_img, templates_folder='assets/runes/', threshold=0.8, debug
 
     return final_detections
 
+# 每個模板各自的門檻。詛咒/怪物模板的誤判分數很低 (負樣本 ~0.3-0.6)，跨視窗大小
+# 比對時分數也偏低 (~0.85)，所以門檻放低仍有很大安全邊際；透明圖形標題文字容易和
+# 場景誤撞 (負樣本可達 ~0.84)，需要較高門檻。沒列到的模板用傳入的 threshold。
+LIE_CHECK_THRESHOLDS = {
+    "transparent_title.png": 0.88,
+    "curse_lock.png": 0.80,
+    "curse_banner.png": 0.78,
+    "monster_instr.png": 0.80,
+}
+
 # 偵測人機驗證 / 詛咒等需要真人處理的畫面 (lie check)
 def detect_lie_check(game_img, templates_folder='assets/lie_check/', threshold=0.88,
                      work_width=700, reference_width=2750.0,
                      scale_min=0.8, scale_max=1.3, scale_step=0.06,
-                     template_filter=None, debug=False):
+                     template_filter=None, thresholds=None, debug=False):
     """
     偵測「需要真人介入」的畫面 (人機驗證、詛咒符文警告等)。
 
@@ -287,6 +297,7 @@ def detect_lie_check(game_img, templates_folder='assets/lie_check/', threshold=0
 
     n_steps = int(round((scale_max - scale_min) / scale_step)) + 1
     scales = [round(scale_min + i * scale_step, 4) for i in range(n_steps)]
+    thr_map = thresholds if thresholds is not None else LIE_CHECK_THRESHOLDS
 
     hits = []
     for template_path in template_paths:
@@ -295,6 +306,7 @@ def detect_lie_check(game_img, templates_folder='assets/lie_check/', threshold=0
             print(f"警告：無法讀取 lie-check 模板圖片：{template_path}")
             continue
         name = os.path.basename(template_path)
+        thr = thr_map.get(name, threshold)      # 每模板門檻，沒列到就用全域 threshold
         h0, w0 = tpl.shape[:2]
         # 正規化到工作畫面的比例 (讓它在縮過的畫面裡是應有大小，掃描以此為中心)
         base = cv2.resize(tpl, (max(1, int(w0 * norm)), max(1, int(h0 * norm))),
@@ -312,12 +324,12 @@ def detect_lie_check(game_img, templates_folder='assets/lie_check/', threshold=0
             _, max_val, _, _ = cv2.minMaxLoc(result)
             if max_val > best:
                 best = max_val
-            if max_val >= threshold and not debug:
+            if max_val >= thr and not debug:
                 break  # 已達門檻即可提前結束此模板 (debug 模式仍掃完取最高分)
 
         if debug:
-            print(f"lie-check 模板 {name}: 最高分 {best:.3f}")
-        if best >= threshold:
+            print(f"lie-check 模板 {name}: 最高分 {best:.3f} (門檻 {thr})")
+        if best >= thr:
             hits.append((name, float(best)))
 
     return hits

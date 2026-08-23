@@ -177,7 +177,10 @@ def lie_check_full_tick(interval=1.5):
     f = capture()
     if f is None or not hasattr(f, "shape"):
         return
-    hits = detect_lie_check(f, templates_folder=_LIE_DIR, template_filter=_FULL_TEMPLATES)
+    # higher work_width keeps the curse banner/lock detail (fine 2-line text + icon)
+    # so they clear threshold on smaller live windows; per-template thresholds apply.
+    hits = detect_lie_check(f, templates_folder=_LIE_DIR, template_filter=_FULL_TEMPLATES,
+                            work_width=1000)
     if _full_alert.update(bool(hits)) and hits:
         print(f"[lie-check] ⚠️ 需真人處理畫面 {[(n, round(s, 2)) for n, s in hits]} -- ALARM (F8 暫停)")
 
