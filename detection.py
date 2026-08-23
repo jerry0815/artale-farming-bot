@@ -245,26 +245,39 @@ LIE_CHECK_THRESHOLDS = {
     "monster_instr.png": 0.80,
 }
 
+# 每個模板佔畫面寬度的比例 (模板寬 / 來源截圖寬)。這些介面大小是相對於畫面的，
+# 所以在任何視窗大小下，介面寬度 = fraction * 該畫面寬度。用這個直接把模板縮到
+# 「這個畫面裡它應有的寬度」，比對就落在 scale≈1.0，掃描範圍可以很窄。
+# 沒列到的模板退回用 reference_width 估算 (見下)。要新增模板時，
+# capture_lie_template.py 會印出裁切區塊的 fraction 供填入。
+LIE_CHECK_FRACTIONS = {
+    "transparent_title.png": 0.1096,   # 295 / 2691
+    "curse_banner.png":      0.4361,   # 1170 / 2683
+    "curse_lock.png":        0.0596,   # 160 / 2683
+    "monster_instr.png":     0.2115,   # 605 / 2860
+}
+
 # 偵測人機驗證 / 詛咒等需要真人處理的畫面 (lie check)
 def detect_lie_check(game_img, templates_folder='assets/lie_check/', threshold=0.88,
                      work_width=700, reference_width=2750.0,
-                     scale_min=0.8, scale_max=1.3, scale_step=0.06,
-                     template_filter=None, thresholds=None, debug=False):
+                     scale_min=0.85, scale_max=1.2, scale_step=0.05,
+                     template_filter=None, thresholds=None, fractions=None, debug=False):
     """
     偵測「需要真人介入」的畫面 (人機驗證、詛咒符文警告等)。
 
     做法：把畫面縮到固定工作寬度 (work_width)，再對每個模板做多比例
     模板匹配。只要任一模板的最高分超過門檻，就視為偵測到。
 
-    關鍵：模板都是從「實際遊戲全螢幕截圖」(約 reference_width 寬) 裁下來的，
-    因此比對前會把每個模板依 work_width/reference_width 正規化，讓它在縮過的
-    畫面裡剛好是它應有的大小 (≈ scale 1.0)。這樣不論模板本身像素大小差多少
-    (整條橫幅 vs 小鎖頭)，都對齊到同一個比例，只需在 1.0 附近小幅掃描縮放
-    (scale_min..scale_max) 來吸收視窗大小/解析度的差異。
+    關鍵：這些介面大小是「相對於畫面」的 (UI 會隨視窗縮放)，所以在任何視窗大小下
+    介面寬度 = fraction * 該畫面寬度。比對前把每個模板縮到「這個畫面裡它應有的
+    寬度」(LIE_CHECK_FRACTIONS[name] * 工作畫面寬)，比對就落在 scale≈1.0，
+    只需在 1.0 附近小幅掃描 (scale_min..scale_max) 吸收 UI 縮放/DPI 的細微差異。
+    沒有列在 LIE_CHECK_FRACTIONS 的模板，退回用 work_width/reference_width 估算。
 
-    注意：正規化假設「畫面裡該介面所佔的比例」與模板來源截圖一致 (UI 會隨
-    視窗縮放，所以成立)。要新增/更新模板，請用實際遊戲全螢幕截圖裁切
-    (capture_lie_template.py)，不要用縮圖或局部放大的截圖。
+    注意：這樣只解決「大小」；分數上限仍受「模板來源的呈現方式」影響 (全螢幕裁的
+    模板拿去比視窗模式的實際畫面，會因反鋸齒/背景不同而掉到 ~0.85)，那是用
+    per-template 門檻 (LIE_CHECK_THRESHOLDS) 處理，不是靠縮放。要新增/更新模板，
+    請用實際遊戲截圖裁切 (capture_lie_template.py 會印出 fraction 供填入)。
 
     Args:
         game_img (np.array): 遊戲畫面影像 (BGR格式)。
@@ -275,6 +288,8 @@ def detect_lie_check(game_img, templates_folder='assets/lie_check/', threshold=0
         scale_min/scale_max/scale_step (float): 在 1.0 附近的縮放掃描範圍與步進。
         template_filter (list|None): 只比對這些檔名的模板 (None = 全部)。用來讓
             時間敏感的畫面 (透明圖形) 只跑單一便宜模板、快速偵測。
+        thresholds (dict|None): 每模板門檻 (basename -> 值)，None = LIE_CHECK_THRESHOLDS。
+        fractions (dict|None): 每模板佔畫面寬比例 (basename -> 值)，None = LIE_CHECK_FRACTIONS。
         debug (bool): 是否印出每個模板的最高分。
 
     Returns:
@@ -293,11 +308,11 @@ def detect_lie_check(game_img, templates_folder='assets/lie_check/', threshold=0
     search = game_img if f == 1.0 else cv2.resize(
         game_img, (int(img_w * f), int(img_h * f)), interpolation=cv2.INTER_AREA)
     sh, sw = search.shape[:2]
-    norm = sw / reference_width          # 模板正規化係數：來源寬 -> 目前工作寬
 
     n_steps = int(round((scale_max - scale_min) / scale_step)) + 1
     scales = [round(scale_min + i * scale_step, 4) for i in range(n_steps)]
     thr_map = thresholds if thresholds is not None else LIE_CHECK_THRESHOLDS
+    frac_map = fractions if fractions is not None else LIE_CHECK_FRACTIONS
 
     hits = []
     for template_path in template_paths:
@@ -308,10 +323,14 @@ def detect_lie_check(game_img, templates_folder='assets/lie_check/', threshold=0
         name = os.path.basename(template_path)
         thr = thr_map.get(name, threshold)      # 每模板門檻，沒列到就用全域 threshold
         h0, w0 = tpl.shape[:2]
-        # 正規化到工作畫面的比例 (讓它在縮過的畫面裡是應有大小，掃描以此為中心)
-        base = cv2.resize(tpl, (max(1, int(w0 * norm)), max(1, int(h0 * norm))),
-                          interpolation=cv2.INTER_AREA if norm < 1.0 else cv2.INTER_LINEAR)
-        base_h, base_w = base.shape[:2]
+        # 把模板縮到「這個畫面裡它應有的寬度」：有 fraction 就用 fraction*畫面寬，
+        # 沒有就退回 work_width/reference_width 估算。掃描以此為中心 (scale≈1.0)。
+        frac = frac_map.get(name)
+        base_w = int(frac * sw) if frac is not None else int(w0 * sw / reference_width)
+        base_w = max(1, base_w)
+        base_h = max(1, int(base_w * h0 / w0))
+        base = cv2.resize(tpl, (base_w, base_h),
+                          interpolation=cv2.INTER_AREA if base_w < w0 else cv2.INTER_LINEAR)
 
         best = -1.0
         for s in scales:

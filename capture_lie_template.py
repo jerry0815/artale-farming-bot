@@ -66,7 +66,12 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     out_path = os.path.join(OUT_DIR, name)
     cv2.imwrite(out_path, img[y:y + h, x:x + w])
+    frac = round(w / img.shape[1], 4)
     print(f"已儲存模板：{out_path}  ({w}x{h})")
+    print(f"畫面寬 {img.shape[1]}，裁切寬 {w} -> fraction {frac}")
+    print(f"請把這行加入 detection.py 的 LIE_CHECK_FRACTIONS：")
+    print(f'    "{name}": {frac},')
+    print("(可再到 LIE_CHECK_THRESHOLDS 依需要設定該模板門檻)")
 
 
 if __name__ == "__main__":
