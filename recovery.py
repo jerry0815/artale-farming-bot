@@ -1255,6 +1255,12 @@ if __name__ == "__main__":
                                             execute_fn=execute_edge))
         finally:
             kb.safe_release_all(); lis.stop()
+    elif cmd == "record-route":
+        mp = sys.argv[2] if len(sys.argv) > 2 else "map"
+        if not focus():
+            print("no focus"); sys.exit(1)
+        import record_route
+        record_route.record_live(mp)
     elif cmd == "record-climb":
         import json as _json
         if not focus():
@@ -1331,4 +1337,5 @@ if __name__ == "__main__":
         print("  run:   runnav          full production farming run (F8 to start/pause)")
         print("  test:  nav [secs]      bounded runnav (default 90s)")
         print("  nav debug: focus | where | hop GX LY [dismount] | portal | drop | gobottom | recover")
+        print("  route: record-route <map>   record a path -> routes/<map>.capture.jsonl")
         print("  other: farmbottom [s] | demo | break [s] | record-climb")

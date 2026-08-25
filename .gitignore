@@ -46,3 +46,6 @@ datasets/dragons/_pool/
 datasets/dragons/_done/
 datasets/dragons/_unlabeled/
 datasets/dragons/labels.cache
+
+# route recorder: raw captures are large & per-user (route.json is committable)
+routes/*.capture.jsonl
