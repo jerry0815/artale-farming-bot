@@ -145,6 +145,40 @@ def _build_actions(controller_ref):
             "make_recorder": make_recorder, "pause_toggle": pause_toggle, "stop": stop}
 
 
+def detect_frame(scale=1.0, thr=0.9, per=3, species=None, roi=None, max_w=900):
+    """Capture one game frame, run fish detection, and return
+    {ok, count, best, img(data-URI)} for the panel's detection preview. No focus steal."""
+    import base64
+    import cv2
+    import numpy as np
+    import fish
+    import recovery
+    f = recovery.capture()
+    if f is None:
+        return {"ok": False, "msg": "no frame (is the game window visible / not minimized?)"}
+    species = species or fish.WATER_FISH
+    tmpls = fish.load_templates(species=species, per_species=per, scale=scale)
+    sub = f if roi is None else f[roi[1]:roi[3], roi[0]:roi[2]]
+    best = {}
+    for name, t, m in tmpls:
+        if sub.shape[0] < t.shape[0] or sub.shape[1] < t.shape[1]:
+            continue
+        r = np.nan_to_num(cv2.matchTemplate(sub, t, cv2.TM_CCORR_NORMED, mask=m))
+        best[name] = round(max(best.get(name, 0), float(r.max())), 3)
+    dets = fish.detect_fish(f, tmpls, roi=roi, threshold=thr)
+    dbg = f.copy()
+    if roi:
+        cv2.rectangle(dbg, (roi[0], roi[1]), (roi[2], roi[3]), (0, 255, 255), 2)
+    for s, x, y, w, h in dets:
+        cv2.rectangle(dbg, (x, y), (x + w, y + h), (0, 0, 255), 2)
+        cv2.putText(dbg, f"{s:.2f}", (x, max(y - 3, 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+    sc = min(1.0, max_w / dbg.shape[1])
+    small = cv2.resize(dbg, None, fx=sc, fy=sc) if sc < 1.0 else dbg
+    ok, buf = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 70])
+    return {"ok": True, "count": len(dets), "best": best,
+            "img": "data:image/jpeg;base64," + base64.b64encode(buf).decode()}
+
+
 def list_maps(maps_dir="maps"):
     """Available water map configs: [{name, path}], sorted by name."""
     import os
@@ -197,6 +231,20 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      <button onclick="loadMaps()">↻</button>
    </div>
  </fieldset>
+ <fieldset><legend>Detection preview (fish)</legend>
+   <div class=row>
+     scale <input id=dscale value="1.0" style="width:56px">
+     thr <input id=dthr value="0.9" style="width:56px">
+     species <input id=dspecies value="bombing_fish_house,goby" style="width:200px">
+   </div>
+   <div class=row>
+     roi <input id=droi placeholder="x0,y0,x1,y1 (blank=full)" style="width:200px">
+     <button class=go onclick="snap()">📸 Snap</button>
+     <label><input type=checkbox id=dlive> live (2s)</label>
+   </div>
+   <div id=dstat style="font-family:ui-monospace,monospace;font-size:12px;margin:6px 0"></div>
+   <img id=detimg style="max-width:100%;border-radius:6px;display:none">
+ </fieldset>
  <fieldset><legend>Record route</legend>
    <div class=row>
      <input id=map placeholder="map name (e.g. blue_dragon)" value="blue_dragon">
@@ -225,6 +273,27 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    const j = await (await fetch('/cmd?'+q)).json();
    if(j.ok){ document.getElementById('node').value=''; } else alert(j.msg);
  }
+ let snapping=false;
+ async function snap(){
+   if(snapping) return; snapping=true;
+   const q = new URLSearchParams({scale:dscale.value, thr:dthr.value, species:dspecies.value});
+   if(droi.value.trim()) q.set('roi', droi.value.trim());
+   document.getElementById('dstat').textContent='snapping…';
+   try{
+     const j = await (await fetch('/detect?'+q)).json();
+     if(!j.ok){ document.getElementById('dstat').textContent='error: '+j.msg; }
+     else{
+       document.getElementById('dstat').textContent =
+         `count: ${j.count}   best: ${Object.entries(j.best).map(([k,v])=>k+'='+v).join('  ')}`;
+       const im=document.getElementById('detimg'); im.src=j.img; im.style.display='block';
+     }
+   }catch(e){ document.getElementById('dstat').textContent='error: '+e; }
+   snapping=false;
+ }
+ async function snapLoop(){
+   if(document.getElementById('dlive').checked) await snap();
+   setTimeout(snapLoop, 2000);
+ }
  async function loadMaps(){
    const maps = await (await fetch('/maps')).json();
    const sel = document.getElementById('mapsel');
@@ -248,7 +317,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    }catch(e){}
    setTimeout(poll, 500);
  }
- loadMaps(); poll();
+ loadMaps(); poll(); snapLoop();
 </script></body></html>"""
 
 
@@ -271,6 +340,19 @@ def make_handler(controller):
                 return self._send(200, json.dumps(_status_dict(controller)))
             if parsed.path == "/maps":
                 return self._send(200, json.dumps(list_maps()))
+            if parsed.path == "/detect":
+                scale = float(q.get("scale", ["1.0"])[0])
+                thr = float(q.get("thr", ["0.9"])[0])
+                per = int(q.get("per", ["3"])[0])
+                sp = q.get("species", [None])[0]
+                species = sp.split(",") if sp else None
+                roi_s = q.get("roi", [None])[0]
+                roi = tuple(int(v) for v in roi_s.split(",")) if roi_s else None
+                try:
+                    return self._send(200, json.dumps(
+                        detect_frame(scale, thr, per, species, roi)))
+                except Exception as e:
+                    return self._send(200, json.dumps({"ok": False, "msg": str(e)}))
             if parsed.path == "/cmd":
                 action = q.get("action", [""])[0]
                 ok, msg = self._dispatch(action, q)
