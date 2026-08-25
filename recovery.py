@@ -1301,13 +1301,15 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         _templates, _mode = _fish.templates_for(map_cfg)
         _roi = tuple(map_cfg["count_roi"]) if map_cfg.get("count_roi") else None
         _thr = map_cfg.get("fish_threshold") or _fish.default_threshold(_mode)
+        _ds = map_cfg.get("match_downscale", 0.5)
 
         def one_count(node):
             f = capture()
-            c = None if f is None else _fish.count_fish(f, _templates, roi=_roi, threshold=_thr)
+            c = None if f is None else _fish.count_fish(f, _templates, roi=_roi,
+                                                        threshold=_thr, downscale=_ds)
             STATUS["count"] = c
             return c
-        print(f"[water] deplete-check: {_mode} templates x{len(_templates)} thr={_thr}")
+        print(f"[water] deplete-check: {_mode} templates x{len(_templates)} thr={_thr} ds={_ds}")
     elif detector == "time":
         print("[water] deplete-check: time-based rotation (rotate every beat)")
     else:                            # yolo (default)
@@ -1680,36 +1682,23 @@ if __name__ == "__main__":
         if f is None:
             print("no frame"); sys.exit(1)
 
-        def best_scores(tmpls, roi):
-            sub = f if roi is None else f[roi[1]:roi[3], roi[0]:roi[2]]
-            b = {}
-            for name, t, m in tmpls:
-                if sub.shape[0] < t.shape[0] or sub.shape[1] < t.shape[1]:
-                    continue
-                if m is None:
-                    r = cv2.matchTemplate(sub, t, cv2.TM_CCOEFF_NORMED)
-                else:
-                    r = cv2.matchTemplate(sub, t, cv2.TM_CCORR_NORMED, mask=m)
-                b[name] = round(max(b.get(name, 0), float(np.nan_to_num(r).max())), 3)
-            return b
-
+        ds = cfg.get("match_downscale", 0.5)
         if sweep:
-            print(f"[fishcount] SWEEP mode={mode} roi={roi} thr={thr}")
+            print(f"[fishcount] SWEEP mode={mode} roi={roi} thr={thr} ds={ds}")
             for s in (0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.4):
                 tmpls, _ = _fish.templates_for(cfg, scale=s)
-                b = best_scores(tmpls, roi)
-                n = _fish.count_fish(f, tmpls, roi=roi, threshold=thr)
-                print(f"  scale {s}: best={b}  count@{thr}={n}")
+                r = _fish.scan(f, tmpls, roi=roi, threshold=thr, downscale=ds)
+                print(f"  scale {s}: best={r['best']}  count@{thr}={len(r['dets'])}")
             cv2.imwrite("fishcount_debug.png", f if roi is None else
                         cv2.rectangle(f.copy(), (roi[0], roi[1]), (roi[2], roi[3]), (0, 255, 255), 2))
             print("[fishcount] wrote fishcount_debug.png (yellow=roi). Pick the scale with high"
                   " best-scores on fish and count matching what you see.")
         else:
             tmpls, _ = _fish.templates_for(cfg, scale=scale)
-            b = best_scores(tmpls, roi)
-            dets = _fish.detect_fish(f, tmpls, roi=roi, threshold=thr)
+            r = _fish.scan(f, tmpls, roi=roi, threshold=thr, downscale=ds)
+            b, dets = r["best"], r["dets"]
             print(f"[fishcount] mode={mode} scale={scale or cfg.get('fish_scale', 1.0)} "
-                  f"thr={thr} roi={roi} templates={len(tmpls)}")
+                  f"thr={thr} ds={ds} roi={roi} templates={len(tmpls)}")
             print(f"[fishcount] best score by species: {b}")
             print(f"[fishcount] COUNT = {len(dets)}")
             dbg = f.copy()

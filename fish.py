@@ -113,35 +113,62 @@ def load_live_templates(dirpath, scale=1.0):
     return out
 
 
-def _match_one(frame_bgr, tmpl, mask, threshold):
-    if frame_bgr.shape[0] < tmpl.shape[0] or frame_bgr.shape[1] < tmpl.shape[1]:
-        return []
-    if mask is None:                              # live crop -> CCOEFF (brightness-robust)
+def _match_res(frame_bgr, tmpl, mask):
+    """Normalized match map: CCOEFF for live crops (mask None), masked CCORR for sprites."""
+    if mask is None:
         res = cv2.matchTemplate(frame_bgr, tmpl, cv2.TM_CCOEFF_NORMED)
-    else:                                         # green-sprite -> masked CCORR
+    else:
         res = cv2.matchTemplate(frame_bgr, tmpl, cv2.TM_CCORR_NORMED, mask=mask)
-    res = np.nan_to_num(res, nan=0.0, posinf=0.0, neginf=0.0)
-    ys, xs = np.where(res >= threshold)
-    h, w = tmpl.shape[:2]
-    return [(float(res[y, x]), int(x), int(y), w, h) for y, x in zip(ys, xs)]
+    return np.nan_to_num(res, nan=0.0, posinf=0.0, neginf=0.0)
 
 
-def detect_fish(frame_bgr, templates, roi=None, threshold=0.9, iou_thr=0.4):
-    """NMS-deduped detections as [(score, x, y, w, h)] in FULL-frame coords (the roi
-    offset is added back), so callers can draw them."""
-    sub = frame_bgr
-    ox, oy = 0, 0
+def _downscaled(frame_bgr, roi, templates, downscale):
+    if not downscale or downscale == 1.0:
+        return frame_bgr, roi, templates
+    frame_bgr = cv2.resize(frame_bgr, None, fx=downscale, fy=downscale, interpolation=cv2.INTER_AREA)
+    if roi is not None:
+        roi = tuple(int(round(v * downscale)) for v in roi)
+    templates = [(n,
+                  cv2.resize(t, None, fx=downscale, fy=downscale, interpolation=cv2.INTER_AREA),
+                  None if m is None else
+                  cv2.resize(m, None, fx=downscale, fy=downscale, interpolation=cv2.INTER_NEAREST))
+                 for n, t, m in templates]
+    return frame_bgr, roi, templates
+
+
+def scan(frame_bgr, templates, roi=None, threshold=0.9, iou_thr=0.4, downscale=1.0):
+    """One (optionally downscaled) matching pass. Returns
+    {'best': {name: max_score}, 'dets': [(score, x, y, w, h)]} in FULL-frame coords.
+    `best` is per-name max even below threshold (for tuning); `dets` is NMS-deduped."""
+    frame_bgr, roi, templates = _downscaled(frame_bgr, roi, templates, downscale)
+    sub, ox, oy = frame_bgr, 0, 0
     if roi is not None:
         x0, y0, x1, y1 = roi
-        sub = frame_bgr[y0:y1, x0:x1]
-        ox, oy = x0, y0
-    dets = []
-    for _name, tmpl, mask in templates:
-        dets += _match_one(sub, tmpl, mask, threshold)
-    return [(s, x + ox, y + oy, w, h) for (s, x, y, w, h) in nms(dets, iou_thr)]
+        sub, ox, oy = frame_bgr[y0:y1, x0:x1], x0, y0
+    best, raw = {}, []
+    for name, tmpl, mask in templates:
+        if sub.shape[0] < tmpl.shape[0] or sub.shape[1] < tmpl.shape[1]:
+            continue
+        res = _match_res(sub, tmpl, mask)
+        best[name] = round(max(best.get(name, 0.0), float(res.max())), 3)
+        h, w = tmpl.shape[:2]
+        ys, xs = np.where(res >= threshold)
+        raw += [(float(res[y, x]), int(x) + ox, int(y) + oy, w, h) for y, x in zip(ys, xs)]
+    kept = nms(raw, iou_thr)
+    if downscale and downscale != 1.0:
+        inv = 1.0 / downscale
+        kept = [(s, int(x * inv), int(y * inv), int(w * inv), int(h * inv))
+                for (s, x, y, w, h) in kept]
+    return {"best": best, "dets": kept}
 
 
-def count_fish(frame_bgr, templates, roi=None, threshold=0.9, iou_thr=0.4):
+def detect_fish(frame_bgr, templates, roi=None, threshold=0.9, iou_thr=0.4, downscale=1.0):
+    """NMS-deduped detections [(score, x, y, w, h)] in FULL-frame coords. `downscale`
+    (<1) shrinks frame + templates before matching for speed, boxes scaled back."""
+    return scan(frame_bgr, templates, roi, threshold, iou_thr, downscale)["dets"]
+
+
+def count_fish(frame_bgr, templates, roi=None, threshold=0.9, iou_thr=0.4, downscale=1.0):
     """Count distinct fish in `frame_bgr` (BGR). `roi`=(x0,y0,x1,y1) limits the search
     (screen coords). Returns the number of NMS-deduped matches at/above `threshold`."""
-    return len(detect_fish(frame_bgr, templates, roi, threshold, iou_thr))
+    return len(detect_fish(frame_bgr, templates, roi, threshold, iou_thr, downscale))

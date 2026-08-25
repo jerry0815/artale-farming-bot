@@ -168,17 +168,9 @@ def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, ro
         thr = cfg.get("fish_threshold") or fish.default_threshold(mode)
     if roi is None and cfg.get("count_roi"):
         roi = tuple(cfg["count_roi"])
-    sub = f if roi is None else f[roi[1]:roi[3], roi[0]:roi[2]]
-    best = {}
-    for name, t, m in tmpls:
-        if sub.shape[0] < t.shape[0] or sub.shape[1] < t.shape[1]:
-            continue
-        if m is None:
-            r = cv2.matchTemplate(sub, t, cv2.TM_CCOEFF_NORMED)
-        else:
-            r = cv2.matchTemplate(sub, t, cv2.TM_CCORR_NORMED, mask=m)
-        best[name] = round(max(best.get(name, 0), float(np.nan_to_num(r).max())), 3)
-    dets = fish.detect_fish(f, tmpls, roi=roi, threshold=thr)
+    ds = cfg.get("match_downscale", 0.5)
+    result = fish.scan(f, tmpls, roi=roi, threshold=thr, downscale=ds)
+    best, dets = result["best"], result["dets"]
     dbg = f.copy()
     if roi:
         cv2.rectangle(dbg, (roi[0], roi[1]), (roi[2], roi[3]), (0, 255, 255), 2)
