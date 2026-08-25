@@ -992,16 +992,16 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None):
 
 
 def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
-                check_every=0.5, debounce=2):
-    """Park at a platform center and fire 'c' for a beat; if knocked off, swim back.
-    With `count_fn` (fast single-frame YOLO count), returns DEPLETED as soon as
+                check_every=0.5, debounce=2, attack_key='c'):
+    """Park at a platform center and hold the attack key for a beat; if knocked off, swim
+    back. With `count_fn` (fast single-frame YOLO count), returns DEPLETED as soon as
     `debounce` consecutive reads fall below `threshold`. Returns True otherwise / False
     if paused out."""
     cx, cy = center
     swim_to(cx, cy, tol=tol, cap=6.0)
     _face_right(0.04)
     t0, nextc, low = time.time(), time.time() + check_every, 0
-    kb.safe_press('c')                                    # HOLD attack (continuous)
+    kb.safe_press(attack_key)                             # HOLD attack (continuous)
     try:
         while time.time() - t0 < seconds:
             if kb.pause:
@@ -1009,9 +1009,9 @@ def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
             lie_check_fast_tick()
             x, y = get_character_full()
             if x >= 0 and (abs(x - cx) > tol[0] + 8 or abs(y - cy) > tol[1] + 8):
-                kb.safe_release('c')                      # drifted off -> swim back, resume
+                kb.safe_release(attack_key)               # drifted off -> swim back, resume
                 swim_to(cx, cy, tol=tol, cap=4.0)
-                _face_right(0.04); kb.safe_press('c')
+                _face_right(0.04); kb.safe_press(attack_key)
             if count_fn is not None and time.time() >= nextc:
                 nextc = time.time() + check_every
                 low, rotate = _reactive_deplete(low, count_fn(), threshold, debounce)
@@ -1020,11 +1020,11 @@ def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
             time.sleep(0.1)
         return True
     finally:
-        kb.safe_release('c')
+        kb.safe_release(attack_key)
 
 
 def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
-                   attack_range=110, band=70, step=0.14):
+                   attack_range=110, band=70, step=0.14, attack_key='c'):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1049,7 +1049,7 @@ def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
             p = _player.find_player(f, cfg=player_cfg)
             mobs = _fish.scan(f, templates, roi=roi, threshold=thr, downscale=ds)["dets"]
             if p is None:                                 # anchor lost -> brief blind attack
-                kb.safe_press('c'); time.sleep(0.3); kb.safe_release('c'); continue
+                kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key); continue
             px, pfeet = p
             same = [(mx + mw // 2, my + mh) for (s, mx, my, mw, mh) in mobs
                     if abs((my + mh) - pfeet) <= band]
@@ -1065,13 +1065,13 @@ def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
             key = Key.right if dx >= 0 else Key.left
             if abs(dx) <= attack_range:                   # in range: face + fire
                 kb.safe_press(key); time.sleep(0.03); kb.safe_release(key)
-                kb.safe_press('c'); time.sleep(0.45); kb.safe_release('c')
+                kb.safe_press(attack_key); time.sleep(0.45); kb.safe_release(attack_key)
             else:                                         # step toward it, attacking
-                kb.safe_press(key); kb.safe_press('c'); time.sleep(step)
-                kb.safe_release('c'); kb.safe_release(key)
+                kb.safe_press(key); kb.safe_press(attack_key); time.sleep(step)
+                kb.safe_release(attack_key); kb.safe_release(key)
         return True
     finally:
-        kb.safe_release('c')
+        kb.safe_release(attack_key)
         kb.safe_release(Key.left); kb.safe_release(Key.right)
 
 
@@ -1383,6 +1383,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     # Close-range approach: walk to the nearest same-platform mob and attack (needs the
     # player HP-bar anchor + mob detection). When on, it replaces fixed-fire per beat and
     # reports its own depletion (no mob left on the platform).
+    attack_key = map_cfg.get("attack_key", "c")
     approach = bool(map_cfg.get("approach", False))
     if approach:
         import fish as _fish
@@ -1453,7 +1454,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 return False
             if approach:
                 ok = approach_shoot(_r.uniform(*stand_secs), _atempls, _aroi, _athr, _ads,
-                                    _pcfg, attack_range=_arange, band=_aband, step=_astep)
+                                    _pcfg, attack_range=_arange, band=_aband, step=_astep,
+                                    attack_key=attack_key)
                 heal_skill()
                 if ok is False:
                     return False
@@ -1462,7 +1464,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 continue
             ok = water_shoot((cx, cy), _r.uniform(*stand_secs),
                              count_fn=(lambda: one_count(node)) if poll_in_shoot else None,
-                             threshold=deplete_threshold, tol=tol)
+                             threshold=deplete_threshold, tol=tol, attack_key=attack_key)
             heal_skill()
             if ok is False:
                 return False
