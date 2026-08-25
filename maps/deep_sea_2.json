@@ -14,6 +14,11 @@
   "fish_per_species": 3,
   "match_downscale": 0.5,
   "count_roi": null,
+  "approach": true,
+  "attack_range": 110,
+  "same_platform_band": 70,
+  "approach_step": 0.14,
+  "player": {"foot_offset": 135},
   "sweep_note": "farm_nodes are the sweep order BOTTOM->TOP. P3/P4 are stacked and read the same y136; list them consecutively (P3 then P4) -- the bot tracks which by sequence, not by sensing. RIGHT is the rightmost drop waypoint: after the top the bot swims there then down to farm_nodes[0]. Mark all of these during record-route.",
   "nodes": [],
   "farm_nodes": []

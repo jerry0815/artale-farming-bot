@@ -1023,6 +1023,58 @@ def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
         kb.safe_release('c')
 
 
+def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
+                   attack_range=110, band=70, step=0.14):
+    """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
+    the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
+    (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
+    when no mob is on the platform, True after the beat, False if paused.
+
+    Screen-space: mob x and player x come from the same frame, so 'which way to walk' is
+    just their x difference. `band` = how close a mob's feet must be to the player's feet
+    (in px) to count as the same platform."""
+    import fish as _fish
+    import player as _player
+    t0 = time.time()
+    saw_mob = False
+    empty_reads = 0
+    try:
+        while time.time() - t0 < seconds:
+            if kb.pause:
+                return False
+            lie_check_fast_tick()
+            f = capture()
+            if f is None:
+                time.sleep(0.1); continue
+            p = _player.find_player(f, cfg=player_cfg)
+            mobs = _fish.scan(f, templates, roi=roi, threshold=thr, downscale=ds)["dets"]
+            if p is None:                                 # anchor lost -> brief blind attack
+                kb.safe_press('c'); time.sleep(0.3); kb.safe_release('c'); continue
+            px, pfeet = p
+            same = [(mx + mw // 2, my + mh) for (s, mx, my, mw, mh) in mobs
+                    if abs((my + mh) - pfeet) <= band]
+            if not same:
+                empty_reads += 1
+                if saw_mob or empty_reads >= 2:           # cleared, or nothing here -> advance
+                    return DEPLETED
+                time.sleep(0.1); continue
+            saw_mob = True
+            empty_reads = 0
+            tx, _tfy = min(same, key=lambda m: abs(m[0] - px))
+            dx = tx - px
+            key = Key.right if dx >= 0 else Key.left
+            if abs(dx) <= attack_range:                   # in range: face + fire
+                kb.safe_press(key); time.sleep(0.03); kb.safe_release(key)
+                kb.safe_press('c'); time.sleep(0.45); kb.safe_release('c')
+            else:                                         # step toward it, attacking
+                kb.safe_press(key); kb.safe_press('c'); time.sleep(step)
+                kb.safe_release('c'); kb.safe_release(key)
+        return True
+    finally:
+        kb.safe_release('c')
+        kb.safe_release(Key.left); kb.safe_release(Key.right)
+
+
 # Per-node farming context for the state machine (home/far x, the y that counts as
 # a fall off THIS platform, the resting y, and the right-edge safety x).
 FARM_CTX = {
@@ -1328,6 +1380,23 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 return c
         print(f"[water] deplete-check: {'YOLO' if one_count else 'none -> time rotation'}")
 
+    # Close-range approach: walk to the nearest same-platform mob and attack (needs the
+    # player HP-bar anchor + mob detection). When on, it replaces fixed-fire per beat and
+    # reports its own depletion (no mob left on the platform).
+    approach = bool(map_cfg.get("approach", False))
+    if approach:
+        import fish as _fish
+        _atempls, _amode = _fish.templates_for(map_cfg)
+        _aroi = tuple(map_cfg["count_roi"]) if map_cfg.get("count_roi") else None
+        _athr = map_cfg.get("fish_threshold") or _fish.default_threshold(_amode)
+        _ads = map_cfg.get("match_downscale", 0.5)
+        _pcfg = map_cfg.get("player")
+        _arange = int(map_cfg.get("attack_range", 110))
+        _aband = int(map_cfg.get("same_platform_band", 70))
+        _astep = float(map_cfg.get("approach_step", 0.14))
+        print(f"[water] approach ON: range={_arange} band={_aband} "
+              f"{_amode} templates x{len(_atempls)} thr={_athr}")
+
     next_skill = [time.time()]
 
     def heal_skill():
@@ -1382,6 +1451,15 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         for _ in range(max(1, beats_per_node)):
             if kb.pause or STOP.is_set():
                 return False
+            if approach:
+                ok = approach_shoot(_r.uniform(*stand_secs), _atempls, _aroi, _athr, _ads,
+                                    _pcfg, attack_range=_arange, band=_aband, step=_astep)
+                heal_skill()
+                if ok is False:
+                    return False
+                if ok is DEPLETED:
+                    break                                # platform clear -> advance
+                continue
             ok = water_shoot((cx, cy), _r.uniform(*stand_secs),
                              count_fn=(lambda: one_count(node)) if poll_in_shoot else None,
                              threshold=deplete_threshold, tol=tol)
