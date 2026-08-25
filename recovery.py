@@ -28,6 +28,7 @@ import random
 import threading
 import keyboard as kb   # safe_press/release/release_all + F8 pause listener
 import navmap
+import watermap
 
 # --- recovery map constants (calibrated 2026-08-09, full-minimap frame) ---
 ROPE_X = 91              # rope minimap x (climbs to farming platform)
@@ -942,6 +943,86 @@ def execute_edge(edge):
     return replay_macro(edge)
 
 
+# --- water-world navigation (free 2D swim; no scroll-pin) -------------------------
+# For water maps the character dot reads true (x,y), so navigation is just "hold the
+# arrow keys toward the target minimap coordinate until you arrive". These reuse the
+# pure decisions in watermap.py; only the key presses + screen reads live here.
+_ARROW = {"up": Key.up, "down": Key.down, "left": Key.left, "right": Key.right}
+
+
+def set_minimap(x, y, w, h):
+    """Override the full-minimap crop (per-map). Water maps have a taller minimap than
+    the dragon nest's default (MM_X,MM_Y,MM_W,MM_H = 20,171,229,259)."""
+    global MM_X, MM_Y, MM_W, MM_H
+    MM_X, MM_Y, MM_W, MM_H = x, y, w, h
+
+
+def _apply_swim_keys(want):
+    """Hold exactly the arrow keys in `want`; release the rest."""
+    for name, key in _ARROW.items():
+        if name in want:
+            kb.safe_press(key)
+        else:
+            kb.safe_release(key)
+
+
+def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None):
+    """Swim toward (target_x, target_y) holding arrow keys, until within `tol` on both
+    axes or `cap` seconds. Returns True on arrival. F8 (kb.pause) aborts. `locate`
+    (default get_character_full) is injectable for tests."""
+    locate = locate or get_character_full
+    t0 = time.time()
+    try:
+        while time.time() - t0 < cap:
+            if kb.pause:
+                return False
+            lie_check_fast_tick()
+            x, y = locate()
+            if x is None or x < 0:
+                time.sleep(0.04); continue
+            want = watermap.swim_keys((x, y), (target_x, target_y), tol)
+            if not want:
+                return True
+            _apply_swim_keys(want)
+            time.sleep(0.06)
+        return False
+    finally:
+        for key in _ARROW.values():
+            kb.safe_release(key)
+
+
+def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
+                check_every=0.5, debounce=2):
+    """Park at a platform center and fire 'c' for a beat; if knocked off, swim back.
+    With `count_fn` (fast single-frame YOLO count), returns DEPLETED as soon as
+    `debounce` consecutive reads fall below `threshold`. Returns True otherwise / False
+    if paused out."""
+    cx, cy = center
+    swim_to(cx, cy, tol=tol, cap=6.0)
+    _face_right(0.04)
+    t0, nextc, low = time.time(), time.time() + check_every, 0
+    kb.safe_press('c')                                    # HOLD attack (continuous)
+    try:
+        while time.time() - t0 < seconds:
+            if kb.pause:
+                return False
+            lie_check_fast_tick()
+            x, y = get_character_full()
+            if x >= 0 and (abs(x - cx) > tol[0] + 8 or abs(y - cy) > tol[1] + 8):
+                kb.safe_release('c')                      # drifted off -> swim back, resume
+                swim_to(cx, cy, tol=tol, cap=4.0)
+                _face_right(0.04); kb.safe_press('c')
+            if count_fn is not None and time.time() >= nextc:
+                nextc = time.time() + check_every
+                low, rotate = _reactive_deplete(low, count_fn(), threshold, debounce)
+                if rotate:
+                    return DEPLETED
+            time.sleep(0.1)
+        return True
+    finally:
+        kb.safe_release('c')
+
+
 # Per-node farming context for the state machine (home/far x, the y that counts as
 # a fall off THIS platform, the resting y, and the right-edge safety x).
 FARM_CTX = {
@@ -1188,6 +1269,112 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
             farm_state = navmap.WALK_SHOOT if farm_state == navmap.STAND_SHOOT else navmap.STAND_SHOOT
 
 
+def farming_loop_water(map_cfg, enemy_check=None, panic=None,
+                       stand_secs=(6, 8), break_every=(8 * 60, 15 * 60),
+                       rest_range=(30, 120), skill_interval=(240, 300),
+                       deplete_threshold=1, max_seconds=None):
+    """Water-map farming: swim between platform centers, fire in place, rotate when a
+    platform runs dry. Reuses lie-check, YOLO dragon counting, breaks, skills, panic,
+    STATUS/STOP. `map_cfg` is a maps/<name>.json path or a loaded config dict."""
+    import random as _r
+    import monsters
+    if isinstance(map_cfg, str):
+        map_cfg = watermap.load_map(map_cfg)
+    set_minimap(*watermap.minimap_crop(map_cfg))
+    centers = watermap.node_centers(map_cfg)
+    farm_nodes = map_cfg.get("farm_nodes") or list(centers)
+    if not farm_nodes:
+        print("[water] no farm nodes in map config"); return
+    tol = watermap.swim_tol(map_cfg)
+    if not focus():
+        print("[water] could not focus"); return
+    STOP.clear(); STATUS["state"] = "farming"
+    print(f"[water] {map_cfg.get('name', '?')}: {len(centers)} nodes, order {farm_nodes}")
+
+    model = monsters.load_dragon_model()
+    reactive = model is not None
+    if reactive:
+        _f0 = capture()
+        if _f0 is not None:
+            monsters.detect_dragons_yolo(_f0, model, monsters.DEFAULT_MOTION_ROI)
+    print(f"[water] deplete-check: {'YOLO' if reactive else 'motion fallback'}")
+
+    def one_count(node):
+        roi = monsters.MOTION_ROI_BY_NODE.get(node, monsters.DEFAULT_MOTION_ROI)
+        f = capture()
+        c = None if f is None else len(monsters.detect_dragons_yolo(f, model, roi))
+        STATUS["count"] = c
+        return c
+
+    next_skill = [time.time()]
+
+    def heal_skill():
+        if time.time() < next_skill[0]:
+            return
+        next_skill[0] = time.time() + _r.uniform(*skill_interval)
+        kb.safe_press('a'); time.sleep(0.4); kb.safe_release('a')
+        kb.safe_press('j'); time.sleep(0.4); kb.safe_release('j')
+
+    current = farm_nodes[0]
+    t_start = time.time()
+    next_break = time.time() + _r.uniform(*break_every)
+
+    while True:
+        if STOP.is_set():
+            kb.safe_release_all(); STATUS["state"] = "idle"; print("[water] STOP"); return
+        if max_seconds is not None and time.time() - t_start > max_seconds:
+            kb.safe_release_all(); STATUS["state"] = "idle"; print("[water] max_seconds"); return
+        if kb.pause:
+            kb.safe_release_all(); lie_check_silence()
+            STATUS["state"] = "paused"; STATUS["lie"] = False; time.sleep(0.1); continue
+        STATUS["state"] = "farming"
+        lie_check_tick(); STATUS["lie"] = is_lie_check_active()
+
+        x, y = stable_char(3)
+        if x < 0:
+            time.sleep(0.2); continue
+        STATUS["node"] = watermap.nearest_node((x, y), centers)
+
+        if enemy_check and enemy_check():
+            print("[water] another player -> panic")
+            if panic: panic()
+            time.sleep(1); continue
+
+        if time.time() >= next_break:
+            print("[water] break -> swim to base platform and idle")
+            swim_to(*centers[farm_nodes[0]], tol=tol, cap=10.0)
+            end = time.time() + _r.uniform(*rest_range)
+            while time.time() < end and not kb.pause and not STOP.is_set():
+                lie_check_fast_tick(); time.sleep(0.5)
+            next_break = time.time() + _r.uniform(*break_every)
+            current = farm_nodes[0]; continue
+
+        cx, cy = centers[current]
+        if not watermap.arrived((x, y), (cx, cy), tol):
+            swim_to(cx, cy, tol=tol, cap=10.0)
+        ok = water_shoot(centers[current], _r.uniform(*stand_secs),
+                         count_fn=(lambda: one_count(current)) if reactive else None,
+                         threshold=deplete_threshold, tol=tol)
+        if ok is False:
+            continue
+        heal_skill()
+
+        if ok is DEPLETED:
+            depleted = True
+        elif reactive:
+            n = one_count(current)
+            depleted = n is not None and n < deplete_threshold
+        else:
+            kb.safe_release_all()
+            n = monsters.count_dragons_best(capture, current)
+            STATUS["count"] = n
+            depleted = n < deplete_threshold
+
+        if depleted:
+            current = watermap.next_farm(current, farm_nodes)
+            print(f"[water] depleted -> rotate to {current}")
+
+
 def break_cycle(idle_seconds=30):
     """Full human-like break: down-jump off the left of the farming platform to the
     safe fallen platform (away from dragons), idle there, then recover back up.
@@ -1281,6 +1468,11 @@ if __name__ == "__main__":
             print(f"[nav] loaded recorded route: {_rp} "
                   f"({len(navmap.NODES)} nodes, {len(navmap.EDGES)} edges)")
         del sys.argv[_ri:_ri + 2]                 # strip so positional args (e.g. secs) still parse
+    _map_path = None                              # `--map maps/<name>.json` for water maps
+    if "--map" in sys.argv:
+        _mi = sys.argv.index("--map")
+        _map_path = sys.argv[_mi + 1] if _mi + 1 < len(sys.argv) else None
+        del sys.argv[_mi:_mi + 2]
     if cmd == "focus":
         print("focused:", focus())
     elif cmd == "recover":
@@ -1384,10 +1576,30 @@ if __name__ == "__main__":
             farming_loop_nav(break_every=(9999, 9999), stand_secs=(4, 8), max_seconds=secs)
         finally:
             kb.safe_release_all(); lis.stop()
+    elif cmd == "waternav":
+        # Water-map farming. Requires --map maps/<name>.json. Optional secs (bounded test).
+        if not _map_path:
+            print("usage: python recovery.py waternav [secs] --map maps/<name>.json"); sys.exit(1)
+        secs = int(sys.argv[2]) if len(sys.argv) > 2 else None
+        def _enemy_check(): return len(get_enemy()) > 0
+        def _panic():
+            kb.safe_release_all()
+            print("[safety] trigger -> releasing keys and PAUSING. F8 to resume.")
+            kb.pause = True
+        lis = Listener(on_press=kb.on_press); lis.start()
+        if secs is None:
+            kb.pause = True
+            print("WATER RUN (waternav) ready. Switch to the game and press F8 to start / pause.")
+        try:
+            farming_loop_water(_map_path, enemy_check=_enemy_check, panic=_panic,
+                               max_seconds=secs)
+        finally:
+            kb.safe_release_all(); lis.stop()
     else:
         print("usage: python recovery.py <cmd>")
         print("  run:   runnav          full production farming run (F8 to start/pause)")
         print("  test:  nav [secs]      bounded runnav (default 90s)")
         print("  nav debug: focus | where | hop GX LY [dismount] | portal | drop | gobottom | recover")
         print("  route: record-route <map>   record a path -> routes/<map>.capture.jsonl")
+        print("  water: waternav [secs] --map maps/<name>.json   water-map farming (F8 start/pause)")
         print("  other: farmbottom [s] | demo | break [s] | record-climb")
