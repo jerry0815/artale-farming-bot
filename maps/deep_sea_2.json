@@ -1,14 +1,25 @@
 {
   "name": "deep_sea_2",
-  "note": "水世界 / 深海峽谷2 (Water World, Deep Sea Canyon 2). Swimming map: direct dot sensing, no scroll-pin. minimap crop measured from video (dot spans full-frame x~47-185, y~247-543); TUNE h if lower platforms clip. nodes/farm_nodes are placeholders -- regenerate from a recording (see docs/superpowers/plans/2026-08-25-water-map-workflow.md). detector 'fish' template-matches bombing_fish_house/goby/bone_fish; TUNE fish_scale/fish_threshold/count_roi with `python recovery.py fishcount --map maps/deep_sea_2.json`, or set detector 'time' for pure timed rotation.",
-  "minimap": {"x": 20, "y": 171, "w": 210, "h": 400},
-  "swim": {"tol_x": 3, "tol_y": 3},
+  "note": "\u6c34\u4e16\u754c / \u6df1\u6d77\u5cfd\u8c372 (Water World, Deep Sea Canyon 2). Swimming map: direct dot sensing, no scroll-pin. minimap crop measured from video (dot spans full-frame x~47-185, y~247-543); TUNE h if lower platforms clip. nodes/farm_nodes are placeholders -- regenerate from a recording (see docs/superpowers/plans/2026-08-25-water-map-workflow.md). detector 'fish' template-matches bombing_fish_house/goby/bone_fish; TUNE fish_scale/fish_threshold/count_roi with `python recovery.py fishcount --map maps/deep_sea_2.json`, or set detector 'time' for pure timed rotation.",
+  "minimap": {
+    "x": 20,
+    "y": 171,
+    "w": 210,
+    "h": 400
+  },
+  "swim": {
+    "tol_x": 3,
+    "tol_y": 3
+  },
   "rotation": "sweep",
   "reset_node": "RIGHT",
   "beats_per_node": 3,
   "detector": "fish",
   "mob_template_dir": "assets/mob/deep_sea_2",
-  "fish_species": ["bombing_fish_house", "goby"],
+  "fish_species": [
+    "bombing_fish_house",
+    "goby"
+  ],
   "fish_scale": 1.0,
   "fish_threshold": 0.6,
   "fish_per_species": 3,
@@ -19,8 +30,115 @@
   "attack_range": 110,
   "same_platform_band": 70,
   "approach_step": 0.14,
-  "player": {"foot_offset": 135},
+  "player": {
+    "foot_offset": 135
+  },
   "sweep_note": "farm_nodes are the sweep order BOTTOM->TOP. P3/P4 are stacked and read the same y136; list them consecutively (P3 then P4) -- the bot tracks which by sequence, not by sensing. RIGHT is the rightmost drop waypoint: after the top the bot swims there then down to farm_nodes[0]. Mark all of these during record-route.",
-  "nodes": [],
-  "farm_nodes": []
+  "nodes": [
+    {
+      "name": "P6",
+      "band": [
+        213,
+        217,
+        113,
+        117
+      ]
+    },
+    {
+      "name": "P5",
+      "band": [
+        169,
+        173,
+        93,
+        97
+      ]
+    },
+    {
+      "name": "P4",
+      "band": [
+        134,
+        138,
+        67,
+        71
+      ]
+    },
+    {
+      "name": "P3",
+      "band": [
+        134,
+        138,
+        85,
+        89
+      ]
+    },
+    {
+      "name": "P2",
+      "band": [
+        102,
+        106,
+        139,
+        143
+      ]
+    },
+    {
+      "name": "P1",
+      "band": [
+        85,
+        89,
+        71,
+        75
+      ]
+    }
+  ],
+  "farm_nodes": [
+    "P6",
+    "P5",
+    "P4",
+    "P3",
+    "P2",
+    "P1"
+  ],
+  "map": "deep_sea_2",
+  "edges": [
+    {
+      "src": "P6",
+      "dst": "P5",
+      "kind": "walk",
+      "params": {
+        "target_x": 95
+      }
+    },
+    {
+      "src": "P5",
+      "dst": "P4",
+      "kind": "walk",
+      "params": {
+        "target_x": 75
+      }
+    },
+    {
+      "src": "P4",
+      "dst": "P3",
+      "kind": "walk",
+      "params": {
+        "target_x": 87
+      }
+    },
+    {
+      "src": "P3",
+      "dst": "P2",
+      "kind": "walk",
+      "params": {
+        "target_x": 141
+      }
+    },
+    {
+      "src": "P2",
+      "dst": "P1",
+      "kind": "walk",
+      "params": {
+        "target_x": 73
+      }
+    }
+  ]
 }
