@@ -1,0 +1,8 @@
+{
+  "name": "deep_sea_2",
+  "note": "水世界 / 深海峽谷2 (Water World, Deep Sea Canyon 2). Swimming map: direct dot sensing, no scroll-pin. minimap crop measured from video (dot spans full-frame x~47-185, y~247-543); TUNE h if lower platforms clip. nodes/farm_nodes are placeholders -- regenerate from a recording (see docs/superpowers/plans/2026-08-25-water-map-workflow.md).",
+  "minimap": {"x": 20, "y": 171, "w": 210, "h": 400},
+  "swim": {"tol_x": 3, "tol_y": 3},
+  "nodes": [],
+  "farm_nodes": []
+}
