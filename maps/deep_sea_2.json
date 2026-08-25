@@ -15,6 +15,7 @@
   "match_downscale": 0.5,
   "count_roi": null,
   "approach": true,
+  "attack_key": "x",
   "attack_range": 110,
   "same_platform_band": 70,
   "approach_step": 0.14,
