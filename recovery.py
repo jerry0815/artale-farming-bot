@@ -1338,61 +1338,100 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         kb.safe_press('a'); time.sleep(0.4); kb.safe_release('a')
         kb.safe_press('j'); time.sleep(0.4); kb.safe_release('j')
 
-    current = farm_nodes[0]
+    # rotation: 'sweep' = farm the list in order (bottom->top) then reset via reset_node;
+    # 'cyclic' (default) = farm current until depleted, advance to the next (wrapping).
+    rotation = map_cfg.get("rotation", "cyclic")
+    reset_node = map_cfg.get("reset_node")
+    beats_per_node = int(map_cfg.get("beats_per_node", 3))
     t_start = time.time()
-    next_break = time.time() + _r.uniform(*break_every)
+    next_break = [time.time() + _r.uniform(*break_every)]
 
-    while True:
+    def guard():
+        """Per-tick housekeeping. Returns 'stop' (return now), 'pause'/'skip'
+        (continue the outer loop), or 'ok'."""
         if STOP.is_set():
-            kb.safe_release_all(); STATUS["state"] = "idle"; print("[water] STOP"); return
+            kb.safe_release_all(); STATUS["state"] = "idle"; print("[water] STOP"); return "stop"
         if max_seconds is not None and time.time() - t_start > max_seconds:
-            kb.safe_release_all(); STATUS["state"] = "idle"; print("[water] max_seconds"); return
+            kb.safe_release_all(); STATUS["state"] = "idle"; print("[water] max_seconds"); return "stop"
         if kb.pause:
             kb.safe_release_all(); lie_check_silence()
-            STATUS["state"] = "paused"; STATUS["lie"] = False; time.sleep(0.1); continue
+            STATUS["state"] = "paused"; STATUS["lie"] = False; time.sleep(0.1); return "pause"
         STATUS["state"] = "farming"
         lie_check_tick(); STATUS["lie"] = is_lie_check_active()
-
-        x, y = stable_char(3)
-        if x < 0:
-            time.sleep(0.2); continue
-        STATUS["node"] = watermap.nearest_node((x, y), centers)
-
         if enemy_check and enemy_check():
             print("[water] another player -> panic")
             if panic: panic()
-            time.sleep(1); continue
+            time.sleep(1); return "skip"
+        return "ok"
 
-        if time.time() >= next_break:
-            print("[water] break -> swim to base platform and idle")
-            swim_to(*centers[farm_nodes[0]], tol=tol, cap=10.0)
-            end = time.time() + _r.uniform(*rest_range)
-            while time.time() < end and not kb.pause and not STOP.is_set():
-                lie_check_fast_tick(); time.sleep(0.5)
-            next_break = time.time() + _r.uniform(*break_every)
-            current = farm_nodes[0]; continue
+    def take_break_if_due():
+        if time.time() < next_break[0]:
+            return
+        print("[water] break -> swim to base and idle")
+        swim_to(*centers[farm_nodes[0]], tol=tol, cap=12.0)
+        end = time.time() + _r.uniform(*rest_range)
+        while time.time() < end and not kb.pause and not STOP.is_set():
+            lie_check_fast_tick(); time.sleep(0.5)
+        next_break[0] = time.time() + _r.uniform(*break_every)
 
-        cx, cy = centers[current]
-        if not watermap.arrived((x, y), (cx, cy), tol):
-            swim_to(cx, cy, tol=tol, cap=10.0)
-        ok = water_shoot(centers[current], _r.uniform(*stand_secs),
-                         count_fn=(lambda: one_count(current)) if poll_in_shoot else None,
-                         threshold=deplete_threshold, tol=tol)
-        if ok is False:
-            continue
-        heal_skill()
+    def farm_node(node):
+        """Swim to `node` (by intent -- P3/P4 are tracked by sequence, never sensed) and
+        farm up to beats_per_node beats or until depleted. False if paused/stopped."""
+        cx, cy = centers[node]
+        STATUS["node"] = node
+        swim_to(cx, cy, tol=tol, cap=12.0)
+        for _ in range(max(1, beats_per_node)):
+            if kb.pause or STOP.is_set():
+                return False
+            ok = water_shoot((cx, cy), _r.uniform(*stand_secs),
+                             count_fn=(lambda: one_count(node)) if poll_in_shoot else None,
+                             threshold=deplete_threshold, tol=tol)
+            heal_skill()
+            if ok is False:
+                return False
+            if ok is DEPLETED:
+                break
+            if one_count is not None:
+                n = one_count(node)
+                if n is not None and n < deplete_threshold:
+                    break
+            elif detector == "time":
+                break                                    # time mode: one beat then advance
+        return True
 
-        if ok is DEPLETED:
-            depleted = True
-        elif one_count is not None:
-            n = one_count(current)
-            depleted = n is not None and n < deplete_threshold
-        else:
-            depleted = True                              # time-based: rotate every beat
-
-        if depleted:
-            current = watermap.next_farm(current, farm_nodes)
-            print(f"[water] depleted -> rotate to {current}")
+    if rotation == "sweep":
+        print(f"[water] sweep {farm_nodes} then reset via {reset_node or '(bottom)'}")
+        while True:
+            g = guard()
+            if g == "stop":
+                return
+            if g != "ok":
+                continue
+            broke = False
+            for node in farm_nodes:                      # bottom -> top, in listed order
+                if guard() != "ok":
+                    broke = True; break
+                take_break_if_due()
+                if not farm_node(node):
+                    broke = True; break
+            if broke:
+                continue
+            # reached the top -> reset: swim to the rightmost drop point, then down to bottom
+            if reset_node and reset_node in centers:
+                STATUS["node"] = reset_node
+                swim_to(*centers[reset_node], tol=tol, cap=12.0)
+            swim_to(*centers[farm_nodes[0]], tol=tol, cap=15.0)   # let her drop back to bottom
+    else:
+        current = farm_nodes[0]
+        while True:
+            g = guard()
+            if g == "stop":
+                return
+            if g != "ok":
+                continue
+            take_break_if_due()
+            if farm_node(current):
+                current = watermap.next_farm(current, farm_nodes)
 
 
 def break_cycle(idle_seconds=30):

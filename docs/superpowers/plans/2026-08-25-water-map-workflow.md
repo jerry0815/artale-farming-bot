@@ -60,6 +60,33 @@ Full run (F8 to start/pause):
 python recovery.py waternav --map maps/deep_sea_2.json
 ```
 
+## Sweep mode + the stacked P3/P4 pair (deep_sea_2)
+
+deep_sea_2 has 6 platforms, mostly vertical. Two of them (P3, P4) are **stacked** and the
+scrolling minimap reads both at the same y≈136 — the minimap can't tell them apart. The
+loop sidesteps this by **never sensing which is which**: it runs a one-way **sweep** and
+tracks the intended platform by sequence.
+
+Config keys (in `maps/deep_sea_2.json`):
+- `"rotation": "sweep"` — farm `farm_nodes` in listed order (BOTTOM→TOP), then reset.
+- `farm_nodes` — the sweep order, e.g. `["P6","P5","P4","P3","P2","P1"]` (bottom→top).
+  List the stacked pair **consecutively** (whichever order you swim them). Because the bot
+  arrives by intent, it knows it's on P3 then P4 without reading the minimap; it separates
+  them by their distinct x.
+- `"reset_node": "RIGHT"` — a rightmost open-water waypoint. After the top platform the bot
+  swims here, then straight down to `farm_nodes[0]` (the natural drop back to the bottom).
+- `"beats_per_node": 3` — shooting beats per platform before advancing (or fewer if the
+  detector reports it empty).
+
+**Recording for sweep:** mark all 6 platforms **plus** the `RIGHT` waypoint (stand at the
+rightmost point you drop from and F9 → name it `RIGHT`). Then:
+```bash
+python build_route.py routes/deep_sea_2.capture.jsonl maps/deep_sea_2.json deep_sea_2 P6,P5,P4,P3,P2,P1 --minimap 20,171,210,400 --swim 3,3
+```
+(The farm_nodes CSV = the sweep order; `RIGHT` stays a node but is referenced via
+`reset_node`, not the farm list.) Re-add `rotation`/`reset_node`/`beats_per_node`/`detector`
+to the file if the rebuild overwrites them, or edit the generated file to include them.
+
 ## Fish detection (depletion rotation)
 
 The dragon YOLO model doesn't know these fish, so the water loop can count them by

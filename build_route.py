@@ -11,6 +11,7 @@ Capture records (JSONL, one dict per line):
 Minimap convention: y DECREASES going up (climbing a rope lowers y).
 """
 import json
+import os
 
 
 def split_records(records):
@@ -156,8 +157,18 @@ def main():
     cap, out, mp = argv[0], argv[1], argv[2]
     farm = argv[3].split(",") if len(argv) > 3 else []
     route = build_route(load_capture(cap), mp, farm_nodes=farm, minimap=minimap, swim=swim)
+    merged = False
+    if os.path.exists(out):                       # preserve hand-set keys (rotation, detector, ...)
+        try:
+            with open(out, encoding="utf-8") as fh:
+                existing = json.load(fh)
+            existing.update(route)                # overwrite only the (re)generated keys
+            route = existing
+            merged = True
+        except (ValueError, OSError):
+            pass
     write_route(route, out)
-    tag = " (water map config)" if minimap else ""
+    tag = " (merged into existing config)" if merged else (" (water map config)" if minimap else "")
     print(f"[build_route] {len(route['nodes'])} nodes, {len(route['edges'])} edges -> {out}{tag}")
 
 

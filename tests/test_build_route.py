@@ -125,3 +125,29 @@ def test_build_route_uses_exact_mark_position_when_present():
     assert route["nodes"][0]["band"] == [198, 202, 58, 62]     # centered on (60,200), margin 2
     import watermap
     assert watermap.node_centers(route)["P_BOT"] == (60, 200)
+
+
+def test_build_route_main_merges_into_existing_config(tmp_path):
+    import json, sys, build_route
+    cap = tmp_path / "c.jsonl"
+    cap.write_text('{"t":0.0,"mark":"NODE","name":"P1","x":60,"y":88}\n'
+                   '{"t":0.1,"mark":"NODE","name":"P2","x":140,"y":105}\n')
+    out = tmp_path / "m.json"
+    # pre-existing config with hand-set keys that must survive a rebuild
+    out.write_text(json.dumps({"rotation": "sweep", "reset_node": "RIGHT",
+                               "detector": "fish", "nodes": [], "farm_nodes": []}))
+    argv = ["build_route.py", str(cap), str(out), "deep_sea_2", "P1,P2",
+            "--minimap", "20,171,210,400"]
+    old = sys.argv
+    try:
+        sys.argv = argv
+        build_route.main()
+    finally:
+        sys.argv = old
+    cfg = json.loads(out.read_text())
+    assert cfg["rotation"] == "sweep"          # preserved
+    assert cfg["reset_node"] == "RIGHT"        # preserved
+    assert cfg["detector"] == "fish"           # preserved
+    assert cfg["farm_nodes"] == ["P1", "P2"]   # regenerated
+    assert [n["name"] for n in cfg["nodes"]] == ["P1", "P2"]
+    assert cfg["minimap"] == {"x": 20, "y": 171, "w": 210, "h": 400}
