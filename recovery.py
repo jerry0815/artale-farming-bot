@@ -1229,6 +1229,16 @@ def recover_to_farming(max_rounds=8):   # extra rounds: a dragon can hit her mid
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "help"
+    # Optional recorded route: `--route routes/<map>.route.json` loads the recorded
+    # node-graph (falls back to the hand-tuned graph when omitted).
+    if "--route" in sys.argv:
+        _ri = sys.argv.index("--route")
+        _rp = sys.argv[_ri + 1] if _ri + 1 < len(sys.argv) else None
+        if _rp:
+            navmap.load_route(_rp)
+            print(f"[nav] loaded recorded route: {_rp} "
+                  f"({len(navmap.NODES)} nodes, {len(navmap.EDGES)} edges)")
+        del sys.argv[_ri:_ri + 2]                 # strip so positional args (e.g. secs) still parse
     if cmd == "focus":
         print("focused:", focus())
     elif cmd == "recover":
