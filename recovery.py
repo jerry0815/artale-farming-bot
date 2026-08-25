@@ -870,12 +870,47 @@ EDGE_ACTIONS = {
     ("LOWER_R", "TOP_FARM"):     lambda: _lower_r_to_top(),
 }
 
+def walk_edge(edge):
+    """Recorded WALK edge: walk to the destination's home x."""
+    return bool(walk_to_x(edge["target_x"]))
+
+
+def downjump_edge(edge):
+    """Recorded DOWNJUMP edge: (optionally walk to target_x, then) jump in the
+    recorded direction and verify she landed on the destination node."""
+    tx = edge.get("target_x")
+    if tx is not None:
+        walk_to_x(tx)
+    key = Key.left if edge.get("dismount") == "left" else Key.right
+    kb.safe_press(key); kb.safe_press(JUMP); time.sleep(0.12)
+    kb.safe_release(JUMP); time.sleep(0.2); kb.safe_release(key)
+    time.sleep(0.3)
+    x, y = stable_char(3)
+    return navmap.classify_node(x, y) == edge["dst"]
+
+
+def replay_macro(edge):
+    """Fallback for an edge we can't type-dispatch and have no composite for."""
+    print(f"[nav] no typed executor for {edge['src']}->{edge['dst']} (kind={edge.get('kind')})")
+    return False
+
+
 def execute_edge(edge):
-    fn = EDGE_ACTIONS.get((edge["src"], edge["dst"]))
-    if fn is None:
-        print(f"[nav] no executor for {edge['src']}->{edge['dst']}")
-        return False
-    return bool(fn())
+    """Dispatch an edge to its executor. Recorded edges carry a `kind` (+ flattened
+    params from navmap.load_route); the hand-tuned graph's edges have no `kind` and
+    fall through to the built-in EDGE_ACTIONS composites (recovery chains)."""
+    kind = edge.get("kind")
+    if kind == "rope" and "grab_x" in edge:
+        return bool(climb_rope_hop(edge["grab_x"], edge["land_y"],
+                                   dismount=edge.get("dismount"), land_node=edge["dst"]))
+    if kind == "walk" and "target_x" in edge:
+        return walk_edge(edge)
+    if kind == "downjump":
+        return downjump_edge(edge)
+    fn = EDGE_ACTIONS.get((edge["src"], edge["dst"]))   # hand-built composites
+    if fn is not None:
+        return bool(fn())
+    return replay_macro(edge)
 
 
 # Per-node farming context for the state machine (home/far x, the y that counts as
