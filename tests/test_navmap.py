@@ -138,3 +138,25 @@ def test_rotation_decision_end_to_end():
     # and travel between the two farm nodes is always planttable
     assert navmap.plan("TOP_FARM", "BOTTOM_FARM") is not None
     assert navmap.plan("BOTTOM_FARM", "TOP_FARM") is not None
+
+
+def test_load_route_replaces_graph_then_reset_restores():
+    default_nodes = list(navmap.NODES)
+    route = {
+        "map": "t", "farm_nodes": ["A"],
+        "nodes": [{"name": "A", "band": [0, 10, 0, 10]},
+                  {"name": "B", "band": [20, 30, 0, 10]}],
+        "edges": [{"src": "A", "dst": "B", "kind": "walk", "params": {"target_x": 5}}],
+    }
+    try:
+        navmap.load_route(route)
+        assert navmap.NODES == ["A", "B"]
+        assert navmap.FARM_NODES == ["A"]
+        assert navmap.classify_node(5, 5) == "A"
+        assert navmap.classify_node(5, 25) == "B"
+        e = navmap.EDGES[0]
+        assert e["src"] == "A" and e["dst"] == "B" and e["kind"] == "walk" and e["target_x"] == 5
+        assert navmap.plan("A", "B") == [navmap.EDGES[0]]
+    finally:
+        navmap.reset_route()
+    assert navmap.NODES == default_nodes

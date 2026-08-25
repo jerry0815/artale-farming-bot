@@ -68,6 +68,43 @@ EDGES = [
     {"src": "LOWER_LEDGE",  "dst": "TOP_FARM",    "kind": "rope",     "rope": "R_C"},
 ]
 
+import json as _json
+
+# Built-in defaults (the hand-tuned graph) so load_route is reversible.
+_DEFAULT_NODES = list(NODES)
+_DEFAULT_FARM_NODES = list(FARM_NODES)
+_DEFAULT_BANDS = list(_BANDS)
+_DEFAULT_EDGES = [dict(e) for e in EDGES]
+
+
+def load_route(route_or_path):
+    """Replace the module graph from a route dict or a route.json path.
+
+    Backward compatible: if this is never called, the hand-tuned defaults above
+    stay in force. Edge params (grab_x, land_y, dismount, target_x, ...) are
+    flattened onto each EDGES entry so recovery.execute_edge can read them, and
+    the `kind` key is preserved for the data-driven dispatch."""
+    global NODES, FARM_NODES, _BANDS, EDGES
+    route = route_or_path
+    if isinstance(route_or_path, str):
+        with open(route_or_path, encoding="utf-8") as fh:
+            route = _json.load(fh)
+    NODES = [n["name"] for n in route["nodes"]]
+    FARM_NODES = list(route.get("farm_nodes", []))
+    _BANDS = [(n["name"], *n["band"]) for n in route["nodes"]]
+    EDGES = [dict(src=e["src"], dst=e["dst"], kind=e.get("kind", "walk"),
+                  **e.get("params", {})) for e in route["edges"]]
+
+
+def reset_route():
+    """Restore the built-in hand-tuned graph."""
+    global NODES, FARM_NODES, _BANDS, EDGES
+    NODES = list(_DEFAULT_NODES)
+    FARM_NODES = list(_DEFAULT_FARM_NODES)
+    _BANDS = list(_DEFAULT_BANDS)
+    EDGES = [dict(e) for e in _DEFAULT_EDGES]
+
+
 def neighbors(node):
     return [e for e in EDGES if e["src"] == node]
 
