@@ -60,6 +60,30 @@ Full run (F8 to start/pause):
 python recovery.py waternav --map maps/deep_sea_2.json
 ```
 
+## Fish detection (depletion rotation)
+
+The dragon YOLO model doesn't know these fish, so the water loop can count them by
+**template-matching** the sprite set (`bombing_fish_house`, `goby`, `bone_fish` under
+`MapleStoryAutoLevelUp/monster`). Config keys (in `maps/deep_sea_2.json`):
+
+- `detector`: `"fish"` (template match), `"yolo"` (only if the fish match the model), or
+  `"time"` (rotate every beat, no detection — the reliable fallback).
+- `fish_scale`: resize sprites toward on-screen size (start 1.0).
+- `fish_threshold`: match score cutoff (TM_CCORR_NORMED; start 0.9).
+- `fish_per_species`: templates per species (speed vs recall; start 3).
+- `count_roi`: `[x0,y0,x1,y1]` screen region to search (null = whole frame; set a band
+  around the platforms for speed + fewer false positives).
+
+**Tune it live** on a populated platform:
+```bash
+python recovery.py fishcount --map maps/deep_sea_2.json
+```
+It prints the count + best match score per species and writes `fishcount_debug.png`
+(yellow=ROI, red=matches). Adjust `fish_scale`/`fish_threshold`/`count_roi` until the
+count matches what you see. On the sample video frame the best scores were only
+~0.75–0.88, so **template matching here is marginal** — if you can't get clean counts,
+set `"detector": "time"` and rotate on `stand_secs` instead.
+
 ## Notes / knobs
 
 - Attack key is `c` (held); buffs `a`/`j`; heal `h` — same as the land loop.

@@ -1291,20 +1291,43 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     STOP.clear(); STATUS["state"] = "farming"
     print(f"[water] {map_cfg.get('name', '?')}: {len(centers)} nodes, order {farm_nodes}")
 
-    model = monsters.load_dragon_model()
-    reactive = model is not None
-    if reactive:
-        _f0 = capture()
-        if _f0 is not None:
-            monsters.detect_dragons_yolo(_f0, model, monsters.DEFAULT_MOTION_ROI)
-    print(f"[water] deplete-check: {'YOLO' if reactive else 'motion fallback'}")
+    # Depletion detector: 'fish' (template-match the water sprites, end-of-beat),
+    # 'yolo' (dragon model; only if the fish match it), or 'time' (rotate every beat).
+    detector = map_cfg.get("detector", "yolo")
+    poll_in_shoot = False           # only YOLO is fast enough to poll WHILE shooting
+    one_count = None
+    if detector == "fish":
+        import fish as _fish
+        _templates = _fish.load_templates(species=map_cfg.get("fish_species", _fish.WATER_FISH),
+                                          per_species=map_cfg.get("fish_per_species", 3),
+                                          scale=map_cfg.get("fish_scale", 1.0))
+        _roi = tuple(map_cfg["count_roi"]) if map_cfg.get("count_roi") else None
+        _thr = map_cfg.get("fish_threshold", 0.9)
 
-    def one_count(node):
-        roi = monsters.MOTION_ROI_BY_NODE.get(node, monsters.DEFAULT_MOTION_ROI)
-        f = capture()
-        c = None if f is None else len(monsters.detect_dragons_yolo(f, model, roi))
-        STATUS["count"] = c
-        return c
+        def one_count(node):
+            f = capture()
+            c = None if f is None else _fish.count_fish(f, _templates, roi=_roi, threshold=_thr)
+            STATUS["count"] = c
+            return c
+        print(f"[water] deplete-check: fish templates x{len(_templates)} "
+              f"thr={_thr} scale={map_cfg.get('fish_scale', 1.0)}")
+    elif detector == "time":
+        print("[water] deplete-check: time-based rotation (rotate every beat)")
+    else:                            # yolo (default)
+        model = monsters.load_dragon_model()
+        if model is not None:
+            _f0 = capture()
+            if _f0 is not None:
+                monsters.detect_dragons_yolo(_f0, model, monsters.DEFAULT_MOTION_ROI)
+            poll_in_shoot = True
+
+            def one_count(node):
+                roi = monsters.MOTION_ROI_BY_NODE.get(node, monsters.DEFAULT_MOTION_ROI)
+                f = capture()
+                c = None if f is None else len(monsters.detect_dragons_yolo(f, model, roi))
+                STATUS["count"] = c
+                return c
+        print(f"[water] deplete-check: {'YOLO' if one_count else 'none -> time rotation'}")
 
     next_skill = [time.time()]
 
@@ -1353,7 +1376,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         if not watermap.arrived((x, y), (cx, cy), tol):
             swim_to(cx, cy, tol=tol, cap=10.0)
         ok = water_shoot(centers[current], _r.uniform(*stand_secs),
-                         count_fn=(lambda: one_count(current)) if reactive else None,
+                         count_fn=(lambda: one_count(current)) if poll_in_shoot else None,
                          threshold=deplete_threshold, tol=tol)
         if ok is False:
             continue
@@ -1361,14 +1384,11 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
 
         if ok is DEPLETED:
             depleted = True
-        elif reactive:
+        elif one_count is not None:
             n = one_count(current)
             depleted = n is not None and n < deplete_threshold
         else:
-            kb.safe_release_all()
-            n = monsters.count_dragons_best(capture, current)
-            STATUS["count"] = n
-            depleted = n < deplete_threshold
+            depleted = True                              # time-based: rotate every beat
 
         if depleted:
             current = watermap.next_farm(current, farm_nodes)
@@ -1583,6 +1603,43 @@ if __name__ == "__main__":
             farming_loop_nav(break_every=(9999, 9999), stand_secs=(4, 8), max_seconds=secs)
         finally:
             kb.safe_release_all(); lis.stop()
+    elif cmd == "fishcount":
+        # Live tuning: capture one frame, count fish at the map's scale/threshold/roi,
+        # print best scores, and save an annotated debug image.
+        import fish as _fish
+        cfg = watermap.load_map(_map_path) if _map_path else {}
+        if _map_path and cfg.get("minimap"):
+            set_minimap(*watermap.minimap_crop(cfg))
+        scale = float(cfg.get("fish_scale", 1.0))
+        thr = float(cfg.get("fish_threshold", 0.9))
+        roi = tuple(cfg["count_roi"]) if cfg.get("count_roi") else None
+        per = cfg.get("fish_per_species", 3)
+        if not focus():
+            print("no focus"); sys.exit(1)
+        time.sleep(0.4)
+        f = capture()
+        if f is None:
+            print("no frame"); sys.exit(1)
+        tmpls = _fish.load_templates(per_species=per, scale=scale)
+        sub = f if roi is None else f[roi[1]:roi[3], roi[0]:roi[2]]
+        best = {}
+        for name, t, m in tmpls:
+            if sub.shape[0] < t.shape[0] or sub.shape[1] < t.shape[1]:
+                continue
+            r = np.nan_to_num(cv2.matchTemplate(sub, t, cv2.TM_CCORR_NORMED, mask=m))
+            best[name] = round(max(best.get(name, 0), float(r.max())), 3)
+        dets = _fish.detect_fish(f, tmpls, roi=roi, threshold=thr)
+        print(f"[fishcount] scale={scale} thr={thr} roi={roi} templates={len(tmpls)}")
+        print(f"[fishcount] best score by species: {best}")
+        print(f"[fishcount] COUNT = {len(dets)}")
+        dbg = f.copy()
+        if roi:
+            cv2.rectangle(dbg, (roi[0], roi[1]), (roi[2], roi[3]), (0, 255, 255), 2)
+        for s, x, y, w, h in dets:
+            cv2.rectangle(dbg, (x, y), (x + w, y + h), (0, 0, 255), 2)
+            cv2.putText(dbg, f"{s:.2f}", (x, y - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        cv2.imwrite("fishcount_debug.png", dbg)
+        print("[fishcount] wrote fishcount_debug.png (yellow=roi, red=matches)")
     elif cmd == "waternav":
         # Water-map farming. Requires --map maps/<name>.json. Optional secs (bounded test).
         if not _map_path:
@@ -1609,4 +1666,5 @@ if __name__ == "__main__":
         print("  nav debug: focus | where | hop GX LY [dismount] | portal | drop | gobottom | recover")
         print("  route: record-route <map>   record a path -> routes/<map>.capture.jsonl")
         print("  water: waternav [secs] --map maps/<name>.json   water-map farming (F8 start/pause)")
+        print("  water: fishcount --map maps/<name>.json          tune fish detection on a live frame")
         print("  other: farmbottom [s] | demo | break [s] | record-climb")
