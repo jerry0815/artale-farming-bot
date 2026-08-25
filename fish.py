@@ -56,6 +56,24 @@ def load_templates(species=WATER_FISH, base=DEFAULT_MONSTER_DIR, per_species=Non
     return out
 
 
+def templates_for(cfg, scale=None):
+    """Pick the template set for a map config: LIVE crops from cfg['mob_template_dir']
+    if that dir has PNGs (matched with CCOEFF), else the green KenYu sprites (masked
+    CCORR). Returns (templates, mode) where mode is 'live' or 'sprite'."""
+    scale = cfg.get("fish_scale", 1.0) if scale is None else scale
+    d = cfg.get("mob_template_dir")
+    if d and glob.glob(os.path.join(d, "*.png")):
+        return load_live_templates(d, scale=scale), "live"
+    return (load_templates(species=cfg.get("fish_species", WATER_FISH),
+                           per_species=cfg.get("fish_per_species", 3), scale=scale),
+            "sprite")
+
+
+def default_threshold(mode):
+    """A sane starting match threshold per template mode."""
+    return 0.6 if mode == "live" else 0.9
+
+
 def iou(a, b):
     """IoU of two (x, y, w, h) boxes."""
     ax, ay, aw, ah = a
@@ -78,10 +96,30 @@ def nms(dets, iou_thr=0.4):
     return kept
 
 
+def load_live_templates(dirpath, scale=1.0):
+    """Load LIVE mob crops (tight screenshots from this game, no green screen) as
+    [(name, bgr, None)]. mask=None signals CCOEFF matching in _match_one -- far more
+    robust than green-sprite CCORR. Name is the filename minus a trailing _<n>."""
+    import re
+    out = []
+    for f in sorted(glob.glob(os.path.join(dirpath, "*.png"))):
+        im = cv2.imread(f, cv2.IMREAD_COLOR)      # BGR, drop any alpha
+        if im is None:
+            continue
+        if scale != 1.0:
+            im = cv2.resize(im, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        name = re.sub(r"_\d+$", "", os.path.splitext(os.path.basename(f))[0])
+        out.append((name, im, None))
+    return out
+
+
 def _match_one(frame_bgr, tmpl, mask, threshold):
     if frame_bgr.shape[0] < tmpl.shape[0] or frame_bgr.shape[1] < tmpl.shape[1]:
         return []
-    res = cv2.matchTemplate(frame_bgr, tmpl, cv2.TM_CCORR_NORMED, mask=mask)
+    if mask is None:                              # live crop -> CCOEFF (brightness-robust)
+        res = cv2.matchTemplate(frame_bgr, tmpl, cv2.TM_CCOEFF_NORMED)
+    else:                                         # green-sprite -> masked CCORR
+        res = cv2.matchTemplate(frame_bgr, tmpl, cv2.TM_CCORR_NORMED, mask=mask)
     res = np.nan_to_num(res, nan=0.0, posinf=0.0, neginf=0.0)
     ys, xs = np.where(res >= threshold)
     h, w = tmpl.shape[:2]

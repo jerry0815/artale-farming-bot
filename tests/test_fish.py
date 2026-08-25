@@ -62,3 +62,34 @@ def test_count_fish_respects_roi():
     assert fish.count_fish(frame, templates, roi=(80, 0, 200, 120), threshold=0.95) == 0
     # ROI includes it -> one
     assert fish.count_fish(frame, templates, roi=(0, 0, 80, 120), threshold=0.95) == 1
+
+
+def test_load_live_templates_and_ccoeff_match(tmp_path):
+    # A live crop = tight BGR image, no green screen, mask None -> CCOEFF matching.
+    import os
+    d = tmp_path / "mob" / "deep_sea_2"
+    d.mkdir(parents=True)
+    tmpl = np.full((20, 24, 3), 60, np.uint8)
+    tmpl[4:16, 4:20] = (40, 40, 220)                 # distinctive red core
+    cv2.imwrite(str(d / "fishhouse_1.png"), tmpl)
+    cv2.imwrite(str(d / "fishhouse_2.png"), tmpl)
+    tmpls = fish.load_live_templates(str(d))
+    assert len(tmpls) == 2
+    assert all(m is None for _n, _t, m in tmpls)     # no mask -> CCOEFF path
+    assert tmpls[0][0] == "fishhouse"                # trailing _N stripped
+
+    frame = np.full((120, 200, 3), 60, np.uint8)
+    for (px, py) in [(30, 30), (120, 70)]:
+        frame[py + 4:py + 16, px + 4:px + 20] = (40, 40, 220)
+    assert fish.count_fish(frame, tmpls, threshold=0.7) == 2
+
+
+def test_templates_for_prefers_live(tmp_path):
+    d = tmp_path / "mob"
+    d.mkdir()
+    cv2.imwrite(str(d / "goby_1.png"), np.full((10, 10, 3), 50, np.uint8))
+    tl, mode = fish.templates_for({"mob_template_dir": str(d)})
+    assert mode == "live" and len(tl) == 1
+    tl2, mode2 = fish.templates_for({"fish_species": ["goby"], "fish_per_species": 1})
+    assert mode2 == "sprite"
+    assert fish.default_threshold("live") < fish.default_threshold("sprite")
