@@ -25,6 +25,7 @@ from exp_processor import ExpProcessor
 import pyautogui
 from pynput.keyboard import Key, Listener
 import random
+import threading
 import keyboard as kb   # safe_press/release/release_all + F8 pause listener
 import navmap
 
@@ -193,6 +194,34 @@ def lie_check_silence():
     """Stop both alarms (e.g. when the bot pauses -- a human is present)."""
     _fast_alert.update(False)
     _full_alert.update(False)
+
+
+def is_lie_check_active():
+    """True while either lie-check alarm is sounding (a human is needed)."""
+    return bool(_fast_alert.alarm.active or _full_alert.alarm.active)
+
+
+# --- shared status + cooperative stop, for the control UI (panel.py) --------------
+# STATUS is a plain dict updated in-place by the loops; the UI polls it. STOP is a
+# cooperative stop the UI sets to end a background-thread run (F8 pause still works).
+STATUS = {"state": "idle", "node": None, "count": None, "lie": False}
+STOP = threading.Event()
+
+
+def watch_loop(sleep=time.sleep):
+    """Passive 'quick easy loop': run the lie-check ticks (no movement) until STOP is
+    set, keeping STATUS['lie'] current. The zero-risk always-on human-check monitor."""
+    STOP.clear()
+    STATUS["state"] = "watching"
+    try:
+        while not STOP.is_set():
+            lie_check_tick()
+            STATUS["lie"] = is_lie_check_active()
+            sleep(0.5)
+    finally:
+        lie_check_silence()
+        STATUS["lie"] = False
+        STATUS["state"] = "idle"
 
 
 # --- game-logic safety, ported faithfully from the notebook (screen reads, no keys) ---
@@ -1017,6 +1046,8 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
     next_skill = [time.time()]                    # cast skills from the first stint (as in split)
     current = "TOP_FARM"
     farm_state = navmap.STAND_SHOOT
+    STOP.clear()
+    STATUS["state"] = "farming"
 
     # Reactive deplete-check: with a YOLO model loaded we poll a fast single-frame
     # count WHILE shooting and rotate the instant the platform runs dry. Without a
@@ -1032,7 +1063,9 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
     def one_count(nd):
         roi = monsters.MOTION_ROI_BY_NODE.get(nd, monsters.DEFAULT_MOTION_ROI)
         f = capture()
-        return None if f is None else len(monsters.detect_dragons_yolo(f, model, roi))
+        c = None if f is None else len(monsters.detect_dragons_yolo(f, model, roi))
+        STATUS["count"] = c
+        return c
 
     def heal_skill():
         # Throttled to skill_interval (240-300s): the timed BUFFS A and J only. 'H' is
@@ -1051,14 +1084,22 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
         return navmap.travel(dst, locate_fn=_nav_locate, execute_fn=execute_edge)
 
     while True:
+        if STOP.is_set():
+            kb.safe_release_all(); STATUS["state"] = "idle"
+            print("[nav] STOP -> stop"); return
         if max_seconds is not None and time.time() - t_start > max_seconds:
-            kb.safe_release_all(); print("[nav] max_seconds -> stop"); return
+            kb.safe_release_all(); STATUS["state"] = "idle"
+            print("[nav] max_seconds -> stop"); return
         if kb.pause:
-            kb.safe_release_all(); lie_check_silence(); time.sleep(0.1); continue
+            kb.safe_release_all(); lie_check_silence()
+            STATUS["state"] = "paused"; STATUS["lie"] = False; time.sleep(0.1); continue
+        STATUS["state"] = "farming"
         lie_check_tick()
+        STATUS["lie"] = is_lie_check_active()
 
         # locate; recover onto a farm node if off-map
         node = _nav_locate()
+        STATUS["node"] = node
         if node is None:
             # Not in any mapped node band. Two cases: (a) a transient bad read (buff
             # glow, mid-fall) -> no clean position -> wait; or (b) a REACHABLE platform
@@ -1132,6 +1173,7 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
             # no model: motion count needs static frames -> release keys, take the median count
             kb.safe_release_all()
             n = monsters.count_dragons_best(capture, node)
+            STATUS["count"] = n
             print(f"[nav] {node} {farm_state} dragons~{n}")
             depleted = n < deplete_threshold
 
