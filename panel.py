@@ -28,13 +28,20 @@ class Controller:
         self.mode = "idle"           # idle|farming|watching|recovering|recording
         self.recorder = None
 
-    _MODE_NAME = {"farm": "farming", "watch": "watching", "recover": "recovering"}
+    _MODE_NAME = {"farm": "farming", "watch": "watching", "recover": "recovering",
+                  "water": "farming"}
 
-    def start(self, mode):
+    def start(self, mode, map_path=None):
         if self.mode != "idle":
             return False, f"busy ({self.mode})"
         if mode not in self._MODE_NAME:
             return False, f"unknown mode {mode}"
+        if mode == "water":
+            if not map_path:
+                return False, "no map selected"
+            self.mode = self._MODE_NAME[mode]
+            self.actions["water"](map_path)
+            return True, self.mode
         self.mode = self._MODE_NAME[mode]
         self.actions[mode]()
         return True, self.mode
@@ -87,18 +94,24 @@ def _build_actions(controller_ref):
     def _run_bg(target):
         threading.Thread(target=target, daemon=True).start()
 
+    def _enemy_check():
+        return len(recovery.get_enemy()) > 0
+
+    def _panic():
+        kb.safe_release_all()
+        print("[panel] safety -> release keys and PAUSE (F8 to resume).")
+        kb.pause = True
+
     def farm():
-        def _enemy_check():
-            return len(recovery.get_enemy()) > 0
-
-        def _panic():
-            kb.safe_release_all()
-            print("[panel] safety -> release keys and PAUSE (F8 to resume).")
-            kb.pause = True
-
         def _go():
             kb.pause = False
             recovery.farming_loop_nav(exp_check=None, enemy_check=_enemy_check, panic=_panic)
+        _run_bg(_go)
+
+    def water(map_path):
+        def _go():
+            kb.pause = False
+            recovery.farming_loop_water(map_path, enemy_check=_enemy_check, panic=_panic)
         _run_bg(_go)
 
     def watch():
@@ -128,8 +141,18 @@ def _build_actions(controller_ref):
         recovery.lie_check_silence()
         kb.safe_release_all()
 
-    return {"farm": farm, "watch": watch, "recover": recover,
+    return {"farm": farm, "water": water, "watch": watch, "recover": recover,
             "make_recorder": make_recorder, "pause_toggle": pause_toggle, "stop": stop}
+
+
+def list_maps(maps_dir="maps"):
+    """Available water map configs: [{name, path}], sorted by name."""
+    import os
+    import glob
+    out = []
+    for p in sorted(glob.glob(os.path.join(maps_dir, "*.json"))):
+        out.append({"name": os.path.splitext(os.path.basename(p))[0], "path": p})
+    return out
 
 
 def _status_dict(controller):
@@ -167,6 +190,13 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    <button onclick="cmd('start','recover')">↥ Recover to top</button>
    <button class=go onclick="cmd('start','watch')">👁 Watch-only (lie-check)</button>
  </div>
+ <fieldset><legend>Water world</legend>
+   <div class=row>
+     <select id=mapsel></select>
+     <button class=go onclick="startWater()">🌊 Start water farm</button>
+     <button onclick="loadMaps()">↻</button>
+   </div>
+ </fieldset>
  <fieldset><legend>Record route</legend>
    <div class=row>
      <input id=map placeholder="map name (e.g. blue_dragon)" value="blue_dragon">
@@ -195,6 +225,18 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    const j = await (await fetch('/cmd?'+q)).json();
    if(j.ok){ document.getElementById('node').value=''; } else alert(j.msg);
  }
+ async function loadMaps(){
+   const maps = await (await fetch('/maps')).json();
+   const sel = document.getElementById('mapsel');
+   sel.innerHTML = maps.length ? '' : '<option value="">(no maps/*.json)</option>';
+   for(const m of maps){ const o=document.createElement('option'); o.value=m.path; o.textContent=m.name; sel.appendChild(o); }
+ }
+ async function startWater(){
+   const map = document.getElementById('mapsel').value;
+   if(!map){ alert('no map selected'); return; }
+   const j = await (await fetch('/cmd?'+new URLSearchParams({action:'start',mode:'water',map}))).json();
+   if(!j.ok) alert(j.msg);
+ }
  async function poll(){
    try{
      const s = await (await fetch('/status')).json();
@@ -206,7 +248,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    }catch(e){}
    setTimeout(poll, 500);
  }
- poll();
+ loadMaps(); poll();
 </script></body></html>"""
 
 
@@ -227,6 +269,8 @@ def make_handler(controller):
                 return self._send(200, PAGE, "text/html; charset=utf-8")
             if parsed.path == "/status":
                 return self._send(200, json.dumps(_status_dict(controller)))
+            if parsed.path == "/maps":
+                return self._send(200, json.dumps(list_maps()))
             if parsed.path == "/cmd":
                 action = q.get("action", [""])[0]
                 ok, msg = self._dispatch(action, q)
@@ -235,7 +279,8 @@ def make_handler(controller):
 
         def _dispatch(self, action, q):
             if action == "start":
-                return controller.start(q.get("mode", [""])[0])
+                return controller.start(q.get("mode", [""])[0],
+                                        map_path=q.get("map", [None])[0])
             if action == "pause":
                 return controller.pause()
             if action == "stop":

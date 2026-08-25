@@ -21,6 +21,7 @@ def _make():
     log = []
     c = panel.Controller({
         "farm": lambda: log.append("farm"),
+        "water": lambda mp: log.append(("water", mp)),
         "watch": lambda: log.append("watch"),
         "recover": lambda: log.append("recover"),
         "make_recorder": lambda mp: log.append(("rec", mp)) or _Rec(log),
@@ -75,3 +76,20 @@ def test_pause_toggles():
     log, c = _make()
     assert c.pause()[0] is True
     assert log.count("pause") == 1
+
+
+def test_water_mode_requires_map_and_dispatches():
+    log, c = _make()
+    assert c.start("water")[0] is False          # no map selected
+    ok, mode = c.start("water", map_path="maps/deep_sea_2.json")
+    assert ok is True and mode == "farming"
+    assert ("water", "maps/deep_sea_2.json") in log
+    assert c.start("farm")[0] is False           # busy
+
+
+def test_list_maps_finds_starter(tmp_path):
+    (tmp_path / "a.json").write_text("{}")
+    (tmp_path / "b.json").write_text("{}")
+    maps = panel.list_maps(str(tmp_path))
+    assert [m["name"] for m in maps] == ["a", "b"]
+    assert maps[0]["path"].endswith("a.json")
