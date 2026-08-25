@@ -1665,6 +1665,9 @@ if __name__ == "__main__":
         scale = _flag("--scale", float, float(cfg.get("fish_scale", 1.0)))
         thr = _flag("--thr", float, float(cfg.get("fish_threshold", 0.9)))
         per = _flag("--per", int, int(cfg.get("fish_per_species", 3)))
+        species_s = _flag("--species", str, None)
+        species = (species_s.split(",") if species_s
+                   else cfg.get("fish_species", _fish.WATER_FISH))
         roi_s = _flag("--roi", str, None)
         roi = tuple(int(v) for v in roi_s.split(",")) if roi_s else (
             tuple(cfg["count_roi"]) if cfg.get("count_roi") else None)
@@ -1686,9 +1689,9 @@ if __name__ == "__main__":
             return b
 
         if sweep:
-            print(f"[fishcount] SWEEP roi={roi} per={per} thr={thr}")
+            print(f"[fishcount] SWEEP species={species} roi={roi} per={per} thr={thr}")
             for s in (0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.4):
-                tmpls = _fish.load_templates(per_species=per, scale=s)
+                tmpls = _fish.load_templates(species=species, per_species=per, scale=s)
                 b = best_scores(tmpls, roi)
                 n = _fish.count_fish(f, tmpls, roi=roi, threshold=thr)
                 print(f"  scale {s}: best={b}  count@{thr}={n}")
@@ -1697,10 +1700,11 @@ if __name__ == "__main__":
             print("[fishcount] wrote fishcount_debug.png (yellow=roi). Pick the scale with high"
                   " best-scores on fish and count matching what you see.")
         else:
-            tmpls = _fish.load_templates(per_species=per, scale=scale)
+            tmpls = _fish.load_templates(species=species, per_species=per, scale=scale)
             b = best_scores(tmpls, roi)
             dets = _fish.detect_fish(f, tmpls, roi=roi, threshold=thr)
-            print(f"[fishcount] scale={scale} thr={thr} per={per} roi={roi} templates={len(tmpls)}")
+            print(f"[fishcount] species={species} scale={scale} thr={thr} per={per} "
+                  f"roi={roi} templates={len(tmpls)}")
             print(f"[fishcount] best score by species: {b}")
             print(f"[fishcount] COUNT = {len(dets)}")
             dbg = f.copy()
