@@ -1643,42 +1643,74 @@ if __name__ == "__main__":
         finally:
             kb.safe_release_all(); lis.stop()
     elif cmd == "fishcount":
-        # Live tuning: capture one frame, count fish at the map's scale/threshold/roi,
-        # print best scores, and save an annotated debug image.
+        # Live tuning: capture one frame, count fish, print best scores, save a debug image.
+        # Config supplies defaults; CLI flags override for fast iteration without editing JSON:
+        #   --scale S  --thr T  --per N  --roi x0,y0,x1,y1  --sweep
         import fish as _fish
+
+        def _flag(name, cast=str, default=None):
+            if name in sys.argv:
+                i = sys.argv.index(name)
+                v = sys.argv[i + 1]
+                del sys.argv[i:i + 2]
+                return cast(v)
+            return default
+
+        sweep = "--sweep" in sys.argv
+        if sweep:
+            sys.argv.remove("--sweep")
         cfg = watermap.load_map(_map_path) if _map_path else {}
         if _map_path and cfg.get("minimap"):
             set_minimap(*watermap.minimap_crop(cfg))
-        scale = float(cfg.get("fish_scale", 1.0))
-        thr = float(cfg.get("fish_threshold", 0.9))
-        roi = tuple(cfg["count_roi"]) if cfg.get("count_roi") else None
-        per = cfg.get("fish_per_species", 3)
+        scale = _flag("--scale", float, float(cfg.get("fish_scale", 1.0)))
+        thr = _flag("--thr", float, float(cfg.get("fish_threshold", 0.9)))
+        per = _flag("--per", int, int(cfg.get("fish_per_species", 3)))
+        roi_s = _flag("--roi", str, None)
+        roi = tuple(int(v) for v in roi_s.split(",")) if roi_s else (
+            tuple(cfg["count_roi"]) if cfg.get("count_roi") else None)
         if not focus():
             print("no focus"); sys.exit(1)
         time.sleep(0.4)
         f = capture()
         if f is None:
             print("no frame"); sys.exit(1)
-        tmpls = _fish.load_templates(per_species=per, scale=scale)
-        sub = f if roi is None else f[roi[1]:roi[3], roi[0]:roi[2]]
-        best = {}
-        for name, t, m in tmpls:
-            if sub.shape[0] < t.shape[0] or sub.shape[1] < t.shape[1]:
-                continue
-            r = np.nan_to_num(cv2.matchTemplate(sub, t, cv2.TM_CCORR_NORMED, mask=m))
-            best[name] = round(max(best.get(name, 0), float(r.max())), 3)
-        dets = _fish.detect_fish(f, tmpls, roi=roi, threshold=thr)
-        print(f"[fishcount] scale={scale} thr={thr} roi={roi} templates={len(tmpls)}")
-        print(f"[fishcount] best score by species: {best}")
-        print(f"[fishcount] COUNT = {len(dets)}")
-        dbg = f.copy()
-        if roi:
-            cv2.rectangle(dbg, (roi[0], roi[1]), (roi[2], roi[3]), (0, 255, 255), 2)
-        for s, x, y, w, h in dets:
-            cv2.rectangle(dbg, (x, y), (x + w, y + h), (0, 0, 255), 2)
-            cv2.putText(dbg, f"{s:.2f}", (x, y - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-        cv2.imwrite("fishcount_debug.png", dbg)
-        print("[fishcount] wrote fishcount_debug.png (yellow=roi, red=matches)")
+
+        def best_scores(tmpls, roi):
+            sub = f if roi is None else f[roi[1]:roi[3], roi[0]:roi[2]]
+            b = {}
+            for name, t, m in tmpls:
+                if sub.shape[0] < t.shape[0] or sub.shape[1] < t.shape[1]:
+                    continue
+                r = np.nan_to_num(cv2.matchTemplate(sub, t, cv2.TM_CCORR_NORMED, mask=m))
+                b[name] = round(max(b.get(name, 0), float(r.max())), 3)
+            return b
+
+        if sweep:
+            print(f"[fishcount] SWEEP roi={roi} per={per} thr={thr}")
+            for s in (0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.4):
+                tmpls = _fish.load_templates(per_species=per, scale=s)
+                b = best_scores(tmpls, roi)
+                n = _fish.count_fish(f, tmpls, roi=roi, threshold=thr)
+                print(f"  scale {s}: best={b}  count@{thr}={n}")
+            cv2.imwrite("fishcount_debug.png", f if roi is None else
+                        cv2.rectangle(f.copy(), (roi[0], roi[1]), (roi[2], roi[3]), (0, 255, 255), 2))
+            print("[fishcount] wrote fishcount_debug.png (yellow=roi). Pick the scale with high"
+                  " best-scores on fish and count matching what you see.")
+        else:
+            tmpls = _fish.load_templates(per_species=per, scale=scale)
+            b = best_scores(tmpls, roi)
+            dets = _fish.detect_fish(f, tmpls, roi=roi, threshold=thr)
+            print(f"[fishcount] scale={scale} thr={thr} per={per} roi={roi} templates={len(tmpls)}")
+            print(f"[fishcount] best score by species: {b}")
+            print(f"[fishcount] COUNT = {len(dets)}")
+            dbg = f.copy()
+            if roi:
+                cv2.rectangle(dbg, (roi[0], roi[1]), (roi[2], roi[3]), (0, 255, 255), 2)
+            for s, x, y, w, h in dets:
+                cv2.rectangle(dbg, (x, y), (x + w, y + h), (0, 0, 255), 2)
+                cv2.putText(dbg, f"{s:.2f}", (x, y - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+            cv2.imwrite("fishcount_debug.png", dbg)
+            print("[fishcount] wrote fishcount_debug.png (yellow=roi, red=matches)")
     elif cmd == "waternav":
         # Water-map farming. Requires --map maps/<name>.json. Optional secs (bounded test).
         if not _map_path:
@@ -1705,5 +1737,5 @@ if __name__ == "__main__":
         print("  nav debug: focus | where | hop GX LY [dismount] | portal | drop | gobottom | recover")
         print("  route: record-route <map>   record a path -> routes/<map>.capture.jsonl")
         print("  water: waternav [secs] --map maps/<name>.json   water-map farming (F8 start/pause)")
-        print("  water: fishcount --map maps/<name>.json          tune fish detection on a live frame")
+        print("  water: fishcount --map maps/<name>.json [--sweep|--scale S|--thr T|--per N|--roi x0,y0,x1,y1]")
         print("  other: farmbottom [s] | demo | break [s] | record-climb")
