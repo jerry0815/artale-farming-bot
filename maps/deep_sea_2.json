@@ -27,9 +27,11 @@
   "count_roi": null,
   "approach": true,
   "attack_key": "x",
-  "attack_range": 110,
+  "attack_range": 60,
   "same_platform_band": 70,
   "approach_step": 0.14,
+  "deplete_reads": 4,
+  "buff_keys": [],
   "player": {
     "foot_offset": 135
   },

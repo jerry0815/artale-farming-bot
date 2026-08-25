@@ -1024,7 +1024,8 @@ def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
 
 
 def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
-                   attack_range=110, band=70, step=0.14, attack_key='c'):
+                   attack_range=110, band=70, step=0.14, attack_key='c',
+                   deplete_reads=4, verbose=True):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1036,8 +1037,14 @@ def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
     import fish as _fish
     import player as _player
     t0 = time.time()
-    saw_mob = False
     empty_reads = 0
+    last_log = [0.0]
+
+    def log(msg):
+        if verbose and time.time() - last_log[0] > 0.6:
+            last_log[0] = time.time()
+            print("[approach] " + msg)
+
     try:
         while time.time() - t0 < seconds:
             if kb.pause:
@@ -1049,24 +1056,27 @@ def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
             p = _player.find_player(f, cfg=player_cfg)
             mobs = _fish.scan(f, templates, roi=roi, threshold=thr, downscale=ds)["dets"]
             if p is None:                                 # anchor lost -> brief blind attack
+                log("player NOT found -> blind attack")
                 kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key); continue
             px, pfeet = p
             same = [(mx + mw // 2, my + mh) for (s, mx, my, mw, mh) in mobs
                     if abs((my + mh) - pfeet) <= band]
-            if not same:
+            if not same:                                  # DEBOUNCED: several empty frames -> clear
                 empty_reads += 1
-                if saw_mob or empty_reads >= 2:           # cleared, or nothing here -> advance
+                log(f"no same-platform mob ({empty_reads}/{deplete_reads}); mobs seen={len(mobs)}")
+                if empty_reads >= deplete_reads:
                     return DEPLETED
-                time.sleep(0.1); continue
-            saw_mob = True
+                time.sleep(0.12); continue
             empty_reads = 0
             tx, _tfy = min(same, key=lambda m: abs(m[0] - px))
             dx = tx - px
             key = Key.right if dx >= 0 else Key.left
             if abs(dx) <= attack_range:                   # in range: face + fire
+                log(f"in range dx={dx} -> attack '{attack_key}' (same={len(same)})")
                 kb.safe_press(key); time.sleep(0.03); kb.safe_release(key)
                 kb.safe_press(attack_key); time.sleep(0.45); kb.safe_release(attack_key)
             else:                                         # step toward it, attacking
+                log(f"dx={dx} -> step {'right' if dx > 0 else 'left'} (same={len(same)})")
                 kb.safe_press(key); kb.safe_press(attack_key); time.sleep(step)
                 kb.safe_release(attack_key); kb.safe_release(key)
         return True
@@ -1395,17 +1405,19 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         _arange = int(map_cfg.get("attack_range", 110))
         _aband = int(map_cfg.get("same_platform_band", 70))
         _astep = float(map_cfg.get("approach_step", 0.14))
+        _adeplete = int(map_cfg.get("deplete_reads", 4))
         print(f"[water] approach ON: range={_arange} band={_aband} "
               f"{_amode} templates x{len(_atempls)} thr={_athr}")
 
-    next_skill = [time.time()]
+    buff_keys = map_cfg.get("buff_keys", [])          # per-character buffs; empty = none
+    next_skill = [time.time() + _r.uniform(*skill_interval)]   # don't fire on the first beat
 
     def heal_skill():
-        if time.time() < next_skill[0]:
+        if not buff_keys or time.time() < next_skill[0]:
             return
         next_skill[0] = time.time() + _r.uniform(*skill_interval)
-        kb.safe_press('a'); time.sleep(0.4); kb.safe_release('a')
-        kb.safe_press('j'); time.sleep(0.4); kb.safe_release('j')
+        for k in buff_keys:
+            kb.safe_press(k); time.sleep(0.3); kb.safe_release(k)
 
     # rotation: 'sweep' = farm the list in order (bottom->top) then reset via reset_node;
     # 'cyclic' (default) = farm current until depleted, advance to the next (wrapping).
@@ -1455,7 +1467,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             if approach:
                 ok = approach_shoot(_r.uniform(*stand_secs), _atempls, _aroi, _athr, _ads,
                                     _pcfg, attack_range=_arange, band=_aband, step=_astep,
-                                    attack_key=attack_key)
+                                    attack_key=attack_key, deplete_reads=_adeplete)
                 heal_skill()
                 if ok is False:
                     return False
