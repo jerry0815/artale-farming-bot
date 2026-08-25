@@ -50,3 +50,32 @@ def test_key_name_normalizes():
 
     assert record_route._key_name(KUp()) == "up"
     assert record_route._key_name(KChar()) == "a"
+
+
+def test_route_recorder_marks_and_positions(tmp_path, monkeypatch):
+    import time
+    import build_route
+    monkeypatch.setattr(record_route, "OUT_DIR", str(tmp_path))
+    xs = iter([(10, 20), (11, 21), (12, 22)])
+    rec = record_route.RouteRecorder("m", get_xy=lambda: next(xs, (12, 22)),
+                                     poll_hz=1000, use_listener=False)
+    rec.start()
+    name = rec.mark("TOP")
+    time.sleep(0.05)
+    out = rec.stop()
+    assert name == "TOP" and rec.marks == 1
+    recs = build_route.load_capture(out)
+    assert any("mark" in r for r in recs)
+    assert any("x" in r for r in recs)
+
+
+def test_route_recorder_auto_names_blank_mark(tmp_path, monkeypatch):
+    monkeypatch.setattr(record_route, "OUT_DIR", str(tmp_path))
+    rec = record_route.RouteRecorder("m", get_xy=lambda: (-1, -1),
+                                     poll_hz=1000, use_listener=False)
+    rec.start()
+    try:
+        assert rec.mark("") == "N1"
+        assert rec.mark(None) == "N2"
+    finally:
+        rec.stop()
