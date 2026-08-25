@@ -93,7 +93,11 @@ class RouteRecorder:
     def mark(self, name=None):
         self.marks += 1
         name = (name or "").strip() or f"N{self.marks}"
-        self._emit({"mark": "NODE", "name": name})
+        rec = {"mark": "NODE", "name": name}
+        gx, gy = self._resolve_get_xy()()            # exact center at the mark instant
+        if gx is not None and gx >= 0:
+            rec["x"], rec["y"] = int(gx), int(gy)
+        self._emit(rec)
         return name
 
     def _run(self):
@@ -158,6 +162,7 @@ def record_live(map_name, poll_hz=30):
             state["stopped"] = True
             return False                       # stop the listener
         if key == Key.f9:
+            gx, gy = recovery.get_character_full()   # grab position AT the mark instant
             state["marks"] += 1
             name = None
             try:
@@ -166,8 +171,11 @@ def record_live(map_name, poll_hz=30):
             except EOFError:
                 name = ""
             name = name or f"N{state['marks']}"
-            emit({"mark": "NODE", "name": name})
-            print(f"[record] marked node '{name}'")
+            rec = {"mark": "NODE", "name": name}
+            if gx is not None and gx >= 0:           # exact center -> alt-tab-proof band
+                rec["x"], rec["y"] = int(gx), int(gy)
+            emit(rec)
+            print(f"[record] marked node '{name}' at ({gx},{gy})")
             return
         emit({"key": _key_name(key), "ev": "down"})
 

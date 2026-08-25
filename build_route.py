@@ -18,10 +18,10 @@ def split_records(records):
     position: has 'x'; mark: has 'mark'; otherwise a key event."""
     positions, keys, marks = [], [], []
     for r in records:
-        if "x" in r:
-            positions.append(r)
-        elif "mark" in r:
+        if "mark" in r:                 # marks may also carry x,y (exact center) -> check first
             marks.append(r)
+        elif "x" in r:
+            positions.append(r)
         else:
             keys.append(r)
     for lst in (positions, keys, marks):
@@ -89,14 +89,18 @@ def build_route(records, map_name, farm_nodes=None, minimap=None, swim=None, **c
     map config needs -- so the output doubles as a maps/<name>.json for watermap."""
     positions, keys, marks = split_records(records)
     nodes, seen = [], set()
+    margin = cfg.get("margin", 2)
     for m in marks:
         if m["name"] in seen:
             continue
         seen.add(m["name"])
-        nodes.append({"name": m["name"],
-                      "band": node_band(positions, m["t"],
-                                        window=cfg.get("window", 0.6),
-                                        margin=cfg.get("margin", 2))})
+        if "x" in m and "y" in m:                    # exact center captured at mark time
+            x, y = m["x"], m["y"]
+            band = [y - margin, y + margin, x - margin, x + margin]
+        else:
+            band = node_band(positions, m["t"],
+                             window=cfg.get("window", 0.6), margin=margin)
+        nodes.append({"name": m["name"], "band": band})
     edges = []
     for a, b in zip(marks, marks[1:]):
         seg_pos = [p for p in positions if a["t"] <= p["t"] <= b["t"]]

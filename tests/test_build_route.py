@@ -112,3 +112,16 @@ def test_build_route_emits_water_map_config():
     import watermap
     assert watermap.minimap_crop(route) == (20, 171, 210, 390)
     assert "P_BOT" in watermap.node_centers(route)
+
+
+def test_build_route_uses_exact_mark_position_when_present():
+    # A mark carrying its own x,y (captured at F9 instant) -> band centered there,
+    # independent of nearby position samples.
+    recs = [
+        {"t": 0.0, "x": 999, "y": 999},                       # noise, far away
+        {"t": 0.5, "mark": "NODE", "name": "P_BOT", "x": 60, "y": 200},
+    ]
+    route = build_route.build_route(recs, "deep_sea_2", farm_nodes=["P_BOT"])
+    assert route["nodes"][0]["band"] == [198, 202, 58, 62]     # centered on (60,200), margin 2
+    import watermap
+    assert watermap.node_centers(route)["P_BOT"] == (60, 200)
