@@ -95,3 +95,20 @@ def test_load_capture_and_write_route_roundtrip(tmp_path):
     build_route.write_route(route, str(out))
     import json
     assert json.loads(out.read_text())["map"] == "m"
+
+
+def test_build_route_emits_water_map_config():
+    recs = [
+        {"t": 0.0, "mark": "NODE", "name": "P_BOT"},
+        {"t": 0.0, "x": 60, "y": 200},
+        {"t": 0.1, "x": 62, "y": 201},
+    ]
+    route = build_route.build_route(recs, "deep_sea_2", farm_nodes=["P_BOT"],
+                                    minimap=(20, 171, 210, 390), swim=(3, 3))
+    assert route["minimap"] == {"x": 20, "y": 171, "w": 210, "h": 390}
+    assert route["swim"] == {"tol_x": 3, "tol_y": 3}
+    assert route["name"] == "deep_sea_2"
+    # usable directly by watermap
+    import watermap
+    assert watermap.minimap_crop(route) == (20, 171, 210, 390)
+    assert "P_BOT" in watermap.node_centers(route)

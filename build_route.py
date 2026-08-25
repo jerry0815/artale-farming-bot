@@ -81,9 +81,12 @@ def classify_traversal(positions, keys, up_keys=("up",), jump_keys=("alt_l",), d
     return "walk", {"target_x": positions[-1]["x"]}
 
 
-def build_route(records, map_name, farm_nodes=None, **cfg):
+def build_route(records, map_name, farm_nodes=None, minimap=None, swim=None, **cfg):
     """Assemble a route dict from a capture. One node per (first) mark; one edge per
-    consecutive pair of marks, from the positions/keys between their timestamps."""
+    consecutive pair of marks, from the positions/keys between their timestamps.
+
+    `minimap` (x,y,w,h) and `swim` (tol_x,tol_y), when given, add the blocks a water
+    map config needs -- so the output doubles as a maps/<name>.json for watermap."""
     positions, keys, marks = split_records(records)
     nodes, seen = [], set()
     for m in marks:
@@ -105,8 +108,14 @@ def build_route(records, map_name, farm_nodes=None, **cfg):
                                           jump_keys=cfg.get("jump_keys", ("alt_l",)),
                                           dy_thresh=cfg.get("dy_thresh", 4))
         edges.append({"src": a["name"], "dst": b["name"], "kind": kind, "params": params})
-    return {"map": map_name, "nodes": nodes, "edges": edges,
-            "farm_nodes": farm_nodes or []}
+    out = {"map": map_name, "name": map_name, "nodes": nodes, "edges": edges,
+           "farm_nodes": farm_nodes or []}
+    if minimap is not None:
+        x, y, w, h = minimap
+        out["minimap"] = {"x": x, "y": y, "w": w, "h": h}
+    if swim is not None:
+        out["swim"] = {"tol_x": swim[0], "tol_y": swim[1]}
+    return out
 
 
 def load_capture(path):
@@ -126,14 +135,26 @@ def write_route(route, path):
 
 def main():
     import sys
-    if len(sys.argv) < 4:
-        print("usage: python build_route.py <capture.jsonl> <out.route.json> <map> [farm_csv]")
+    argv = sys.argv[1:]
+    minimap = swim = None
+    if "--minimap" in argv:                      # --minimap x,y,w,h  (writes a water map config)
+        i = argv.index("--minimap")
+        minimap = tuple(int(v) for v in argv[i + 1].split(","))
+        del argv[i:i + 2]
+    if "--swim" in argv:                         # --swim tol_x,tol_y
+        i = argv.index("--swim")
+        swim = tuple(int(v) for v in argv[i + 1].split(","))
+        del argv[i:i + 2]
+    if len(argv) < 3:
+        print("usage: python build_route.py <capture.jsonl> <out.json> <map> [farm_csv] "
+              "[--minimap x,y,w,h] [--swim tx,ty]")
         return
-    cap, out, mp = sys.argv[1], sys.argv[2], sys.argv[3]
-    farm = sys.argv[4].split(",") if len(sys.argv) > 4 else []
-    route = build_route(load_capture(cap), mp, farm_nodes=farm)
+    cap, out, mp = argv[0], argv[1], argv[2]
+    farm = argv[3].split(",") if len(argv) > 3 else []
+    route = build_route(load_capture(cap), mp, farm_nodes=farm, minimap=minimap, swim=swim)
     write_route(route, out)
-    print(f"[build_route] {len(route['nodes'])} nodes, {len(route['edges'])} edges -> {out}")
+    tag = " (water map config)" if minimap else ""
+    print(f"[build_route] {len(route['nodes'])} nodes, {len(route['edges'])} edges -> {out}{tag}")
 
 
 if __name__ == "__main__":

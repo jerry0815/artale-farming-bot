@@ -1473,6 +1473,13 @@ if __name__ == "__main__":
         _mi = sys.argv.index("--map")
         _map_path = sys.argv[_mi + 1] if _mi + 1 < len(sys.argv) else None
         del sys.argv[_mi:_mi + 2]
+    _minimap_override = None                       # `--minimap x,y,w,h` (e.g. recording a water map)
+    if "--minimap" in sys.argv:
+        _ni = sys.argv.index("--minimap")
+        _minimap_override = tuple(int(v) for v in sys.argv[_ni + 1].split(","))
+        del sys.argv[_ni:_ni + 2]
+        set_minimap(*_minimap_override)
+        print(f"[nav] minimap crop override -> {_minimap_override}")
     if cmd == "focus":
         print("focused:", focus())
     elif cmd == "recover":
