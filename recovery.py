@@ -1038,8 +1038,8 @@ def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
     import player as _player
     t0 = time.time()
     empty_reads = 0
-    prev_absdx = None
-    stall = 0
+    best_absdx = None       # closest we've gotten to the current target (net-progress stall)
+    no_improve = 0
     last_log = [0.0]
 
     def log(msg):
@@ -1073,23 +1073,25 @@ def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
             tx, _tfy = min(same, key=lambda m: abs(m[0] - px))
             dx = tx - px
             key = Key.right if dx >= 0 else Key.left
-            if abs(dx) <= attack_range:                   # in range: face + fire
-                stall = 0; prev_absdx = None
-                log(f"in range dx={dx} -> attack '{attack_key}' (same={len(same)})")
+            if abs(dx) <= attack_range:                   # in range: face + fire a burst
+                best_absdx = None; no_improve = 0
+                log(f"IN RANGE dx={dx} px={px} -> attack '{attack_key}' burst (same={len(same)})")
                 kb.safe_press(key); time.sleep(0.03); kb.safe_release(key)
-                kb.safe_press(attack_key); time.sleep(0.45); kb.safe_release(attack_key)
-            else:                                         # step toward it, attacking
-                # STALL: stepping but the gap isn't closing -> target unreachable (gap/other
-                # platform). Give up on this platform instead of pushing into terrain forever.
-                if prev_absdx is not None and abs(dx) >= prev_absdx - 8:
-                    stall += 1
+                for _ in range(3):                        # commit: several hits before re-evaluating
+                    kb.safe_press(attack_key); time.sleep(0.35); kb.safe_release(attack_key)
+                    time.sleep(0.05)
+            else:                                         # walk toward it, attacking as we go
+                # NET-progress stall: only give up if we stop getting CLOSER (best |dx| not
+                # improving) for stall_limit frames -- tolerates jitter + slow approach.
+                if best_absdx is None or abs(dx) < best_absdx - 4:
+                    best_absdx = abs(dx); no_improve = 0
                 else:
-                    stall = 0
-                prev_absdx = abs(dx)
-                if stall >= stall_limit:
-                    log(f"stalled at dx={dx} (not closing) -> advance")
+                    no_improve += 1
+                if no_improve >= stall_limit:
+                    log(f"stalled at dx={dx} (best={best_absdx}, unreachable) -> advance")
                     return DEPLETED
-                log(f"dx={dx} -> step {'right' if dx > 0 else 'left'} (same={len(same)}, stall={stall})")
+                log(f"dx={dx} px={px} -> step {'right' if dx > 0 else 'left'} "
+                    f"(same={len(same)}, best={best_absdx}, noimp={no_improve})")
                 kb.safe_press(key); kb.safe_press(attack_key); time.sleep(step)
                 kb.safe_release(attack_key); kb.safe_release(key)
         return True
