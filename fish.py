@@ -63,7 +63,7 @@ def templates_for(cfg, scale=None):
     scale = cfg.get("fish_scale", 1.0) if scale is None else scale
     d = cfg.get("mob_template_dir")
     if d and glob.glob(os.path.join(d, "*.png")):
-        return load_live_templates(d, scale=scale), "live"
+        return load_live_templates(d, scale=scale, per_name=cfg.get("mob_template_limit")), "live"
     return (load_templates(species=cfg.get("fish_species", WATER_FISH),
                            per_species=cfg.get("fish_per_species", 3), scale=scale),
             "sprite")
@@ -96,19 +96,25 @@ def nms(dets, iou_thr=0.4):
     return kept
 
 
-def load_live_templates(dirpath, scale=1.0):
+def load_live_templates(dirpath, scale=1.0, per_name=None):
     """Load LIVE mob crops (tight screenshots from this game, no green screen) as
-    [(name, bgr, None)]. mask=None signals CCOEFF matching in _match_one -- far more
-    robust than green-sprite CCORR. Name is the filename minus a trailing _<n>."""
+    [(name, bgr, None)]. mask=None signals CCOEFF matching -- far more robust than
+    green-sprite CCORR. Name is the filename minus a trailing _<n>. `per_name` caps how
+    many crops per mob (speed: fewer templates -> faster scan)."""
     import re
+    from collections import defaultdict
+    counts = defaultdict(int)
     out = []
     for f in sorted(glob.glob(os.path.join(dirpath, "*.png"))):
+        name = re.sub(r"_\d+$", "", os.path.splitext(os.path.basename(f))[0])
+        if per_name and counts[name] >= per_name:
+            continue
         im = cv2.imread(f, cv2.IMREAD_COLOR)      # BGR, drop any alpha
         if im is None:
             continue
         if scale != 1.0:
             im = cv2.resize(im, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
-        name = re.sub(r"_\d+$", "", os.path.splitext(os.path.basename(f))[0])
+        counts[name] += 1
         out.append((name, im, None))
     return out
 

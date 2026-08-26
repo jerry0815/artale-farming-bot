@@ -1025,7 +1025,7 @@ def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
 
 def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
                    attack_range=110, band=70, step=0.14, attack_key='c',
-                   deplete_reads=4, verbose=True):
+                   deplete_reads=4, stall_limit=5, verbose=True):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1038,6 +1038,8 @@ def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
     import player as _player
     t0 = time.time()
     empty_reads = 0
+    prev_absdx = None
+    stall = 0
     last_log = [0.0]
 
     def log(msg):
@@ -1072,11 +1074,22 @@ def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
             dx = tx - px
             key = Key.right if dx >= 0 else Key.left
             if abs(dx) <= attack_range:                   # in range: face + fire
+                stall = 0; prev_absdx = None
                 log(f"in range dx={dx} -> attack '{attack_key}' (same={len(same)})")
                 kb.safe_press(key); time.sleep(0.03); kb.safe_release(key)
                 kb.safe_press(attack_key); time.sleep(0.45); kb.safe_release(attack_key)
             else:                                         # step toward it, attacking
-                log(f"dx={dx} -> step {'right' if dx > 0 else 'left'} (same={len(same)})")
+                # STALL: stepping but the gap isn't closing -> target unreachable (gap/other
+                # platform). Give up on this platform instead of pushing into terrain forever.
+                if prev_absdx is not None and abs(dx) >= prev_absdx - 8:
+                    stall += 1
+                else:
+                    stall = 0
+                prev_absdx = abs(dx)
+                if stall >= stall_limit:
+                    log(f"stalled at dx={dx} (not closing) -> advance")
+                    return DEPLETED
+                log(f"dx={dx} -> step {'right' if dx > 0 else 'left'} (same={len(same)}, stall={stall})")
                 kb.safe_press(key); kb.safe_press(attack_key); time.sleep(step)
                 kb.safe_release(attack_key); kb.safe_release(key)
         return True
@@ -1467,7 +1480,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             if approach:
                 ok = approach_shoot(_r.uniform(*stand_secs), _atempls, _aroi, _athr, _ads,
                                     _pcfg, attack_range=_arange, band=_aband, step=_astep,
-                                    attack_key=attack_key, deplete_reads=_adeplete)
+                                    attack_key=attack_key, deplete_reads=_adeplete,
+                                    stall_limit=int(map_cfg.get("stall_limit", 5)))
                 heal_skill()
                 if ok is False:
                     return False

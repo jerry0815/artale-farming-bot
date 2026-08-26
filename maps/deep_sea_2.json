@@ -16,6 +16,7 @@
   "beats_per_node": 3,
   "detector": "fish",
   "mob_template_dir": "assets/mob/deep_sea_2",
+  "mob_template_limit": 6,
   "fish_species": [
     "bombing_fish_house",
     "goby"
@@ -31,6 +32,7 @@
   "same_platform_band": 70,
   "approach_step": 0.14,
   "deplete_reads": 4,
+  "stall_limit": 5,
   "buff_keys": [],
   "player": {
     "foot_offset": 135
