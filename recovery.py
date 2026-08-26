@@ -1025,7 +1025,7 @@ def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
 
 def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
                    attack_range=110, band=70, step=0.14, attack_key='c',
-                   deplete_reads=4, stall_limit=5, verbose=True):
+                   deplete_reads=4, stall_limit=8, scan_w=520, verbose=True):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1055,12 +1055,17 @@ def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
             f = capture()
             if f is None:
                 time.sleep(0.1); continue
-            p = _player.find_player(f, cfg=player_cfg)
-            mobs = _fish.scan(f, templates, roi=roi, threshold=thr, downscale=ds)["dets"]
+            p = _player.find_player(f, cfg=player_cfg)   # cheap (color); do it first
             if p is None:                                 # anchor lost -> brief blind attack
                 log("player NOT found -> blind attack")
                 kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key); continue
             px, pfeet = p
+            # Scan only a WINDOW around the player (not the whole frame) -> much faster,
+            # and it already restricts to nearby same-platform mobs.
+            H, W = f.shape[:2]
+            lroi = (max(0, px - scan_w), max(0, pfeet - band - 40),
+                    min(W, px + scan_w), min(H, pfeet + 40))
+            mobs = _fish.scan(f, templates, roi=lroi, threshold=thr, downscale=ds)["dets"]
             same = [(mx + mw // 2, my + mh) for (s, mx, my, mw, mh) in mobs
                     if abs((my + mh) - pfeet) <= band]
             if not same:                                  # DEBOUNCED: several empty frames -> clear
@@ -1421,6 +1426,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         _aband = int(map_cfg.get("same_platform_band", 70))
         _astep = float(map_cfg.get("approach_step", 0.14))
         _adeplete = int(map_cfg.get("deplete_reads", 4))
+        _astall = int(map_cfg.get("stall_limit", 8))
+        _ascan = int(map_cfg.get("approach_scan_w", 520))
         print(f"[water] approach ON: range={_arange} band={_aband} "
               f"{_amode} templates x{len(_atempls)} thr={_athr}")
 
@@ -1483,7 +1490,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 ok = approach_shoot(_r.uniform(*stand_secs), _atempls, _aroi, _athr, _ads,
                                     _pcfg, attack_range=_arange, band=_aband, step=_astep,
                                     attack_key=attack_key, deplete_reads=_adeplete,
-                                    stall_limit=int(map_cfg.get("stall_limit", 5)))
+                                    stall_limit=_astall, scan_w=_ascan)
                 heal_skill()
                 if ok is False:
                     return False
