@@ -968,17 +968,17 @@ def _apply_swim_keys(want):
 
 
 def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
-            jump_after=0.35):
-    """Swim toward (target_x, target_y) holding arrow keys, until within `tol` on both
-    axes or `cap` seconds. Returns True on arrival. F8 (kb.pause) aborts. `locate`
-    (default get_character_full) is injectable for tests.
+            jump_interval=0.1):
+    """Swim toward (target_x, target_y) until within `tol` on both axes or `cap` seconds.
+    Returns True on arrival. F8 (kb.pause) aborts. `locate` (default get_character_full)
+    is injectable for tests.
 
-    Grounded on a platform, holding Up alone won't ascend -- so when we WANT to go up but
-    y isn't decreasing for `jump_after` s, we JUMP (hop up toward the higher platform)."""
+    Water-world movement: you RISE by JUMPING repeatedly (holding Up does nothing), so when
+    the target is above we spam JUMP every `jump_interval` s and NEVER press Up. Left/right
+    use arrow keys; descending holds Down."""
     locate = locate or get_character_full
     t0 = time.time()
-    last_y = None
-    rose_at = time.time()
+    last_jump = 0.0
     try:
         while time.time() - t0 < cap:
             if kb.pause:
@@ -990,17 +990,13 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
             want = watermap.swim_keys((x, y), (target_x, target_y), tol)
             if not want:
                 return True
-            _apply_swim_keys(want)
-            if jump and "up" in want:                      # ascending
-                if last_y is not None and y < last_y - 0.5:
-                    rose_at = time.time()                  # still rising -> no hop needed
-                if time.time() - rose_at > jump_after:     # stalled climbing -> hop up
-                    kb.safe_press(JUMP); time.sleep(0.05); kb.safe_release(JUMP)
-                    rose_at = time.time()
-            else:
-                rose_at = time.time()
-            last_y = y
-            time.sleep(0.06)
+            _apply_swim_keys(want - {"up"})                # never hold Up: up = jump-swim
+            if jump and "up" in want:
+                now = time.time()
+                if now - last_jump >= jump_interval:
+                    kb.safe_press(JUMP); time.sleep(0.02); kb.safe_release(JUMP)
+                    last_jump = now
+            time.sleep(0.05)
         return False
     finally:
         for key in _ARROW.values():

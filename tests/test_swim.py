@@ -16,8 +16,10 @@ def test_swim_to_presses_toward_target_and_stops(monkeypatch):
 
     ok = recovery.swim_to(100, 100, tol=(3, 3), cap=5.0)
     assert ok is True
-    # First step: below target (y 130 > 100) and left (x 90 < 100) -> up + right held
-    assert Key.up in pressed and Key.right in pressed
+    # First step: below target (y 130 > 100) -> JUMP to rise (NOT Up arrow); left of target
+    # (x 90 < 100) -> right held.
+    assert Key.right in pressed and recovery.JUMP in pressed
+    assert Key.up not in pressed                  # water-world: never hold Up
     # On exit every arrow key is released
     for k in recovery._ARROW.values():
         assert k in released
@@ -46,8 +48,9 @@ def test_swim_to_jumps_when_ascent_stalls(monkeypatch):
     monkeypatch.setattr(recovery.kb, "safe_press", lambda k: pressed.append(k))
     monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
     monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
-    recovery.swim_to(100, 100, tol=(3, 3), cap=3.0, jump_after=0.35)
-    assert recovery.JUMP in pressed          # hopped to climb the ledge
+    recovery.swim_to(100, 100, tol=(3, 3), cap=3.0, jump_interval=0.1)
+    assert recovery.JUMP in pressed          # jump-swims up (no Up arrow)
+    assert Key.up not in pressed
 
 
 def test_swim_to_no_jump_when_descending(monkeypatch):
