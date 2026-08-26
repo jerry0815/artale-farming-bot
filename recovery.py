@@ -1023,7 +1023,7 @@ def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
         kb.safe_release(attack_key)
 
 
-def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
+def approach_shoot(seconds, detect_fn, player_cfg,
                    attack_range=110, band=70, step=0.14, attack_key='c',
                    deplete_reads=4, stall_limit=8, scan_w=520, verbose=True):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
@@ -1031,10 +1031,10 @@ def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
     when no mob is on the platform, True after the beat, False if paused.
 
-    Screen-space: mob x and player x come from the same frame, so 'which way to walk' is
-    just their x difference. `band` = how close a mob's feet must be to the player's feet
-    (in px) to count as the same platform."""
-    import fish as _fish
+    `detect_fn(frame, roi) -> [(score, x, y, w, h)]` is the detector (YOLO or template) --
+    approach is detector-agnostic. Screen-space: mob x and player x come from the same
+    frame, so 'which way to walk' is their x difference. `band` = how close a mob's feet
+    must be to the player's feet (px) to count as the same platform."""
     import player as _player
     t0 = time.time()
     empty_reads = 0
@@ -1065,7 +1065,7 @@ def approach_shoot(seconds, templates, roi, thr, ds, player_cfg,
             H, W = f.shape[:2]
             lroi = (max(0, px - scan_w), max(0, pfeet - band - 40),
                     min(W, px + scan_w), min(H, pfeet + 40))
-            mobs = _fish.scan(f, templates, roi=lroi, threshold=thr, downscale=ds)["dets"]
+            mobs = detect_fn(f, lroi)
             same = [(mx + mw // 2, my + mh) for (s, mx, my, mw, mh) in mobs
                     if abs((my + mh) - pfeet) <= band]
             if not same:                                  # DEBOUNCED: several empty frames -> clear
@@ -1373,28 +1373,36 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     STOP.clear(); STATUS["state"] = "farming"
     print(f"[water] {map_cfg.get('name', '?')}: {len(centers)} nodes, order {farm_nodes}")
 
-    # Depletion detector: 'fish' (template-match the water sprites, end-of-beat),
-    # 'yolo' (dragon model; only if the fish match it), or 'time' (rotate every beat).
+    # Detection: build ONE detect_fn(frame, roi) -> [(score,x,y,w,h)] used by BOTH approach
+    # and depletion. 'mob_yolo' = trained YOLO (recommended), 'fish' = template match,
+    # 'time' = no detection (rotate every beat), 'yolo' = legacy dragon model.
     detector = map_cfg.get("detector", "yolo")
-    poll_in_shoot = False           # only YOLO is fast enough to poll WHILE shooting
+    poll_in_shoot = False
     one_count = None
-    if detector == "fish":
+    detect_fn = None
+    _count_roi = tuple(map_cfg["count_roi"]) if map_cfg.get("count_roi") else None
+
+    if detector == "mob_yolo":
+        import mob_detect
+        _mm = mob_detect.load_yolo(map_cfg.get("mob_model", "models/mob_yolo.pt"))
+        _mconf = float(map_cfg.get("mob_conf", 0.6))
+        _mimg = int(map_cfg.get("mob_imgsz", 640))
+
+        def detect_fn(frame, roi):
+            return mob_detect.yolo_boxes(_mm, frame, roi, _mconf, _mimg)
+        print(f"[water] detector: mob_yolo conf={_mconf} imgsz={_mimg}")
+    elif detector == "fish":
         import fish as _fish
         _templates, _mode = _fish.templates_for(map_cfg)
-        _roi = tuple(map_cfg["count_roi"]) if map_cfg.get("count_roi") else None
         _thr = map_cfg.get("fish_threshold") or _fish.default_threshold(_mode)
         _ds = map_cfg.get("match_downscale", 0.5)
 
-        def one_count(node):
-            f = capture()
-            c = None if f is None else _fish.count_fish(f, _templates, roi=_roi,
-                                                        threshold=_thr, downscale=_ds)
-            STATUS["count"] = c
-            return c
-        print(f"[water] deplete-check: {_mode} templates x{len(_templates)} thr={_thr} ds={_ds}")
+        def detect_fn(frame, roi):
+            return _fish.scan(frame, _templates, roi=roi, threshold=_thr, downscale=_ds)["dets"]
+        print(f"[water] detector: {_mode} templates x{len(_templates)} thr={_thr} ds={_ds}")
     elif detector == "time":
-        print("[water] deplete-check: time-based rotation (rotate every beat)")
-    else:                            # yolo (default)
+        print("[water] detector: time-based rotation (rotate every beat)")
+    else:                            # legacy dragon yolo
         model = monsters.load_dragon_model()
         if model is not None:
             _f0 = capture()
@@ -1408,19 +1416,22 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 c = None if f is None else len(monsters.detect_dragons_yolo(f, model, roi))
                 STATUS["count"] = c
                 return c
-        print(f"[water] deplete-check: {'YOLO' if one_count else 'none -> time rotation'}")
+        print(f"[water] detector: {'dragon-YOLO' if one_count else 'none -> time'}")
 
-    # Close-range approach: walk to the nearest same-platform mob and attack (needs the
-    # player HP-bar anchor + mob detection). When on, it replaces fixed-fire per beat and
-    # reports its own depletion (no mob left on the platform).
+    if detect_fn is not None and one_count is None:   # depletion count from detect_fn
+        def one_count(node):
+            f = capture()
+            c = None if f is None else len(detect_fn(f, _count_roi))
+            STATUS["count"] = c
+            return c
+
+    # Close-range approach: walk to the nearest same-platform mob and attack. Replaces
+    # fixed-fire per beat and reports its own depletion (no mob left on the platform).
     attack_key = map_cfg.get("attack_key", "c")
     approach = bool(map_cfg.get("approach", False))
     if approach:
-        import fish as _fish
-        _atempls, _amode = _fish.templates_for(map_cfg)
-        _aroi = tuple(map_cfg["count_roi"]) if map_cfg.get("count_roi") else None
-        _athr = map_cfg.get("fish_threshold") or _fish.default_threshold(_amode)
-        _ads = map_cfg.get("match_downscale", 0.5)
+        if detect_fn is None:
+            raise RuntimeError("approach needs detector 'mob_yolo' or 'fish'")
         _pcfg = map_cfg.get("player")
         _arange = int(map_cfg.get("attack_range", 110))
         _aband = int(map_cfg.get("same_platform_band", 70))
@@ -1428,8 +1439,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         _adeplete = int(map_cfg.get("deplete_reads", 4))
         _astall = int(map_cfg.get("stall_limit", 8))
         _ascan = int(map_cfg.get("approach_scan_w", 520))
-        print(f"[water] approach ON: range={_arange} band={_aband} "
-              f"{_amode} templates x{len(_atempls)} thr={_athr}")
+        print(f"[water] approach ON: detector={detector} range={_arange} band={_aband}")
 
     buff_keys = map_cfg.get("buff_keys", [])          # per-character buffs; empty = none
     next_skill = [time.time() + _r.uniform(*skill_interval)]   # don't fire on the first beat
@@ -1487,8 +1497,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             if kb.pause or STOP.is_set():
                 return False
             if approach:
-                ok = approach_shoot(_r.uniform(*stand_secs), _atempls, _aroi, _athr, _ads,
-                                    _pcfg, attack_range=_arange, band=_aband, step=_astep,
+                ok = approach_shoot(_r.uniform(*stand_secs), detect_fn, _pcfg,
+                                    attack_range=_arange, band=_aband, step=_astep,
                                     attack_key=attack_key, deplete_reads=_adeplete,
                                     stall_limit=_astall, scan_w=_ascan)
                 heal_skill()
