@@ -49,3 +49,8 @@ datasets/dragons/labels.cache
 
 # route recorder: raw captures are large & per-user (route.json is committable)
 routes/*.capture.jsonl
+
+# synthetic mob-detection data (regenerate via synth_data.py)
+assets/bg/
+datasets/mobs/
+models/mob_yolo.pt
