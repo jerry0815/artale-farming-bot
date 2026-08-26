@@ -31,7 +31,7 @@ def main():
     print(f"[train] epochs={epochs} imgsz={imgsz} (early-stop patience 20)")
     model.train(data=yaml_path, epochs=epochs, imgsz=imgsz, batch=-1, patience=20,
                 device=0, fliplr=0.0, mosaic=1.0, name="mob_yolo")
-    best = os.path.join("runs", "detect", "mob_yolo", "weights", "best.pt")
+    best = str(model.trainer.best)                 # actual run dir (handles mob_yolo-N)
     os.makedirs("models", exist_ok=True)
     shutil.copy(best, os.path.join("models", "mob_yolo.pt"))
     print(f"[train] copied {best} -> models/mob_yolo.pt")
