@@ -23,6 +23,39 @@ CLASSES = ["fishhouse", "goby"]
 SPRITE_SPECIES = {"fishhouse": "bombing_fish_house", "goby": "goby"}
 
 
+def water_mask(bgr):
+    """Isolate a mob in a LIVE crop by removing teal/cyan water. Keeps non-water
+    components >=4% of the crop (drops bubbles/noise, keeps rock + eyeball tubes)."""
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    water = cv2.inRange(hsv, (80, 40, 20), (115, 255, 255))
+    mask = cv2.bitwise_not(water)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+    n, lab, st, _ = cv2.connectedComponentsWithStats(mask, 8)
+    area = mask.shape[0] * mask.shape[1]
+    keep = np.zeros_like(mask)
+    for i in range(1, n):
+        if st[i, cv2.CC_STAT_AREA] >= 0.04 * area:
+            keep[lab == i] = 255
+    return keep
+
+
+def load_live_cutouts(live_dir):
+    """Live crops (real rendering) grouped by filename prefix into class indices.
+    {class_idx: [(bgr, mask)]}, mask via water removal. Files: <class>_<n>.png."""
+    out = {}
+    for ci, cls in enumerate(CLASSES):
+        items = []
+        for f in sorted(glob.glob(os.path.join(live_dir, f"{cls}_*.png"))):
+            im = cv2.imread(f, cv2.IMREAD_COLOR)
+            if im is None:
+                continue
+            items.append((im, water_mask(im)))
+        if items:
+            out[ci] = items
+    return out
+
+
 def load_cutouts(base=fish.DEFAULT_MONSTER_DIR):
     """{class_idx: [(bgr, mask), ...]} from the green-screen sprites (green keyed out,
     fringe eroded)."""
@@ -105,12 +138,15 @@ def write_yaml(out_dir):
 
 
 def generate(bg_dir, out_dir, n=3000, val_frac=0.1, seed=0, base=fish.DEFAULT_MONSTER_DIR,
-             **synth_kw):
-    """Build the full dataset. Deterministic given seed. Returns the data.yaml path."""
+             live_dir=None, **synth_kw):
+    """Build the full dataset. Deterministic given seed. Returns the data.yaml path.
+    `live_dir` uses your real in-game crops (recommended -- matches the game); otherwise
+    the green-screen sprites."""
     rng = random.Random(seed)
-    cutouts = load_cutouts(base)
+    cutouts = load_live_cutouts(live_dir) if live_dir else load_cutouts(base)
     if not cutouts:
-        raise RuntimeError(f"no sprites under {base}")
+        raise RuntimeError(f"no cutouts ({'live ' + live_dir if live_dir else base})")
+    print(f"[synth] cutouts: " + ", ".join(f"{CLASSES[k]}={len(v)}" for k, v in cutouts.items()))
     bgs = sorted(glob.glob(os.path.join(bg_dir, "*.jpg")) + glob.glob(os.path.join(bg_dir, "*.png")))
     if not bgs:
         raise RuntimeError(f"no background images in {bg_dir}")
@@ -151,10 +187,12 @@ if __name__ == "__main__":
     ap.add_argument("--out", default="datasets/mobs")
     ap.add_argument("--n", type=int, default=3000)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--live", default=None,
+                    help="use real in-game crops from this dir (e.g. assets/mob/deep_sea_2)")
     a = ap.parse_args()
     if a.extract:
         got = extract_backgrounds(a.extract[0], a.extract[1])
         print(f"[synth] extracted {got} background frames -> {a.extract[1]}")
     else:
-        yaml = generate(a.bg, a.out, n=a.n, seed=a.seed)
+        yaml = generate(a.bg, a.out, n=a.n, seed=a.seed, live_dir=a.live)
         print(f"[synth] wrote {a.n} samples -> {a.out}\n[synth] data.yaml: {yaml}")
