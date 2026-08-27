@@ -16,7 +16,7 @@
   "beats_per_node": 3,
   "detector": "mob_yolo",
   "mob_model": "models/mob_yolo.pt",
-  "mob_conf": 0.72,
+  "mob_conf": 0.5,
   "mob_imgsz": 640,
   "mob_template_dir": "assets/mob/deep_sea_2",
   "mob_template_limit": 6,
