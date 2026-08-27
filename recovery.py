@@ -1538,6 +1538,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     # 'cyclic' (default) = farm current until depleted, advance to the next (wrapping).
     _ylift = int(map_cfg.get("node_y_lift", 5))          # aim this many px above node center
     _lift_override = map_cfg.get("node_lift_override", {})  # per-node lift (pin nodes -> 0)
+    _arrive_jumps = map_cfg.get("node_arrive_jumps", {})   # extra hops after arriving (seat on pin)
     rotation = map_cfg.get("rotation", "cyclic")
     reset_node = map_cfg.get("reset_node")
     beats_per_node = int(map_cfg.get("beats_per_node", 3))
@@ -1590,6 +1591,11 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             lift = _lift_override.get(node, _ylift)        # pin nodes (P4) use 0 -- target below
             print(f"[water] --> farm {node} (center {cx},{cy}) lift={lift}")  # the pin is unreachable
             swim_to(cx, cy - lift, tol=tol, cap=12.0)      # aim a bit ABOVE so she lands on it
+            extra = _arrive_jumps.get(node, 0)             # seat on a pin platform (P4): a few more hops
+            for _ in range(extra):
+                if kb.pause:
+                    break
+                kb.safe_press(JUMP); time.sleep(0.12); kb.safe_release(JUMP); time.sleep(0.05)
         for _ in range(max(1, beats_per_node)):
             if kb.pause or STOP.is_set():
                 return False

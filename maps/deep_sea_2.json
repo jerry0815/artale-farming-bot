@@ -167,5 +167,8 @@
   "node_y_lift": 5,
   "node_lift_override": {
     "P4": 0
+  },
+  "node_arrive_jumps": {
+    "P4": 2
   }
 }
