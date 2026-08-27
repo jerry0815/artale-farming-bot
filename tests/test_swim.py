@@ -6,7 +6,6 @@ from pynput.keyboard import Key
 def test_swim_to_presses_toward_target_and_stops(monkeypatch):
     # Scripted positions: start below-left of target (100,100), then arrive.
     seq = iter([(90, 130), (95, 115), (100, 100)])
-    monkeypatch.setattr(recovery, "get_character_full", lambda: next(seq, (100, 100)))
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
     monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
     pressed, released = [], []
@@ -14,7 +13,8 @@ def test_swim_to_presses_toward_target_and_stops(monkeypatch):
     monkeypatch.setattr(recovery.kb, "safe_release", lambda k: released.append(k))
     monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
 
-    ok = recovery.swim_to(100, 100, tol=(3, 3), cap=5.0)
+    # inject locate directly (bypass stable_char's multi-read) with a scripted sequence
+    ok = recovery.swim_to(100, 100, tol=(3, 3), cap=5.0, locate=lambda: next(seq, (100, 100)))
     assert ok is True
     # First step: below target (y 130 > 100) -> JUMP to rise (NOT Up arrow); left of target
     # (x 90 < 100) -> right held.
