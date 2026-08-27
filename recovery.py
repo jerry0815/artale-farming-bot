@@ -1041,7 +1041,7 @@ def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
 def approach_shoot(seconds, detect_fn, player_cfg,
                    attack_range=110, band=70, step=0.14, attack_key='c',
                    deplete_reads=4, stall_limit=8, scan_w=520, verbose=True,
-                   patrol_x=None, locate=None):
+                   patrol_x=None, locate=None, label=""):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1063,7 +1063,7 @@ def approach_shoot(seconds, detect_fn, player_cfg,
     def log(msg):
         if verbose and time.time() - last_log[0] > 0.6:
             last_log[0] = time.time()
-            print("[approach] " + msg)
+            print(f"[approach {label}] " + msg if label else "[approach] " + msg)
 
     try:
         while time.time() - t0 < seconds:
@@ -1546,6 +1546,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         farm up to beats_per_node beats or until depleted. False if paused/stopped."""
         cx, cy = centers[node]
         STATUS["node"] = node
+        print(f"[water] --> farm {node} (center {cx},{cy})")
         swim_to(cx, cy, tol=tol, cap=12.0)
         for _ in range(max(1, beats_per_node)):
             if kb.pause or STOP.is_set():
@@ -1557,7 +1558,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                                     attack_range=_arange, band=_aband, step=_astep,
                                     attack_key=attack_key, deplete_reads=_adeplete,
                                     stall_limit=_astall, scan_w=_ascan,
-                                    patrol_x=_px, locate=stable_char)
+                                    patrol_x=_px, locate=stable_char, label=node)
                 heal_skill()
                 if ok is False:
                     return False

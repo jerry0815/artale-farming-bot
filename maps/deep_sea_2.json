@@ -9,7 +9,7 @@
   },
   "swim": {
     "tol_x": 3,
-    "tol_y": 3
+    "tol_y": 7
   },
   "rotation": "sweep",
   "reset_node": "RIGHT",
