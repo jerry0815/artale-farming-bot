@@ -202,6 +202,32 @@ def is_lie_check_active():
     return bool(_fast_alert.alarm.active or _full_alert.alarm.active)
 
 
+# --- another-player alarm: a DISTINCT lower tone, sounds until F9 acknowledges it ---
+_enemy_alarm = Alarm(freq=700, beep_ms=250, gap_ms=120)
+
+
+def enemy_alarm_on():
+    """Start the another-player alarm (keeps beeping until F9 / silence)."""
+    _enemy_alarm.start()
+
+
+def enemy_alarm_silence():
+    _enemy_alarm.stop()
+
+
+def silence_all_alarms():
+    """F9: acknowledge -- stop every alarm (lie-check + another-player). Quiet when nothing
+    is sounding, so F9 stays usable for other things (e.g. record-route node marks)."""
+    active = is_lie_check_active() or _enemy_alarm.active
+    lie_check_silence()
+    enemy_alarm_silence()
+    if active:
+        print("[alarm] silenced (F9)")
+
+
+kb.f9_callback = silence_all_alarms   # F9 silences alarms wherever kb.on_press is the listener
+
+
 # --- shared status + cooperative stop, for the control UI (panel.py) --------------
 # STATUS is a plain dict updated in-place by the loops; the UI polls it. STOP is a
 # cooperative stop the UI sets to end a background-thread run (F8 pause still works).
@@ -1405,7 +1431,8 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
 
         # safety
         if enemy_check and enemy_check():
-            print("[nav] another player -> panic")
+            print("[nav] another player -> ALARM + panic (F9 to silence)")
+            enemy_alarm_on()
             if panic: panic()
             time.sleep(1); continue
         if exp_check and exp_check():
@@ -1631,7 +1658,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         lie_check_tick(); STATUS["lie"] = is_lie_check_active()
         exp_tick()
         if enemy_check and enemy_check():
-            print("[water] another player -> panic")
+            print("[water] another player -> ALARM + panic (F9 to silence)")
+            enemy_alarm_on()
             if panic: panic()
             time.sleep(1); return "skip"
         return "ok"

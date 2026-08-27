@@ -37,12 +37,17 @@ def wait_with_pause(duration):
         time.sleep(0.01) # 檢查頻率
     return True # 表示等待完成
 
+f9_callback = None   # set by recovery.py to silence alarms on F9
+
+
 def on_press(key):
     global pause
     try:
         if key == Key.f8:
             pause = not pause
             print(f"[狀態切換] {'暫停中' if pause else '繼續運行'}")
+        elif key == Key.f9 and f9_callback is not None:
+            f9_callback()
     except AttributeError:
         # 非特殊按鍵，例如 'a' 'b' 等
         pass
