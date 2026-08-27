@@ -163,7 +163,7 @@
       "P3"
     ]
   ],
-  "stacked_jump_secs": 1.2,
+  "stacked_jump_secs": 1.8,
   "node_y_lift": 5,
   "node_lift_override": {
     "P4": 0

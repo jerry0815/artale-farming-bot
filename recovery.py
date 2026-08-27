@@ -978,8 +978,11 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
     use arrow keys; descending just sinks.
 
     `axis="x"` reaches the target X only (ignores Y, no jump) -- used by the reset to reach
-    the rightmost open column without fighting the descent."""
-    locate = locate or get_character_full
+    the rightmost open column without fighting the descent.
+
+    Uses stable_char (densest-cluster median) by default so scattered phantom reads at bad
+    spots (e.g. P6's far-right edge) don't flip the swim direction."""
+    locate = locate or (lambda: stable_char(3))
     t0 = time.time()
     last_jump = 0.0
     try:
