@@ -163,5 +163,6 @@
       "P3"
     ]
   ],
-  "stacked_jump_secs": 1.2
+  "stacked_jump_secs": 1.2,
+  "node_y_lift": 10
 }
