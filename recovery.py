@@ -1166,7 +1166,7 @@ def approach_shoot(seconds, detect_fn, player_cfg,
             key = Key.right if dx >= 0 else Key.left
             if abs(dx) <= attack_range:                   # in range: face + fire a burst
                 best_absdx = None; no_improve = 0
-                occlude_grace = 3                         # tolerate VFX hiding this mob next frames
+                occlude_grace = 2                         # tolerate VFX hiding this mob next frames
                 log(f"IN RANGE dx={dx} px={px} -> attack '{attack_key}' burst (same={len(same)})")
                 kb.safe_press(key); time.sleep(0.03); kb.safe_release(key)
                 for _ in range(3):                        # commit: several hits before re-evaluating

@@ -29,7 +29,7 @@ def bar_candidates(bgr, region=None, cfg=None):
     Filters by bar-like geometry (wide, thin)."""
     c = {**DEFAULTS, **(cfg or {})}
     H, W = bgr.shape[:2]
-    x0, y0, x1, y1 = region or (int(W * 0.15), 55, int(W * 0.85), int(H * 0.90))
+    x0, y0, x1, y1 = region or (int(W * 0.05), 55, int(W * 0.95), int(H * 0.93))
     sub = bgr[y0:y1, x0:x1]
     mask = _red_mask(sub, c["hue_lo"])
     n, lab, stats, cent = cv2.connectedComponentsWithStats(mask, 8)
