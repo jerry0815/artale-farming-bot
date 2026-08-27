@@ -7,6 +7,8 @@ Prereqs: build the dataset first --
 Then:
     python train_mobs.py [epochs] [imgsz]    # default 80 640
     # quick sanity run:  python train_mobs.py 25 640
+    # HYBRID (mix in hand-labeled real frames from label_mobs.py):
+    #   python train_mobs.py 80 640 --real
 
 Writes models/mob_yolo.pt. Review runs/detect/mob_yolo/results.png before trusting it.
 Fish are big-ish, so imgsz 640 trains ~2x faster than 960 AND infers faster in the loop.
@@ -17,13 +19,34 @@ import sys
 import shutil
 
 DATA_ROOT = os.path.join("datasets", "mobs")
+REAL_ROOT = os.path.join("datasets", "mobs_real")
+
+
+def _hybrid_yaml():
+    """Write a data.yaml training on BOTH the synthetic set and the hand-labeled real
+    frames (both train + val), so a few real images fine-tune the synthetic detector."""
+    import glob
+    real_imgs = os.path.abspath(os.path.join(REAL_ROOT, "images"))
+    if not glob.glob(os.path.join(real_imgs, "*.png")):
+        print(f"[train] no real frames in {real_imgs} -- label some with label_mobs.py first")
+        return None
+    p = os.path.join(DATA_ROOT, "data_hybrid.yaml")
+    syn = os.path.abspath(DATA_ROOT)
+    with open(p, "w") as fh:
+        fh.write(f"train:\n  - {syn}/images/train\n  - {real_imgs}\n")
+        fh.write(f"val:\n  - {syn}/images/val\n  - {real_imgs}\n")
+        fh.write("nc: 2\nnames: [fishhouse, goby]\n")
+    print(f"[train] hybrid: synthetic + real frames ({real_imgs})")
+    return p
 
 
 def main():
-    epochs = int(sys.argv[1]) if len(sys.argv) > 1 else 80
-    imgsz = int(sys.argv[2]) if len(sys.argv) > 2 else 640
-    yaml_path = os.path.join(DATA_ROOT, "data.yaml")
-    if not os.path.exists(yaml_path):
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    use_real = "--real" in sys.argv
+    epochs = int(args[0]) if len(args) > 0 else 80
+    imgsz = int(args[1]) if len(args) > 1 else 640
+    yaml_path = _hybrid_yaml() if use_real else os.path.join(DATA_ROOT, "data.yaml")
+    if not yaml_path or not os.path.exists(yaml_path):
         print(f"[train] {yaml_path} missing -- run synth_data.py first"); return
 
     from ultralytics import YOLO                  # lazy import
