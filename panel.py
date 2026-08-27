@@ -10,10 +10,47 @@ shared status, so the existing F8 hotkey and all lie-check ticks keep working.
 See docs/superpowers/specs/2026-08-24-route-recorder-and-ui-design.md.
 """
 import json
+import sys
 import threading
 import http.server
 import socketserver
 import urllib.parse
+from collections import deque
+
+# --- stdout tee: mirror loop prints into a ring buffer the panel can serve ---
+_LOG = deque(maxlen=800)          # (seq, line)
+_LOG_SEQ = [0]
+_LOG_LOCK = threading.Lock()
+
+
+class _Tee:
+    """Wrap a stream: write through, and buffer complete lines into _LOG."""
+    def __init__(self, real):
+        self._real = real
+        self._buf = ""
+
+    def write(self, s):
+        self._real.write(s)
+        with _LOG_LOCK:
+            self._buf += s
+            while "\n" in self._buf:
+                line, self._buf = self._buf.split("\n", 1)
+                _LOG_SEQ[0] += 1
+                _LOG.append((_LOG_SEQ[0], line))
+
+    def flush(self):
+        self._real.flush()
+
+
+def install_log_tee():
+    if not isinstance(sys.stdout, _Tee):
+        sys.stdout = _Tee(sys.stdout)
+
+
+def log_since(cursor):
+    with _LOG_LOCK:
+        lines = [ln for seq, ln in _LOG if seq > cursor]
+        return {"lines": lines, "next": _LOG_SEQ[0]}
 
 PORT = 8080
 
@@ -236,6 +273,9 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
  #stat{font-family:ui-monospace,monospace;background:#1c1c22;border-radius:8px;padding:12px;margin-top:12px}
  fieldset{border:1px solid #333;border-radius:8px;margin-top:14px}
  legend{color:#9ad}
+ #log{font-family:ui-monospace,monospace;font-size:12px;background:#0d0d12;color:#cdd;
+      border-radius:8px;padding:10px;height:240px;overflow:auto;white-space:pre-wrap;line-height:1.4}
+ #log .exp{color:#7fdd7f} #log .app{color:#9ad} #log .wtr{color:#e8c06a}
 </style></head><body><div id=wrap>
  <h1>MapleStory bot — control panel</h1>
  <div id=lie class=ok>lie-check: OK</div>
@@ -281,6 +321,11 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    </div>
  </fieldset>
  <div id=stat>loading…</div>
+ <fieldset><legend>Log</legend>
+   <div class=row><button onclick="document.getElementById('log').innerHTML=''">clear</button>
+     <label><input type=checkbox id=autoscroll checked> auto-scroll</label></div>
+   <div id=log></div>
+ </fieldset>
 </div>
 <script>
  async function cmd(action, mode){
@@ -346,7 +391,24 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    }catch(e){}
    setTimeout(poll, 500);
  }
- loadMaps(); poll(); snapLoop();
+ let logCursor=0;
+ function logClass(s){ if(s.startsWith('[exp]'))return'exp'; if(s.startsWith('[approach'))return'app';
+   if(s.startsWith('[water')||s.startsWith('[nav'))return'wtr'; return''; }
+ async function pollLog(){
+   try{
+     const j = await (await fetch('/log?since='+logCursor)).json();
+     if(j.lines && j.lines.length){
+       const box=document.getElementById('log');
+       for(const ln of j.lines){ const d=document.createElement('div');
+         d.className=logClass(ln); d.textContent=ln; box.appendChild(d); }
+       while(box.childNodes.length>800) box.removeChild(box.firstChild);
+       if(document.getElementById('autoscroll').checked) box.scrollTop=box.scrollHeight;
+     }
+     logCursor=j.next;
+   }catch(e){}
+   setTimeout(pollLog, 1200);
+ }
+ loadMaps(); poll(); snapLoop(); pollLog();
 </script></body></html>"""
 
 
@@ -365,6 +427,9 @@ def make_handler(controller):
             q = urllib.parse.parse_qs(parsed.query)
             if parsed.path == "/":
                 return self._send(200, PAGE, "text/html; charset=utf-8")
+            if parsed.path == "/log":
+                cursor = int(q.get("since", ["0"])[0])
+                return self._send(200, json.dumps(log_since(cursor)))
             if parsed.path == "/status":
                 return self._send(200, json.dumps(_status_dict(controller)))
             if parsed.path == "/maps":
@@ -413,6 +478,7 @@ def make_handler(controller):
 def serve(port=PORT):
     import keyboard as kb
     from pynput.keyboard import Listener
+    install_log_tee()                              # capture loop prints for the panel log pane
     ref = [None]
     controller = Controller(_build_actions(ref))
     ref[0] = controller

@@ -239,6 +239,34 @@ def get_enemy():
         return []
 
 
+def get_exp_number(exp_processor):
+    """Absolute EXP number via OCR (or None). Unlike get_exp it does NOT run the delta /
+    'reasonable gain' logic, so it never prints the anomaly warning -- the per-10-min
+    tracker diffs these numbers itself with its own filtering."""
+    import ocr_processor
+    pil_img, _ = capture_pil_np()
+    if pil_img is None:
+        return None
+    ow, oh = pil_img.width, pil_img.height
+    wo, ho = (0, 0) if ow % 10 == 0 else (22, 56)
+    cw, ch = ow - wo, oh - ho
+    rw, rh = 1920, 1080
+    reg = (1028, 996, 1190, 1025)
+    try:
+        left = int(cw * reg[0] / rw) + wo
+        top = max(0, int(ch * reg[1] / rh) + ho)
+        right = min(ow, int(cw * reg[2] / rw) + wo)
+        bottom = min(oh, int(ch * reg[3] / rh) + ho)
+        adj = int(max(-30, min(30, (cw - rw) * 0.01)))
+        left = max(0, left + adj)
+        raw = ocr_processor.run_ocr(ocr_processor.preprocess_exp_image(
+            pil_img.crop((left, top, right, bottom))), 'exp')
+        num_str, _pct = exp_processor.parse_exp_data(raw)
+        return int(num_str) if num_str else None
+    except Exception:
+        return None
+
+
 def get_exp(exp_processor):
     """Recent EXP gain as [gain, num_str, pct_str] (or None). Faithful port of the
     notebook get_exp: the width/height offsets normalize the 150%-DPI physical grab
@@ -1024,11 +1052,11 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
         kb.safe_release(JUMP)
 
 
-def sink_to_bottom(bottom_y, cap=15.0, locate=None, settle=4, near=15):
-    """Reset descent: release ALL keys and let her SINK straight down. Returns True only
-    once she has actually LANDED at the bottom: she must have been sinking, then stopped
-    for `settle` reads AND be within `near` px of `bottom_y`. This avoids starting the next
-    loop mid-fall. F8 aborts."""
+def sink_to_bottom(bottom_y, cap=15.0, locate=None, settle=4, near=35):
+    """Reset descent: release ALL keys and let her SINK straight down. Returns True once she
+    has LANDED after sinking: she was sinking, then stopped for `settle` reads AND is within
+    `near` px of `bottom_y` (generous, so landing a bit high still counts as arrived). Avoids
+    starting the next loop mid-fall. F8 aborts."""
     locate = locate or get_character_full
     kb.safe_release_all()
     t0 = time.time()
@@ -1548,13 +1576,25 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     t_start = time.time()
     next_break = [time.time() + _r.uniform(*break_every)]
 
-    # EXP tracker: sample the EXP bar periodically, log the gain per 10-min window.
+    # EXP tracker: sample the absolute EXP number periodically; log the gain per 10-min
+    # window (sum of positive consecutive deltas, skipping level-ups and digit-count OCR
+    # errors -- robust to the 'reasonable gain' rejection get_exp used to trip on).
     exp_proc = ExpProcessor() if map_cfg.get("log_exp", True) else None
     _exp_sample_s = float(map_cfg.get("exp_sample_secs", 45))
     _exp_window_s = float(map_cfg.get("exp_window_secs", 600))   # 10 min
     _exp_next_sample = [time.time() + _exp_sample_s]
     _exp_next_log = [time.time() + _exp_window_s]
+    _exp_samples = []                                           # [(t, abs_exp_number)]
     _exp_windows = [0, 0.0]                                      # [count, cumulative gain]
+
+    def _window_gain(since):
+        win = [(t, n) for t, n in _exp_samples if t >= since]
+        total = 0
+        for (_t0, n0), (_t1, n1) in zip(win, win[1:]):
+            d = n1 - n0
+            if d > 0 and len(str(n0)) == len(str(n1)):           # positive, same digits (not lvl-up/OCR error)
+                total += d
+        return total
 
     def exp_tick():
         if exp_proc is None:
@@ -1562,10 +1602,14 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         now = time.time()
         if now >= _exp_next_sample[0]:
             _exp_next_sample[0] = now + _exp_sample_s
-            get_exp(exp_proc)                                    # OCR -> accumulate gain history
+            num = get_exp_number(exp_proc)
+            if num:
+                _exp_samples.append((now, num))
+                if len(_exp_samples) > 400:
+                    del _exp_samples[:200]
         if now >= _exp_next_log[0]:
             _exp_next_log[0] = now + _exp_window_s
-            gain = exp_proc.get_last_n_minutes_gain(int(_exp_window_s / 60))
+            gain = _window_gain(now - _exp_window_s)
             _exp_windows[0] += 1
             _exp_windows[1] += gain
             avg = _exp_windows[1] / _exp_windows[0]
@@ -1682,8 +1726,9 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 print(f"[water] reset -> swim to {reset_node} (x-only)")
                 swim_to(*centers[reset_node], tol=tol, cap=12.0, jump=False, axis="x")
             bottom_y = centers[farm_nodes[0]][1]                   # P6 y (land here before looping)
-            print(f"[water] reset -> sink to bottom (land near y={bottom_y})")
-            sink_to_bottom(bottom_y, cap=15.0)
+            _near = int(map_cfg.get("sink_near", 35))              # buffer: landing a bit high = arrived
+            print(f"[water] reset -> sink to bottom (land within {_near} of y={bottom_y})")
+            sink_to_bottom(bottom_y, cap=15.0, near=_near)
     else:
         current = farm_nodes[0]
         while True:
