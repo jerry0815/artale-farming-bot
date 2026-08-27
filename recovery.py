@@ -1541,6 +1541,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
 
     # rotation: 'sweep' = farm the list in order (bottom->top) then reset via reset_node;
     # 'cyclic' (default) = farm current until depleted, advance to the next (wrapping).
+    _ylift = int(map_cfg.get("node_y_lift", 5))          # aim this many px above node center
     rotation = map_cfg.get("rotation", "cyclic")
     reset_node = map_cfg.get("reset_node")
     beats_per_node = int(map_cfg.get("beats_per_node", 3))
@@ -1581,7 +1582,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         cx, cy = centers[node]
         STATUS["node"] = node
         print(f"[water] --> farm {node} (center {cx},{cy})")
-        swim_to(cx, cy, tol=tol, cap=12.0)
+        swim_to(cx, cy - _ylift, tol=tol, cap=12.0)   # aim a bit ABOVE so she lands on it
         for _ in range(max(1, beats_per_node)):
             if kb.pause or STOP.is_set():
                 return False
