@@ -990,7 +990,9 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
             want = watermap.swim_keys((x, y), (target_x, target_y), tol)
             if not want:
                 return True
-            _apply_swim_keys(want - {"up"})                # never hold Up: up = jump-swim
+            # Water-world vertical: rise = jump (no Up), descend = just sink (no Down).
+            # Only horizontal keys are ever held.
+            _apply_swim_keys(want - {"up", "down"})
             if jump and "up" in want:
                 now = time.time()
                 if now - last_jump >= jump_interval:
@@ -1536,8 +1538,16 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 break                                    # time mode: one beat then advance
         return True
 
+    # Stacked-node groups read the same minimap spot (P3/P4), so we can't reach both in one
+    # pass -- alternate which member we farm each loop (the user's "flag" idea).
+    stacked = map_cfg.get("stacked_alternate", [])       # e.g. [["P4","P3"]]
+    group_of = {name: (gi, mi) for gi, grp in enumerate(stacked)
+                for mi, name in enumerate(grp)}
+
     if rotation == "sweep":
-        print(f"[water] sweep {farm_nodes} then reset via {reset_node or '(bottom)'}")
+        print(f"[water] sweep {farm_nodes} then reset via {reset_node or '(bottom)'}"
+              + (f"; alternate {stacked}" if stacked else ""))
+        loop_i = 0
         while True:
             g = guard()
             if g == "stop":
@@ -1546,11 +1556,15 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 continue
             broke = False
             for node in farm_nodes:                      # bottom -> top, in listed order
+                gm = group_of.get(node)                  # skip the non-chosen stacked member
+                if gm is not None and gm[1] != loop_i % len(stacked[gm[0]]):
+                    continue
                 if guard() != "ok":
                     broke = True; break
                 take_break_if_due()
                 if not farm_node(node):
                     broke = True; break
+            loop_i += 1
             if broke:
                 continue
             # reached the top -> reset: swim to the rightmost drop point, then down to bottom

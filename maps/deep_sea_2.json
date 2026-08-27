@@ -13,6 +13,7 @@
   },
   "rotation": "sweep",
   "reset_node": "RIGHT",
+  "stacked_alternate": [["P4", "P3"]],
   "beats_per_node": 3,
   "detector": "mob_yolo",
   "mob_model": "models/mob_yolo.pt",

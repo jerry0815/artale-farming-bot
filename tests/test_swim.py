@@ -66,3 +66,4 @@ def test_swim_to_no_jump_when_descending(monkeypatch):
     monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
     recovery.swim_to(100, 130, tol=(3, 3), cap=3.0)
     assert recovery.JUMP not in pressed
+    assert Key.down not in pressed           # descend = just sink, never hold Down
