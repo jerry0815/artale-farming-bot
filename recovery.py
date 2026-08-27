@@ -1040,7 +1040,8 @@ def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
 
 def approach_shoot(seconds, detect_fn, player_cfg,
                    attack_range=110, band=70, step=0.14, attack_key='c',
-                   deplete_reads=4, stall_limit=8, scan_w=520, verbose=True):
+                   deplete_reads=4, stall_limit=8, scan_w=520, verbose=True,
+                   patrol_x=None, locate=None):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1053,6 +1054,8 @@ def approach_shoot(seconds, detect_fn, player_cfg,
     import player as _player
     t0 = time.time()
     empty_reads = 0
+    occlude_grace = 0       # keep firing after being in range (VFX hides the mob briefly)
+    patrol_dir = 0          # 0=not patrolling, +1=exploring toward xhi, -1=toward xlo
     best_absdx = None       # closest we've gotten to the current target (net-progress stall)
     no_improve = 0
     last_log = [0.0]
@@ -1088,18 +1091,48 @@ def approach_shoot(seconds, detect_fn, player_cfg,
             if not same:                                  # widen to the WHOLE platform strip --
                 strip = (0, max(0, pfeet - band - 40), W, min(H, pfeet + 40))  # far mobs on a wide
                 same = same_platform(detect_fn(f, strip))                      # platform (e.g. P6)
-            if not same:                                  # DEBOUNCED: several empty frames -> clear
-                empty_reads += 1
+            if not same:
+                # The attack VFX often OCCLUDES the mob we just hit, so it vanishes from
+                # detection for a beat. If we were just in range, keep firing in place a few
+                # frames (assume occluded) rather than abandoning a live mob.
+                if occlude_grace > 0:
+                    occlude_grace -= 1
+                    log(f"no mob (occlusion grace {occlude_grace}) -> hold fire")
+                    kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key)
+                    continue
+                # PATROL: mobs may be OFF-SCREEN on a wide platform (e.g. P6's rightmost
+                # fishhouse). Walk to the far end (minimap-bounded) to bring them into view
+                # before declaring the platform clear.
+                if patrol_x and locate:
+                    cx, _cy = locate()
+                    xlo, xhi = patrol_x
+                    if cx >= 0:
+                        if patrol_dir == 0:
+                            patrol_dir = 1
+                        if patrol_dir > 0 and cx < xhi - 2:
+                            log(f"patrol right (mmx {cx}->{xhi})")
+                            kb.safe_press(Key.right); time.sleep(step); kb.safe_release(Key.right)
+                            continue
+                        if patrol_dir > 0:
+                            patrol_dir = -1                # reached right end -> sweep back left
+                        if patrol_dir < 0 and cx > xlo + 2:
+                            log(f"patrol left (mmx {cx}->{xlo})")
+                            kb.safe_press(Key.left); time.sleep(step); kb.safe_release(Key.left)
+                            continue
+                        patrol_dir = 0                     # covered both ends, nothing -> deplete
+                empty_reads += 1                          # DEBOUNCED: several empty frames -> clear
                 log(f"no same-platform mob ({empty_reads}/{deplete_reads})")
                 if empty_reads >= deplete_reads:
                     return DEPLETED
                 time.sleep(0.12); continue
             empty_reads = 0
+            patrol_dir = 0                                 # found a mob -> reset patrol
             tx, _tfy = min(same, key=lambda m: abs(m[0] - px))
             dx = tx - px
             key = Key.right if dx >= 0 else Key.left
             if abs(dx) <= attack_range:                   # in range: face + fire a burst
                 best_absdx = None; no_improve = 0
+                occlude_grace = 3                         # tolerate VFX hiding this mob next frames
                 log(f"IN RANGE dx={dx} px={px} -> attack '{attack_key}' burst (same={len(same)})")
                 kb.safe_press(key); time.sleep(0.03); kb.safe_release(key)
                 for _ in range(3):                        # commit: several hits before re-evaluating
@@ -1459,6 +1492,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         _adeplete = int(map_cfg.get("deplete_reads", 4))
         _astall = int(map_cfg.get("stall_limit", 8))
         _ascan = int(map_cfg.get("approach_scan_w", 520))
+        _phalf = int(map_cfg.get("patrol_half", 45))     # minimap px to patrol each side for off-screen mobs
         print(f"[water] approach ON: detector={detector} range={_arange} band={_aband}")
 
     buff_keys = map_cfg.get("buff_keys", [])          # per-character buffs; empty = none
@@ -1517,10 +1551,13 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             if kb.pause or STOP.is_set():
                 return False
             if approach:
+                _ncx = centers[node][0]                   # patrol +/- half around the node (minimap x)
+                _px = (max(0, _ncx - _phalf), _ncx + _phalf) if _phalf > 0 else None
                 ok = approach_shoot(_r.uniform(*stand_secs), detect_fn, _pcfg,
                                     attack_range=_arange, band=_aband, step=_astep,
                                     attack_key=attack_key, deplete_reads=_adeplete,
-                                    stall_limit=_astall, scan_w=_ascan)
+                                    stall_limit=_astall, scan_w=_ascan,
+                                    patrol_x=_px, locate=stable_char)
                 heal_skill()
                 if ok is False:
                     return False
@@ -1573,10 +1610,11 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             if broke:
                 continue
             # reached the top -> reset: swim to the rightmost drop point, then down to bottom
+            # reset is all rightward/downward -> never jump (just move right and sink)
             if reset_node and reset_node in centers:
                 STATUS["node"] = reset_node
-                swim_to(*centers[reset_node], tol=tol, cap=12.0)
-            swim_to(*centers[farm_nodes[0]], tol=tol, cap=15.0)   # let her drop back to bottom
+                swim_to(*centers[reset_node], tol=tol, cap=12.0, jump=False)
+            swim_to(*centers[farm_nodes[0]], tol=tol, cap=15.0, jump=False)   # drop to bottom
     else:
         current = farm_nodes[0]
         while True:
