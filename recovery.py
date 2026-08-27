@@ -1146,7 +1146,15 @@ def approach_shoot(seconds, detect_fn, player_cfg,
                 for _ in range(3):                        # commit: several hits before re-evaluating
                     kb.safe_press(attack_key); time.sleep(0.35); kb.safe_release(attack_key)
                     time.sleep(0.05)
-            else:                                         # walk toward it, attacking as we go
+            else:                                         # nearest visible mob is OUT of range
+                # If we were just in range, the mob under/next to us is likely OCCLUDED by the
+                # player sprite (the far one is a different mob). Hold and keep firing instead
+                # of walking off the mob we're standing on.
+                if occlude_grace > 0:
+                    occlude_grace -= 1
+                    log(f"nearest far (dx={dx}) but recently in range -> hold fire (occluded?)")
+                    kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key)
+                    continue
                 # NET-progress stall: only give up if we stop getting CLOSER (best |dx| not
                 # improving) for stall_limit frames -- tolerates jitter + slow approach.
                 if best_absdx is None or abs(dx) < best_absdx - 4:
@@ -1624,10 +1632,6 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             bottom_y = centers[farm_nodes[0]][1] - tol[1]          # P6 y band
             print(f"[water] reset -> sink to bottom (y>={bottom_y})")
             sink_to_bottom(bottom_y, cap=15.0)
-            _wl = float(map_cfg.get("reset_walk_left", 0.8))       # off the right edge into P6
-            if _wl > 0:
-                print(f"[water] reset -> walk left {_wl}s into P6")
-                kb.safe_press(Key.left); time.sleep(_wl); kb.safe_release(Key.left)
     else:
         current = farm_nodes[0]
         while True:
