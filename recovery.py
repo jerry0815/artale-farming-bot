@@ -1012,29 +1012,31 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
         kb.safe_release(JUMP)
 
 
-def sink_to_bottom(bottom_y, cap=15.0, locate=None, settle=4):
-    """Reset descent: release ALL keys and let her SINK straight down. Watches the y-axis
-    and returns True once she reaches `bottom_y` (at the bottom) OR stops sinking for
-    `settle` reads (landed on the bottom platform). F8 aborts."""
+def sink_to_bottom(bottom_y, cap=15.0, locate=None, settle=4, near=15):
+    """Reset descent: release ALL keys and let her SINK straight down. Returns True only
+    once she has actually LANDED at the bottom: she must have been sinking, then stopped
+    for `settle` reads AND be within `near` px of `bottom_y`. This avoids starting the next
+    loop mid-fall. F8 aborts."""
     locate = locate or get_character_full
     kb.safe_release_all()
     t0 = time.time()
     prev_y = None
     still = 0
+    sank = False
     while time.time() - t0 < cap:
         if kb.pause:
             return False
         lie_check_fast_tick()
         x, y = locate()
         if y is not None and y >= 0:
-            if y >= bottom_y:                             # reached the bottom band
-                return True
-            if prev_y is not None and y <= prev_y + 0.5:  # no longer sinking -> landed/snagged
-                still += 1
-                if still >= settle:
-                    return True
-            else:
-                still = 0
+            if prev_y is not None:
+                if y > prev_y + 0.5:                      # still descending
+                    sank = True
+                    still = 0
+                else:
+                    still += 1
+                    if sank and still >= settle and y >= bottom_y - near:
+                        return True                       # sank, then landed near the bottom
             prev_y = y
         time.sleep(0.1)
     return True
@@ -1632,8 +1634,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 STATUS["node"] = reset_node
                 print(f"[water] reset -> swim to {reset_node}")
                 swim_to(*centers[reset_node], tol=tol, cap=12.0, jump=False)
-            bottom_y = centers[farm_nodes[0]][1] - tol[1]          # P6 y band
-            print(f"[water] reset -> sink to bottom (y>={bottom_y})")
+            bottom_y = centers[farm_nodes[0]][1]                   # P6 y (land here before looping)
+            print(f"[water] reset -> sink to bottom (land near y={bottom_y})")
             sink_to_bottom(bottom_y, cap=15.0)
     else:
         current = farm_nodes[0]
