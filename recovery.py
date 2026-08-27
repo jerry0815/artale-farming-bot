@@ -1655,6 +1655,10 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             bottom_y = centers[farm_nodes[0]][1] - tol[1]          # P6 y band
             print(f"[water] reset -> sink to bottom (y>={bottom_y})")
             sink_to_bottom(bottom_y, cap=15.0)
+            _wl = float(map_cfg.get("reset_walk_left", 0.8))       # off the right edge into P6
+            if _wl > 0:
+                print(f"[water] reset -> walk left {_wl}s into P6")
+                kb.safe_press(Key.left); time.sleep(_wl); kb.safe_release(Key.left)
     else:
         current = farm_nodes[0]
         while True:
