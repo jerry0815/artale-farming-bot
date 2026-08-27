@@ -1158,6 +1158,7 @@ def approach_shoot(seconds, detect_fn, player_cfg,
     occlude_grace = 0       # keep firing after being in range (VFX hides the mob briefly)
     best_absdx = None       # closest we've gotten to the current target (net-progress stall)
     no_improve = 0
+    last_player = None      # sticky anchor: lock onto the bar nearest last frame's player
     last_log = [0.0]
 
     def log(msg):
@@ -1173,10 +1174,11 @@ def approach_shoot(seconds, detect_fn, player_cfg,
             f = capture()
             if f is None:
                 time.sleep(0.1); continue
-            p = _player.find_player(f, cfg=player_cfg)   # cheap (color); do it first
+            p = _player.find_player(f, cfg=player_cfg, near=last_player)   # sticky anchor
             if p is None:                                 # anchor lost -> brief blind attack
                 log("player NOT found -> blind attack")
                 kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key); continue
+            last_player = p
             px, pfeet = p
             # Scan the FULL platform-width strip at the player's y-band (YOLO is cheap on the
             # whole frame). Catches far mobs (P6's rightmost fishhouse) without any patrol.
@@ -1760,6 +1762,10 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             _near = int(map_cfg.get("sink_near", 35))              # buffer: landing a bit high = arrived
             print(f"[water] reset -> sink to bottom (land within {_near} of y={bottom_y})")
             sink_to_bottom(bottom_y, cap=15.0, near=_near)
+            # slide left to P6's center (x-only, no jump) -- off the sensing-bad right edge
+            print(f"[water] reset -> reposition to {farm_nodes[0]} center (x-only)")
+            swim_to(centers[farm_nodes[0]][0], centers[farm_nodes[0]][1],
+                    tol=tol, cap=8.0, jump=False, axis="x")
     else:
         current = farm_nodes[0]
         while True:

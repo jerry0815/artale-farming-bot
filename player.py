@@ -51,13 +51,28 @@ def pick_center(cands, frame_shape, y_weight=0.4, y_focus=0.45):
     return min(cands, key=lambda b: abs(b[0] - W / 2) + y_weight * abs(b[1] - H * y_focus))
 
 
-def find_player(bgr, region=None, cfg=None, debug=False):
-    """Player screen position (x, feet_y), or None. With debug=True returns a dict
-    {player, bar, candidates} for the preview overlay."""
+def pick_near(cands, near, foot_offset):
+    """Candidate whose implied feet (cx, cy+foot_offset) is nearest `near`=(x,feet)."""
+    nx, ny = near
+    return min(cands, key=lambda b: (b[0] - nx) ** 2 + ((b[1] + foot_offset) - ny) ** 2)
+
+
+def find_player(bgr, region=None, cfg=None, debug=False, near=None, near_tol=130):
+    """Player screen position (x, feet_y), or None. If `near`=(x,feet) (last known player)
+    is given, LOCK onto the candidate nearest it (within near_tol) so transient monster HP
+    bars near screen-center don't steal the anchor; else fall back to center-bias. With
+    debug=True returns {player, bar, candidates}."""
     c = {**DEFAULTS, **(cfg or {})}
+    fo = c["foot_offset"]
     cands = bar_candidates(bgr, region=region, cfg=c)
-    bar = pick_center(cands, bgr.shape)
-    player = None if bar is None else (bar[0], bar[1] + c["foot_offset"])
+    bar = None
+    if near is not None and cands:                    # sticky: prefer the bar nearest last pos
+        b = pick_near(cands, near, fo)
+        if abs(b[0] - near[0]) <= near_tol and abs((b[1] + fo) - near[1]) <= near_tol:
+            bar = b
+    if bar is None:                                   # re-acquire: nearest screen center
+        bar = pick_center(cands, bgr.shape)
+    player = None if bar is None else (bar[0], bar[1] + fo)
     if debug:
         return {"player": player, "bar": bar, "candidates": cands}
     return player
