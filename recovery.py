@@ -1776,6 +1776,25 @@ if __name__ == "__main__":
     elif cmd == "where":                                    # print current node classification
         x, y = stable_char(4)
         print(f"({x},{y}) -> {navmap.classify_node(x, y)}")
+    elif cmd == "trackpos":                                 # live minimap (x,y) readout; F8/Ctrl-C to stop
+        hz = float(sys.argv[sys.argv.index("--hz") + 1]) if "--hz" in sys.argv else 6.0
+        lis = Listener(on_press=kb.on_press); lis.start()
+        print(f"[trackpos] live minimap (x,y) at {hz:.0f}Hz -- move up/down to watch the pin. F8 pauses, Ctrl-C stops.")
+        prev = None
+        try:
+            while True:
+                if kb.pause:
+                    time.sleep(0.1); continue
+                x, y = get_character_full()
+                dyq = "" if (prev is None or y < 0 or prev < 0) else f"  dy={y - prev:+d}"
+                if y >= 0:
+                    prev = y
+                print(f"  ({x:>4},{y:>4}){dyq}")
+                time.sleep(1.0 / hz)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            lis.stop()
     elif cmd == "hop":                                      # test one climb_rope_hop: hop GX LY [dismount]
         gx, ly = int(sys.argv[2]), int(sys.argv[3])
         dm = sys.argv[4] if len(sys.argv) > 4 else None
@@ -1959,7 +1978,7 @@ if __name__ == "__main__":
         print("usage: python recovery.py <cmd>")
         print("  run:   runnav          full production farming run (F8 to start/pause)")
         print("  test:  nav [secs]      bounded runnav (default 90s)")
-        print("  nav debug: focus | where | hop GX LY [dismount] | portal | drop | gobottom | recover")
+        print("  nav debug: focus | where | trackpos [--hz N] | hop GX LY [dismount] | portal | drop | gobottom | recover")
         print("  route: record-route <map>   record a path -> routes/<map>.capture.jsonl")
         print("  water: waternav [secs] --map maps/<name>.json   water-map farming (F8 start/pause)")
         print("  water: fishcount --map maps/<name>.json [--sweep|--scale S|--thr T|--per N|--roi x0,y0,x1,y1]")
