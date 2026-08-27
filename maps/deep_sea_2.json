@@ -164,5 +164,8 @@
     ]
   ],
   "stacked_jump_secs": 1.2,
-  "node_y_lift": 5
+  "node_y_lift": 5,
+  "node_lift_override": {
+    "P4": 0
+  }
 }
