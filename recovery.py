@@ -968,14 +968,17 @@ def _apply_swim_keys(want):
 
 
 def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
-            jump_interval=0.1, jump_interval_max=0.5):
+            jump_interval=0.1, jump_interval_max=0.5, axis="xy"):
     """Swim toward (target_x, target_y) until within `tol` on both axes or `cap` seconds.
     Returns True on arrival. F8 (kb.pause) aborts. `locate` (default get_character_full)
     is injectable for tests.
 
     Water-world movement: you RISE by JUMPING repeatedly (holding Up does nothing), so when
     the target is above we spam JUMP every `jump_interval` s and NEVER press Up. Left/right
-    use arrow keys; descending holds Down."""
+    use arrow keys; descending just sinks.
+
+    `axis="x"` reaches the target X only (ignores Y, no jump) -- used by the reset to reach
+    the rightmost open column without fighting the descent."""
     locate = locate or get_character_full
     t0 = time.time()
     last_jump = 0.0
@@ -988,6 +991,12 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
             if x is None or x < 0:
                 time.sleep(0.04); continue
             want = watermap.swim_keys((x, y), (target_x, target_y), tol)
+            if axis == "x":                               # horizontal only; arrived when x is close
+                horiz = want & {"left", "right"}
+                if not horiz:
+                    return True
+                _apply_swim_keys(horiz)
+                time.sleep(0.05); continue
             if not want:
                 return True
             # Water-world vertical: rise = jump (no Up), descend = just sink (no Down).
@@ -1633,8 +1642,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             # SINK straight down, watching y until she reaches the bottom -> next loop.
             if reset_node and reset_node in centers:
                 STATUS["node"] = reset_node
-                print(f"[water] reset -> swim to {reset_node}")
-                swim_to(*centers[reset_node], tol=tol, cap=12.0, jump=False)
+                print(f"[water] reset -> swim to {reset_node} (x-only)")
+                swim_to(*centers[reset_node], tol=tol, cap=12.0, jump=False, axis="x")
             bottom_y = centers[farm_nodes[0]][1]                   # P6 y (land here before looping)
             print(f"[water] reset -> sink to bottom (land near y={bottom_y})")
             sink_to_bottom(bottom_y, cap=15.0)
