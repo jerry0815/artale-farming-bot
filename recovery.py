@@ -1140,9 +1140,67 @@ def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
         kb.safe_release(attack_key)
 
 
+def walk_shoot(node_mm_x, seconds, detect_fn, attack_key='c', half=60, tol=(3, 3),
+               walk_step=0.25, deplete_reads=2, verbose=True, label=""):
+    """Sweep a platform end-to-end firing -- NO screen player-anchor (minimap only, so it's
+    robust to the damage-number/monster-bar anchor mess). Walks between [center-half,
+    center+half] on the MINIMAP x, stopping to fire an attack burst each step (the attack
+    roots the char anyway). Depletion = detect_fn finds no mob in the central screen band
+    for `deplete_reads` consecutive sweep-ends. Returns DEPLETED / True (beat done) / False."""
+    left, right = max(0, node_mm_x - half), node_mm_x + half
+    target = right                                        # sweep toward the right first
+    t0, empty_ends, last_log = time.time(), 0, [0.0]
+
+    def log(msg):
+        if verbose and time.time() - last_log[0] > 0.6:
+            last_log[0] = time.time(); print(f"[walk {label}] " + msg)
+
+    def burst(n=2):
+        for _ in range(n):
+            if kb.pause:
+                return
+            kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key)
+
+    def central_clear():
+        f = capture()
+        if f is None:
+            return False
+        H, W = f.shape[:2]
+        band = (int(W * 0.12), int(H * 0.34), int(W * 0.88), int(H * 0.80))
+        return len(detect_fn(f, band)) == 0
+
+    try:
+        while time.time() - t0 < seconds:
+            if kb.pause or STOP.is_set():
+                return False
+            lie_check_fast_tick()
+            x, _y = stable_char(2)                         # minimap x (robust)
+            if x < 0:                                      # no read -> fire in place, retry
+                burst(1); continue
+            if abs(x - target) <= tol[0] + 3:              # reached an end -> fire + reverse
+                burst(2)
+                target = left if target == right else right
+                if central_clear():                        # depletion check at the sweep end
+                    empty_ends += 1
+                    log(f"sweep end clear ({empty_ends}/{deplete_reads})")
+                    if empty_ends >= deplete_reads:
+                        return DEPLETED
+                else:
+                    empty_ends = 0
+                continue
+            key = Key.right if target > x else Key.left    # step toward the end, then fire
+            log(f"mmx={x} -> {'right' if target > x else 'left'} to {target}")
+            kb.safe_press(key); time.sleep(walk_step); kb.safe_release(key)
+            burst(1)
+        return True
+    finally:
+        kb.safe_release_all()
+
+
 def approach_shoot(seconds, detect_fn, player_cfg,
                    attack_range=110, band=70, step=0.14, attack_key='c',
-                   deplete_reads=4, stall_limit=8, verbose=True, label="", confirm_scans=3):
+                   deplete_reads=4, stall_limit=8, verbose=True, label="", confirm_scans=3,
+                   mm_bounds=None):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1270,6 +1328,16 @@ def approach_shoot(seconds, detect_fn, player_cfg,
                     return DEPLETED
                 # WALK ONLY -- do NOT attack while approaching: the attack skill roots her in
                 # place, so firing mid-walk cancels her movement and she never closes in.
+                # MINIMAP BOUND: navigation stays on the minimap. Never step OFF the platform
+                # even if the (noisy) anchor says so -- fire in place at the edge instead. This
+                # stops a bad anchor from walking her off-platform and breaking the next swim_to.
+                if mm_bounds is not None:
+                    mmx, _mmy = stable_char(2)
+                    if mmx >= 0 and ((key == Key.right and mmx >= mm_bounds[1]) or
+                                     (key == Key.left and mmx <= mm_bounds[0])):
+                        log(f"platform edge (mmx={mmx} bounds={mm_bounds}) -> fire in place")
+                        kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key)
+                        continue
                 log(f"dx={dx} px={px} -> step {'right' if dx > 0 else 'left'} "
                     f"(same={len(same)}, best={best_absdx}, noimp={no_improve})")
                 kb.safe_press(key); time.sleep(step); kb.safe_release(key)
@@ -1600,10 +1668,17 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             STATUS["count"] = c
             return c
 
-    # Close-range approach: walk to the nearest same-platform mob and attack. Replaces
-    # fixed-fire per beat and reports its own depletion (no mob left on the platform).
+    # Farming mode: 'walk_shoot' = minimap-only end-to-end sweep firing (no screen anchor,
+    # robust); 'approach' = walk to the detected nearest mob (needs a stable player anchor);
+    # else fixed-fire at the node center.
     attack_key = map_cfg.get("attack_key", "c")
-    approach = bool(map_cfg.get("approach", False))
+    farm_mode = map_cfg.get("farm_mode", "approach" if map_cfg.get("approach") else "park")
+    _phalf = int(map_cfg.get("platform_half", 60))    # minimap half-width to sweep for walk_shoot
+    if farm_mode == "walk_shoot":
+        if detect_fn is None:
+            raise RuntimeError("walk_shoot needs detector 'mob_yolo' or 'fish'")
+        print(f"[water] walk_shoot ON: detector={detector} platform_half={_phalf}")
+    approach = farm_mode == "approach"
     if approach:
         if detect_fn is None:
             raise RuntimeError("approach needs detector 'mob_yolo' or 'fish'")
@@ -1736,12 +1811,24 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         for _ in range(max(1, beats_per_node)):
             if kb.pause or STOP.is_set():
                 return False
+            if farm_mode == "walk_shoot":
+                ok = walk_shoot(centers[node][0], _r.uniform(*stand_secs), detect_fn,
+                                attack_key=attack_key, half=_phalf, tol=tol,
+                                deplete_reads=int(map_cfg.get("deplete_reads", 2)), label=node)
+                heal_skill()
+                if ok is False:
+                    return False
+                if ok is DEPLETED:
+                    break
+                continue
             if approach:
+                _ncx = centers[node][0]                    # keep her on THIS platform (minimap)
                 ok = approach_shoot(_r.uniform(*stand_secs), detect_fn, _pcfg,
                                     attack_range=_arange, band=_aband, step=_astep,
                                     attack_key=attack_key, deplete_reads=_adeplete,
                                     stall_limit=_astall, label=node,
-                                    confirm_scans=int(map_cfg.get("confirm_scans", 3)))
+                                    confirm_scans=int(map_cfg.get("confirm_scans", 3)),
+                                    mm_bounds=(_ncx - _phalf, _ncx + _phalf))
                 heal_skill()
                 if ok is False:
                     return False

@@ -174,5 +174,6 @@
   "node_arrive_jumps": {
     "P4": 2
   },
-  "buff_interval_secs": 300
+  "buff_interval_secs": 300,
+  "platform_half": 60
 }

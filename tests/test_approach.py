@@ -92,3 +92,25 @@ def test_double_check_stays_when_mob_reappears_during_confirm(monkeypatch):
 
     r = recovery.approach_shoot(10, detect, None, deplete_reads=2, confirm_scans=1, verbose=False)
     assert r is not recovery.DEPLETED     # mob reappeared in the double-check -> did not leave
+
+
+def test_minimap_bound_fires_in_place_at_platform_edge(monkeypatch):
+    # Mob far to the right (would step right), but she's at the right minimap bound ->
+    # must FIRE IN PLACE, not walk off the platform.
+    import numpy as np
+    mob = [(0.9, 1600, 480, 60, 40)]                 # cx=1630, dx large, out of range
+    monkeypatch.setattr(recovery, "capture", lambda: np.zeros((1000, 1600, 3), np.uint8))
+    monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(player, "find_player", lambda f, cfg=None, near=None: (800, 500))
+    monkeypatch.setattr(recovery, "stable_char", lambda n=2: (180, 136))   # at right bound
+    monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
+    presses = []
+    monkeypatch.setattr(recovery.kb, "safe_press", lambda k: presses.append(k))
+    monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
+    it = iter([0, 0])
+    monkeypatch.setattr(recovery.time, "time", lambda: next(it, 10_000))
+    recovery.approach_shoot(10, lambda f, roi: mob, None, attack_range=90,
+                            mm_bounds=(60, 180), verbose=False)
+    assert Key.right not in presses      # did NOT walk off the platform
+    assert 'c' in presses                # fired in place instead
