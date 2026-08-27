@@ -1583,6 +1583,9 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         print(f"[water] approach ON: detector={detector} range={_arange} band={_aband}")
 
     buff_keys = map_cfg.get("buff_keys", [])          # per-character buffs; empty = none
+    _bi = map_cfg.get("buff_interval_secs")           # exact interval (else skill_interval range)
+    if _bi:
+        skill_interval = (float(_bi), float(_bi))
     next_skill = [time.time() + _r.uniform(*skill_interval)]   # don't fire on the first beat
 
     def heal_skill():

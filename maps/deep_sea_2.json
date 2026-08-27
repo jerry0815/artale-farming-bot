@@ -36,7 +36,9 @@
   "approach_step": 0.28,
   "deplete_reads": 4,
   "stall_limit": 8,
-  "buff_keys": [],
+  "buff_keys": [
+    "5"
+  ],
   "player": {
     "foot_offset": 135
   },
@@ -170,5 +172,6 @@
   },
   "node_arrive_jumps": {
     "P4": 2
-  }
+  },
+  "buff_interval_secs": 300
 }
