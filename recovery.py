@@ -1548,6 +1548,31 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     t_start = time.time()
     next_break = [time.time() + _r.uniform(*break_every)]
 
+    # EXP tracker: sample the EXP bar periodically, log the gain per 10-min window.
+    exp_proc = ExpProcessor() if map_cfg.get("log_exp", True) else None
+    _exp_sample_s = float(map_cfg.get("exp_sample_secs", 45))
+    _exp_window_s = float(map_cfg.get("exp_window_secs", 600))   # 10 min
+    _exp_next_sample = [time.time() + _exp_sample_s]
+    _exp_next_log = [time.time() + _exp_window_s]
+    _exp_windows = [0, 0.0]                                      # [count, cumulative gain]
+
+    def exp_tick():
+        if exp_proc is None:
+            return
+        now = time.time()
+        if now >= _exp_next_sample[0]:
+            _exp_next_sample[0] = now + _exp_sample_s
+            get_exp(exp_proc)                                    # OCR -> accumulate gain history
+        if now >= _exp_next_log[0]:
+            _exp_next_log[0] = now + _exp_window_s
+            gain = exp_proc.get_last_n_minutes_gain(int(_exp_window_s / 60))
+            _exp_windows[0] += 1
+            _exp_windows[1] += gain
+            avg = _exp_windows[1] / _exp_windows[0]
+            STATUS["exp_10min"] = round(gain)
+            print(f"[exp] last 10 min: {gain:,.0f} EXP  |  avg/10min: {avg:,.0f} "
+                  f"(over {_exp_windows[0]} window{'s' if _exp_windows[0] != 1 else ''})")
+
     def guard():
         """Per-tick housekeeping. Returns 'stop' (return now), 'pause'/'skip'
         (continue the outer loop), or 'ok'."""
@@ -1560,6 +1585,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             STATUS["state"] = "paused"; STATUS["lie"] = False; time.sleep(0.1); return "pause"
         STATUS["state"] = "farming"
         lie_check_tick(); STATUS["lie"] = is_lie_check_active()
+        exp_tick()
         if enemy_check and enemy_check():
             print("[water] another player -> panic")
             if panic: panic()
