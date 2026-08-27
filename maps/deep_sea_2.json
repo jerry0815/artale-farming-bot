@@ -175,5 +175,11 @@
     "P4": 2
   },
   "buff_interval_secs": 300,
-  "platform_half": 60
+  "platform_half": 60,
+  "map_box": [
+    30,
+    200,
+    50,
+    385
+  ]
 }

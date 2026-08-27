@@ -1012,6 +1012,15 @@ def set_minimap(x, y, w, h):
     MM_X, MM_Y, MM_W, MM_H = x, y, w, h
 
 
+def set_map_box(x_min, x_max, y_min, y_max):
+    """Override the VALID character-dot box (per-map). The dragon-nest default
+    (60-170, 65-175) wrongly excludes the water map's dots (x~40-185, y~76-372), so the
+    reader falls back to the largest blob and a minimap-edge PHANTOM wins. Set this to the
+    map's real dot range to reject phantoms outside it."""
+    global MAP_X_MIN, MAP_X_MAX, MAP_Y_MIN, MAP_Y_MAX
+    MAP_X_MIN, MAP_X_MAX, MAP_Y_MIN, MAP_Y_MAX = x_min, x_max, y_min, y_max
+
+
 def _apply_swim_keys(want):
     """Hold exactly the arrow keys in `want`; release the rest."""
     for name, key in _ARROW.items():
@@ -1606,6 +1615,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     if isinstance(map_cfg, str):
         map_cfg = watermap.load_map(map_cfg)
     set_minimap(*watermap.minimap_crop(map_cfg))
+    if map_cfg.get("map_box"):                          # per-map valid dot box (reject phantoms)
+        set_map_box(*map_cfg["map_box"])
     centers = watermap.node_centers(map_cfg)
     farm_nodes = map_cfg.get("farm_nodes") or list(centers)
     if not farm_nodes:
