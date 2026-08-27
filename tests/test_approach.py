@@ -45,14 +45,14 @@ def test_walks_right_toward_far_mob(monkeypatch):
     mob = [(0.7, 1200, 480, 60, 40)]                 # cx=1230, bottom=520 ~ feet 500 -> same
     df, pressed = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0])
     recovery.approach_shoot(10, df, None, attack_range=110, verbose=False)
-    assert Key.right in pressed and 'c' in pressed   # dx=+430 -> step right while firing
+    assert Key.right in pressed and 'c' not in pressed   # walk only (attack roots her)
 
 
 def test_walks_left_toward_far_mob(monkeypatch):
     mob = [(0.7, 100, 480, 60, 40)]                  # cx=130, far left of player 800
     df, pressed = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0])
     recovery.approach_shoot(10, df, None, attack_range=110, verbose=False)
-    assert Key.left in pressed and 'c' in pressed
+    assert Key.left in pressed and 'c' not in pressed    # walk only, no attack mid-approach
 
 
 def test_attacks_in_place_when_in_range(monkeypatch):

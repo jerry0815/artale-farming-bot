@@ -1169,10 +1169,11 @@ def approach_shoot(seconds, detect_fn, player_cfg,
                 if no_improve >= stall_limit:
                     log(f"stalled at dx={dx} (best={best_absdx}, unreachable) -> advance")
                     return DEPLETED
+                # WALK ONLY -- do NOT attack while approaching: the attack skill roots her in
+                # place, so firing mid-walk cancels her movement and she never closes in.
                 log(f"dx={dx} px={px} -> step {'right' if dx > 0 else 'left'} "
                     f"(same={len(same)}, best={best_absdx}, noimp={no_improve})")
-                kb.safe_press(key); kb.safe_press(attack_key); time.sleep(step)
-                kb.safe_release(attack_key); kb.safe_release(key)
+                kb.safe_press(key); time.sleep(step); kb.safe_release(key)
         return True
     finally:
         kb.safe_release(attack_key)
