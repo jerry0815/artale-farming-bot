@@ -163,14 +163,21 @@ def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, ro
     f = recovery.capture()
     if f is None:
         return {"ok": False, "msg": "no frame (is the game window visible / not minimized?)"}
-    tmpls, mode = fish.templates_for(cfg, scale=scale)
-    if thr is None:
-        thr = cfg.get("fish_threshold") or fish.default_threshold(mode)
     if roi is None and cfg.get("count_roi"):
         roi = tuple(cfg["count_roi"])
-    ds = cfg.get("match_downscale", 0.5)
-    result = fish.scan(f, tmpls, roi=roi, threshold=thr, downscale=ds)
-    best, dets = result["best"], result["dets"]
+    if cfg.get("detector") == "mob_yolo":                     # match the loop's real detector
+        import mob_detect
+        m = mob_detect.load_yolo(cfg.get("mob_model", "models/mob_yolo.pt"))
+        conf = thr if thr is not None else float(cfg.get("mob_conf", 0.6))
+        dets = mob_detect.yolo_boxes(m, f, roi=roi, conf=conf, imgsz=int(cfg.get("mob_imgsz", 640)))
+        best, mode, thr = {}, "mob_yolo", conf
+    else:
+        tmpls, mode = fish.templates_for(cfg, scale=scale)
+        if thr is None:
+            thr = cfg.get("fish_threshold") or fish.default_threshold(mode)
+        ds = cfg.get("match_downscale", 0.5)
+        result = fish.scan(f, tmpls, roi=roi, threshold=thr, downscale=ds)
+        best, dets = result["best"], result["dets"]
     # player anchor overlay (green), all red-bar candidates (yellow)
     import player as _player
     pinfo = _player.find_player(f, cfg=cfg.get("player"), debug=True)
