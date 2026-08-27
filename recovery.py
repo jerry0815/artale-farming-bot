@@ -1080,12 +1080,17 @@ def approach_shoot(seconds, detect_fn, player_cfg,
             H, W = f.shape[:2]
             lroi = (max(0, px - scan_w), max(0, pfeet - band - 40),
                     min(W, px + scan_w), min(H, pfeet + 40))
-            mobs = detect_fn(f, lroi)
-            same = [(mx + mw // 2, my + mh) for (s, mx, my, mw, mh) in mobs
-                    if abs((my + mh) - pfeet) <= band]
+            def same_platform(dets):
+                return [(mx + mw // 2, my + mh) for (_s, mx, my, mw, mh) in dets
+                        if abs((my + mh) - pfeet) <= band]
+
+            same = same_platform(detect_fn(f, lroi))
+            if not same:                                  # widen to the WHOLE platform strip --
+                strip = (0, max(0, pfeet - band - 40), W, min(H, pfeet + 40))  # far mobs on a wide
+                same = same_platform(detect_fn(f, strip))                      # platform (e.g. P6)
             if not same:                                  # DEBOUNCED: several empty frames -> clear
                 empty_reads += 1
-                log(f"no same-platform mob ({empty_reads}/{deplete_reads}); mobs seen={len(mobs)}")
+                log(f"no same-platform mob ({empty_reads}/{deplete_reads})")
                 if empty_reads >= deplete_reads:
                     return DEPLETED
                 time.sleep(0.12); continue
