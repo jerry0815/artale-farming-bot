@@ -67,3 +67,28 @@ def test_blind_attack_when_anchor_lost(monkeypatch):
     df, pressed = _setup(monkeypatch, mobs=mob, ptuple=None, clock_vals=[0, 0])
     recovery.approach_shoot(10, df, None, verbose=False)
     assert 'c' in pressed                            # no anchor -> still attacks
+
+
+def test_double_check_stays_when_mob_reappears_during_confirm(monkeypatch):
+    # Main loop reads empty (reaches deplete_reads), but the confirm re-scan finds a mob
+    # -> must NOT return DEPLETED (resume farming). Guards against one flaky frame leaving.
+    import numpy as np
+    calls = {"n": 0}
+
+    def detect(f, roi):
+        calls["n"] += 1
+        return [] if calls["n"] <= 2 else [(0.9, 800, 480, 60, 40)]   # empty, then a mob
+
+    monkeypatch.setattr(recovery, "capture", lambda: np.zeros((1000, 1600, 3), np.uint8))
+    monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(player, "find_player", lambda f, cfg=None, near=None: (800, 500))
+    monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
+    monkeypatch.setattr(recovery.kb, "safe_press", lambda k: None)
+    monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
+    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
+    it = iter([0, 0, 0, 0, 0])
+    monkeypatch.setattr(recovery.time, "time", lambda: next(it, 10_000))
+
+    r = recovery.approach_shoot(10, detect, None, deplete_reads=2, confirm_scans=1, verbose=False)
+    assert r is not recovery.DEPLETED     # mob reappeared in the double-check -> did not leave

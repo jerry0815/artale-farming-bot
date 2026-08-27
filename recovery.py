@@ -1142,7 +1142,7 @@ def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
 
 def approach_shoot(seconds, detect_fn, player_cfg,
                    attack_range=110, band=70, step=0.14, attack_key='c',
-                   deplete_reads=4, stall_limit=8, verbose=True, label=""):
+                   deplete_reads=4, stall_limit=8, verbose=True, label="", confirm_scans=3):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1165,6 +1165,34 @@ def approach_shoot(seconds, detect_fn, player_cfg,
         if verbose and time.time() - last_log[0] > 0.6:
             last_log[0] = time.time()
             print(f"[approach {label}] " + msg if label else "[approach] " + msg)
+
+    def confirm_clear():
+        """DOUBLE-CHECK before leaving: stop attacking so the VFX/floating numbers clear,
+        then re-scan a few clean frames. Returns True only if the platform is really empty
+        (so a single flaky detection never abandons a live mob). Paused -> False (don't leave)."""
+        kb.safe_release_all()
+        time.sleep(0.4)                                   # let attack effects fade
+        for _ in range(max(1, confirm_scans)):
+            if kb.pause:
+                return False
+            f2 = capture()
+            if f2 is None:
+                time.sleep(0.1); continue
+            p2 = _player.find_player(f2, cfg=player_cfg, near=last_player)
+            pf = p2[1] if p2 else (last_player[1] if last_player else None)
+            H2, W2 = f2.shape[:2]
+            if pf is not None:
+                s2 = (0, max(0, pf - band - 40), W2, min(H2, pf + 40))
+                m2 = [1 for (_s, _mx, my, _mw, mh) in detect_fn(f2, s2) if abs((my + mh) - pf) <= band]
+            else:                                         # anchor lost -> central play band
+                s2 = (0, int(H2 * 0.40), W2, int(H2 * 0.78))
+                m2 = detect_fn(f2, s2)
+            if m2:
+                log(f"double-check: {len(m2)} mob still here -> STAY")
+                return False
+            time.sleep(0.15)
+        log("double-check: platform confirmed clear -> advance")
+        return True
 
     try:
         while time.time() - t0 < seconds:
@@ -1205,7 +1233,10 @@ def approach_shoot(seconds, detect_fn, player_cfg,
                 log(f"no same-platform mob ({empty_reads}/{deplete_reads}); "
                     f"pfeet={pfeet} band={band} detected feet={feet}")
                 if empty_reads >= deplete_reads:
-                    return DEPLETED
+                    if confirm_clear():                   # double-check before leaving
+                        return DEPLETED
+                    empty_reads = 0                       # a mob is still there -> resume farming
+                    continue
                 time.sleep(0.12); continue
             empty_reads = 0
             tx, _tfy = min(same, key=lambda m: abs(m[0] - px))
@@ -1709,7 +1740,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 ok = approach_shoot(_r.uniform(*stand_secs), detect_fn, _pcfg,
                                     attack_range=_arange, band=_aband, step=_astep,
                                     attack_key=attack_key, deplete_reads=_adeplete,
-                                    stall_limit=_astall, label=node)
+                                    stall_limit=_astall, label=node,
+                                    confirm_scans=int(map_cfg.get("confirm_scans", 3)))
                 heal_skill()
                 if ok is False:
                     return False
