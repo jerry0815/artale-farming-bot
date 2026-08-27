@@ -67,3 +67,30 @@ def test_swim_to_no_jump_when_descending(monkeypatch):
     recovery.swim_to(100, 130, tol=(3, 3), cap=3.0)
     assert recovery.JUMP not in pressed
     assert Key.down not in pressed           # descend = just sink, never hold Down
+
+
+def test_sink_to_bottom_stops_at_bottom_y(monkeypatch):
+    # y rises 150 -> 220; bottom_y=210 -> returns True once y crosses it, releasing keys.
+    ys = iter([150, 170, 190, 210, 230])
+    monkeypatch.setattr(recovery, "get_character_full", lambda: (176, next(ys, 230)))
+    monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
+    t = {"v": 0.0}
+    monkeypatch.setattr(recovery.time, "time", lambda: t.__setitem__("v", t["v"] + 0.2) or t["v"])
+    released = []
+    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: released.append("all"))
+    monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
+    assert recovery.sink_to_bottom(210, cap=5.0) is True
+    assert "all" in released                     # released keys before sinking
+
+
+def test_sink_to_bottom_settles_when_not_sinking(monkeypatch):
+    # y stuck at 180 (< bottom 210) for several reads -> landed -> True
+    monkeypatch.setattr(recovery, "get_character_full", lambda: (176, 180))
+    monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
+    t = {"v": 0.0}
+    monkeypatch.setattr(recovery.time, "time", lambda: t.__setitem__("v", t["v"] + 0.2) or t["v"])
+    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
+    monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
+    assert recovery.sink_to_bottom(210, cap=5.0, settle=3) is True
