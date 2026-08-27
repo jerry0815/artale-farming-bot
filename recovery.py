@@ -1576,13 +1576,23 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             lie_check_fast_tick(); time.sleep(0.5)
         next_break[0] = time.time() + _r.uniform(*break_every)
 
-    def farm_node(node):
-        """Swim to `node` (by intent -- P3/P4 are tracked by sequence, never sensed) and
-        farm up to beats_per_node beats or until depleted. False if paused/stopped."""
+    # Stacked pair: P3 sits directly ABOVE P4 and reads the same minimap y, so swim_to can't
+    # move between them. When we reach the UPPER node right after its lower partner, jump-up
+    # blindly instead of swimming (the "arrive P4 -> target P3" flag).
+    stacked_up = {up: lo for lo, up in map_cfg.get("stacked_up", [])}
+    stacked_jump_secs = float(map_cfg.get("stacked_jump_secs", 0.9))
+
+    def farm_node(node, prev=None):
         cx, cy = centers[node]
         STATUS["node"] = node
-        print(f"[water] --> farm {node} (center {cx},{cy})")
-        swim_to(cx, cy - _ylift, tol=tol, cap=12.0)   # aim a bit ABOVE so she lands on it
+        if node in stacked_up and prev == stacked_up[node]:
+            print(f"[water] --> {node}: jump-up from {prev} (stacked, same minimap y)")
+            t_end = time.time() + stacked_jump_secs
+            while time.time() < t_end and not kb.pause:
+                kb.safe_press(JUMP); time.sleep(0.1); kb.safe_release(JUMP)
+        else:
+            print(f"[water] --> farm {node} (center {cx},{cy})")
+            swim_to(cx, cy - _ylift, tol=tol, cap=12.0)   # aim a bit ABOVE so she lands on it
         for _ in range(max(1, beats_per_node)):
             if kb.pause or STOP.is_set():
                 return False
@@ -1616,16 +1626,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 break                                    # time mode: one beat then advance
         return True
 
-    # Stacked-node groups read the same minimap spot (P3/P4), so we can't reach both in one
-    # pass -- alternate which member we farm each loop (the user's "flag" idea).
-    stacked = map_cfg.get("stacked_alternate", [])       # e.g. [["P4","P3"]]
-    group_of = {name: (gi, mi) for gi, grp in enumerate(stacked)
-                for mi, name in enumerate(grp)}
-
     if rotation == "sweep":
-        print(f"[water] sweep {farm_nodes} then reset via {reset_node or '(bottom)'}"
-              + (f"; alternate {stacked}" if stacked else ""))
-        loop_i = 0
+        print(f"[water] sweep {farm_nodes} then reset via {reset_node or '(bottom)'}")
         while True:
             g = guard()
             if g == "stop":
@@ -1633,16 +1635,14 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             if g != "ok":
                 continue
             broke = False
+            prev = None
             for node in farm_nodes:                      # bottom -> top, in listed order
-                gm = group_of.get(node)                  # skip the non-chosen stacked member
-                if gm is not None and gm[1] != loop_i % len(stacked[gm[0]]):
-                    continue
                 if guard() != "ok":
                     broke = True; break
                 take_break_if_due()
-                if not farm_node(node):
+                if not farm_node(node, prev=prev):       # prev enables the P4->P3 jump-up
                     broke = True; break
-            loop_i += 1
+                prev = node
             if broke:
                 continue
             # reached the top -> reset: swim to the rightmost drop point, then down to bottom
