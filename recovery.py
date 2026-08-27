@@ -1119,7 +1119,8 @@ def approach_shoot(seconds, detect_fn, player_cfg,
                 return [(mx + mw // 2, my + mh) for (_s, mx, my, mw, mh) in dets
                         if abs((my + mh) - pfeet) <= band]
 
-            same = same_platform(detect_fn(f, strip))
+            dets = detect_fn(f, strip)
+            same = same_platform(dets)
             if not same:
                 # The attack VFX often OCCLUDES the mob we just hit, so it vanishes from
                 # detection for a beat. If we were just in range, keep firing in place a few
@@ -1130,7 +1131,9 @@ def approach_shoot(seconds, detect_fn, player_cfg,
                     kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key)
                     continue
                 empty_reads += 1                          # DEBOUNCED: several empty frames -> clear
-                log(f"no same-platform mob ({empty_reads}/{deplete_reads})")
+                feet = [my + mh for (_s, _mx, my, _mw, mh) in dets]
+                log(f"no same-platform mob ({empty_reads}/{deplete_reads}); "
+                    f"pfeet={pfeet} band={band} detected feet={feet}")
                 if empty_reads >= deplete_reads:
                     return DEPLETED
                 time.sleep(0.12); continue
