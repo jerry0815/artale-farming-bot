@@ -1371,7 +1371,8 @@ def approach_shoot(seconds, detect_fn, anchor,
                 log(f"dx={dx} px={px} -> walk {'right' if dx > 0 else 'left'} "
                     f"(same={len(same)}, best={best_absdx}, noimp={no_improve})")
                 walk(key)
-                time.sleep(step)
+                if step > 0:                              # 0 = no pacing, run at compute speed
+                    time.sleep(step)
         return True
     finally:
         kb.safe_release(attack_key)
