@@ -1291,6 +1291,9 @@ def approach_shoot(seconds, detect_fn, anchor,
     best_absdx = None       # closest we've gotten to the current target (net-progress stall)
     no_improve = 0
     last_player = None      # sticky anchor: lock onto the bar nearest last frame's player
+    rooted = False          # True only while firing in place -> the skill roots her, so a lost
+                            # HP bar means she hasn't moved (assume last pos). While WALKING she
+                            # IS moving, so a stale pos would overshoot + false-stall -> never fake it.
     held = [None]           # currently-held walk key -> HELD across frames for smooth motion
     last_log = [0.0]
 
@@ -1325,10 +1328,15 @@ def approach_shoot(seconds, detect_fn, anchor,
                     log("player NOT found (no prior lock) -> blind attack")
                     stop_walk()
                     kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key); continue
-                # The attack SKILL hides the HP bar (VFX) but also ROOTS her -- she hasn't
-                # moved -- so assume she's where she last was and keep farming from there.
+                if not rooted:                            # she was WALKING (moving): her last pos is
+                    # already stale -- faking it overshoots the mob and trips the stall guard. Stop
+                    # and wait a beat for the bar to re-appear (no skill VFX while walking, so brief).
+                    log("player lost mid-walk -> stop, wait for re-lock")
+                    stop_walk(); time.sleep(0.03); continue
+                # Rooted: the attack SKILL's VFX hides the bar but also holds her still -- she hasn't
+                # moved -- so assume her last position and keep firing.
                 p = last_player
-                log(f"player NOT found -> assume last position {p}")
+                log(f"player NOT found (rooted) -> assume last position {p}")
             last_player = p
             px, pfeet = p
             # Scan the FULL platform-width strip at the player's y-band (YOLO is cheap on the
@@ -1349,10 +1357,10 @@ def approach_shoot(seconds, detect_fn, anchor,
                 if occlude_grace > 0:
                     occlude_grace -= 1
                     log(f"no mob (occlusion grace {occlude_grace}) -> hold fire")
-                    stop_walk()
+                    stop_walk(); rooted = True             # firing in place
                     kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key)
                     continue
-                stop_walk()
+                stop_walk(); rooted = False                # idle scan (not firing) -> she may drift
                 empty_reads += 1                          # DEBOUNCED: several empty frames -> clear
                 feet = [my + mh for (_s, _mx, my, _mw, mh) in dets]
                 log(f"no same-platform mob ({empty_reads}/{deplete_reads}); "
@@ -1366,6 +1374,7 @@ def approach_shoot(seconds, detect_fn, anchor,
             key = Key.right if dx >= 0 else Key.left
             if abs(dx) <= attack_range:                   # in range: face + fire a burst
                 best_absdx = None; no_improve = 0
+                rooted = True                             # firing in place -> assume-last-pos is valid
                 occlude_grace = 2                         # tolerate VFX hiding this mob next frames
                 log(f"IN RANGE dx={dx} px={px} -> attack '{attack_key}' burst (same={len(same)})")
                 stop_walk()
@@ -1380,7 +1389,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                 if occlude_grace > 0:
                     occlude_grace -= 1
                     log(f"nearest far (dx={dx}) but recently in range -> hold fire (occluded?)")
-                    stop_walk()
+                    stop_walk(); rooted = True             # firing in place
                     kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key)
                     continue
                 # NET-progress stall: only give up if we stop getting CLOSER (best |dx| not
@@ -1402,13 +1411,14 @@ def approach_shoot(seconds, detect_fn, anchor,
                     if mmx >= 0 and ((key == Key.right and mmx >= mm_bounds[1]) or
                                      (key == Key.left and mmx <= mm_bounds[0])):
                         log(f"platform edge (mmx={mmx} bounds={mm_bounds}) -> fire in place")
-                        stop_walk()
+                        stop_walk(); rooted = True         # firing in place at the edge
                         kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key)
                         continue
                 # CONTINUOUS walk: hold the key across frames (only re-press on a turn), so
                 # motion is smooth instead of stutter-stepping between detections.
                 log(f"dx={dx} px={px} -> walk {'right' if dx > 0 else 'left'} "
                     f"(same={len(same)}, best={best_absdx}, noimp={no_improve})")
+                rooted = False                            # moving now -> a lost bar must NOT be faked
                 walk(key)
                 if step > 0:                              # 0 = no pacing, run at compute speed
                     time.sleep(step)

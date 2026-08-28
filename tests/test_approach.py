@@ -86,15 +86,25 @@ class _AnchorSeq:                                     # anchor that returns a sc
         return v
 
 
-def test_assumes_last_position_when_anchor_lost_after_lock(monkeypatch):
-    # Skill VFX hides the HP bar (anchor -> None) but the skill ROOTS her, so once locked we
-    # assume her last position and keep farming from there (walk toward the mob), NOT a blind
-    # attack. Mob far right & out of range -> she should keep walking right, never firing 'c'.
-    mob = [(0.7, 1200, 480, 60, 40)]                 # cx=1230 vs player 800 -> far right
-    df, pressed, _ = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0] * 12)
-    anc = _AnchorSeq([(800, 500), None, None, None])  # lock, then bar hidden by VFX
-    recovery.approach_shoot(10, df, anc, attack_range=110, stall_limit=8, verbose=False)
-    assert Key.right in pressed and 'c' not in pressed   # walked from the assumed last pos
+def test_assumes_last_position_when_rooted_and_bar_hidden(monkeypatch):
+    # In range (rooted, firing) the skill VFX hides the HP bar (anchor -> None). Because she's
+    # rooted she hasn't moved -> assume last position and keep FIRING, not abandon the mob.
+    mob = [(0.7, 800, 480, 60, 40)]                  # cx=830, dx=30 <= range -> in range, rooted
+    df, pressed, _ = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0] * 8)
+    anc = _AnchorSeq([(800, 500), None, None])        # lock (fires, roots), then bar hidden
+    recovery.approach_shoot(10, df, anc, attack_range=110, verbose=False)
+    assert 'c' in pressed                            # kept firing from the assumed last pos
+
+
+def test_lost_mid_walk_does_not_false_stall(monkeypatch):
+    # Anchor blips out WHILE walking (not rooted): her last pos is stale, so we must NOT freeze
+    # it (that overshoots + trips the stall guard). She stops and waits -> no premature DEPLETED.
+    mob = [(0.7, 1200, 480, 60, 40)]                 # far right, out of range -> walking
+    df, pressed, _ = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0] * 20)
+    anc = _AnchorSeq([(800, 500)] + [None] * 15)      # lock once, then lost for many frames
+    r = recovery.approach_shoot(10, df, anc, attack_range=110, stall_limit=3, verbose=False)
+    assert r is not recovery.DEPLETED                # stopped & waited; no fabricated stall
+    assert 'c' not in pressed                        # never blind-attacked (she was walking)
 
 
 def test_minimap_bound_fires_in_place_at_platform_edge(monkeypatch):
