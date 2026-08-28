@@ -73,7 +73,7 @@ class NametagAnchor:
     mob covering part of the name). locate(frame) -> (player_x, feet_y) or None."""
 
     def __init__(self, tag_white, feet_offset=6, split_width=45, local_radius=60,
-                 accept_thres=0.55, y_lo_frac=0.08, y_hi_frac=0.90, stale_grace=3):
+                 accept_thres=0.55, y_lo_frac=0.22, y_hi_frac=0.86, stale_grace=3):
         self.tag = tag_white
         self.h, self.w = tag_white.shape
         self.feet_offset = feet_offset
