@@ -1,7 +1,7 @@
 # Mob detection: training & improving the YOLO detector
 
-How the water-map mob detector (`models/mob_yolo.pt`, classes **fishhouse**, **goby**) is
-built and improved. Two phases:
+How the water-map mob detector (`models/mob_yolo.pt`, classes **fishhouse**, **goby**, and
+optionally **player**) is built and improved. Two phases:
 
 1. **Bootstrap** — a synthetic dataset trains a first model with *zero* hand-labeling.
 2. **Improve (hybrid)** — hand-label a few real frames (the model pre-labels them) and mix
@@ -86,7 +86,7 @@ from scratch). `--grab-dir <folder>` imports existing PNGs; `--no-prelabel` star
 python label_mobs.py            # http://localhost:8001
 ```
 - **drag** = new box in the active class
-- **1** / **2** = active class fishhouse / goby (or, with a box selected, reclassify it)
+- **1** / **2** / **3** = active class fishhouse / goby / player (or, with a box selected, reclassify it)
 - click box → **Del** = remove
 - **← / →** = prev / next (auto-saves)
 
@@ -116,6 +116,32 @@ Result of the first pass (40 frames): coral goby-FPs went from 0.55–0.67 to **
 conf 0.4**, real goby held at 0.88–0.92.
 
 ---
+
+## Optional — unified player anchor (class **player**)
+
+The same YOLO can also locate the *player*, so ONE model finds both mobs and the character
+(no separate name-tag / HP-bar anchor). Label the player's box **including the red HP bar
+above the head** — that HP bar is the feature YOLO learns to track through attack VFX.
+
+Because the HP bar is the anchor feature, **record the label clip with the HP bar visible
+on-screen** (take a hit at the start so it shows). Then:
+
+1. Grab + prelabel real frames as usual (`python label_mobs.py --grab "<clip>" 40`).
+2. In the browser, press **3** and drag a box around the character **from the HP bar down
+   to the feet**, one per frame. Fix any mob boxes too.
+3. Retrain hybrid: `python train_mobs.py 80 640 --real` (now writes `nc: 3`,
+   names `[fishhouse, goby, player]`).
+4. Switch the map to the YOLO anchor in `maps/<name>.json`:
+   ```json
+   "anchor": "yolo_player"
+   ```
+   (drop `nametag_template` / `title_template`; keep `detector: "mob_yolo"`). Feet =
+   bottom-center of the player box; add `"player": {"foot_offset": N}` to nudge if needed.
+5. Snap-verify in the panel — the player box draws GREEN, labeled `player`.
+
+`mob_detect.yolo_detect()` returns `(mobs, player)` from a single inference; the farming
+loop's `YoloPlayerAnchor` exposes the player box as `.locate(frame) -> (x, feet_y)`. Until
+the 3-class model is trained, keep `anchor: "nametag"` (a 2-class model has no player class).
 
 ## Tuning `mob_conf` (the runtime threshold)
 

@@ -1723,7 +1723,16 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         _astep = float(map_cfg.get("approach_step", 0.14))
         _adeplete = int(map_cfg.get("deplete_reads", 4))
         _astall = int(map_cfg.get("stall_limit", 8))
-        if map_cfg.get("anchor") == "nametag":            # KenYu-style name-tag anchor
+        if map_cfg.get("anchor") == "yolo_player":        # class-2 box of the unified mob YOLO
+            if detector != "mob_yolo":
+                raise RuntimeError("anchor 'yolo_player' needs detector 'mob_yolo'")
+            import mob_detect as _md
+            _pfoot = int((map_cfg.get("player") or {}).get("foot_offset", 0))
+
+            def _make_anchor():
+                return _md.YoloPlayerAnchor(_mm, conf=_mconf, imgsz=_mimg, foot_offset=_pfoot)
+            print(f"[water] anchor: yolo_player (class 2 of {map_cfg.get('mob_model', 'models/mob_yolo.pt')})")
+        elif map_cfg.get("anchor") == "nametag":          # KenYu-style name-tag anchor
             _tagw = _p.load_nametag(map_cfg["nametag_template"])
             _titlew = _p.load_nametag(map_cfg["title_template"]) if map_cfg.get("title_template") else None
 

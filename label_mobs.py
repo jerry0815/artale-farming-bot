@@ -23,8 +23,8 @@ import urllib.parse
 
 import cv2
 
-CLASSES = ["fishhouse", "goby"]
-COLORS = ["#ff3b3b", "#3bd23b"]                      # fishhouse red, goby green
+CLASSES = ["fishhouse", "goby", "player"]
+COLORS = ["#ff3b3b", "#3bd23b", "#4aa3ff"]           # fishhouse red, goby green, player blue
 ROOT = os.path.join("datasets", "mobs_real")
 IMG_DIR = os.path.join(ROOT, "images")
 LBL_DIR = os.path.join(ROOT, "labels")
@@ -119,11 +119,11 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>mob labeler</tit
  <span id=pos></span> <b id=cnt></b>
  <span>active: <span id=active></span></span>
  <span id=hint>drag = new box &middot; click box then 1/2 = set class &middot; Del = remove &middot;
-   1=fishhouse 2=goby &middot; arrows = prev/next</span>
+   1=fishhouse 2=goby 3=player &middot; arrows = prev/next</span>
 </div>
 <div id=wrap><canvas id=cv></canvas></div>
 <script>
-const CLASSES=["fishhouse","goby"], COLORS=["#ff3b3b","#3bd23b"];
+const CLASSES=["fishhouse","goby","player"], COLORS=["#ff3b3b","#3bd23b","#4aa3ff"];
 let files=[], idx=0, boxes=[], sel=-1, img=new Image(), drag=null, active=0;
 const cv=document.getElementById('cv'), ctx=cv.getContext('2d'); const MAXW=1500;
 function setActive(a){ active=a; const e=document.getElementById('active');
@@ -162,6 +162,7 @@ document.onkeydown=e=>{
   if(e.key==='Delete'||e.key==='Backspace'){ if(sel>=0){ boxes.splice(sel,1); sel=-1; draw(); e.preventDefault(); } }
   else if(e.key==='1'){ if(sel>=0){ boxes[sel][0]=0; draw(); } else setActive(0); }
   else if(e.key==='2'){ if(sel>=0){ boxes[sel][0]=1; draw(); } else setActive(1); }
+  else if(e.key==='3'){ if(sel>=0){ boxes[sel][0]=2; draw(); } else setActive(2); }
   else if(e.key==='ArrowRight') nav(1);
   else if(e.key==='ArrowLeft') nav(-1);
   else if(e.key==='s'||e.key==='S') save(); };

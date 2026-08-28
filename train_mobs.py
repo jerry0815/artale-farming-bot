@@ -1,5 +1,10 @@
 """Train YOLO11n on the SYNTHETIC water-mob dataset (fishhouse, goby).
 
+The HYBRID (--real) set is 3-class -- fishhouse, goby, AND player: hand-label the player's
+box (INCLUDING the red HP bar above the head) in real frames so YOLO learns the HP bar as
+the player feature and the same single inference locates both mobs and the player. Record
+the label video with the HP bar visible on-screen for the player class to train.
+
 Prereqs: build the dataset first --
     python synth_data.py --extract "<recording.mp4>" assets/bg   # backgrounds
     python synth_data.py --bg assets/bg --out datasets/mobs --n 3000
@@ -35,7 +40,7 @@ def _hybrid_yaml():
     with open(p, "w") as fh:
         fh.write(f"train:\n  - {syn}/images/train\n  - {real_imgs}\n")
         fh.write(f"val:\n  - {syn}/images/val\n  - {real_imgs}\n")
-        fh.write("nc: 2\nnames: [fishhouse, goby]\n")
+        fh.write("nc: 3\nnames: [fishhouse, goby, player]\n")
     print(f"[train] hybrid: synthetic + real frames ({real_imgs})")
     return p
 

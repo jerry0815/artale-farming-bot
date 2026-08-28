@@ -225,7 +225,25 @@ def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, ro
         cv2.rectangle(dbg, (x, y), (x + w, y + h), (0, 0, 255), 2)
         cv2.putText(dbg, f"{s:.2f}", (x, max(y - 3, 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
     player_pos, anchor_mode = None, cfg.get("anchor", "hpbar")
-    if anchor_mode == "nametag" and cfg.get("nametag_template"):
+    if anchor_mode == "yolo_player" and cfg.get("detector") == "mob_yolo":
+        try:                                                 # class-2 player box = GREEN
+            import mob_detect as _md
+            _mp = _md.load_yolo(cfg.get("mob_model", "models/mob_yolo.pt"))
+            _pfoot = int((cfg.get("player") or {}).get("foot_offset", 0))
+            _pconf = thr if thr is not None else float(cfg.get("mob_conf", 0.6))
+            _, pbox = _md.yolo_detect(_mp, f, roi=None, conf=_pconf, imgsz=int(cfg.get("mob_imgsz", 640)))
+            if pbox is not None:
+                _s, px, py, pw, ph = pbox
+                player_pos = (px + pw // 2, py + ph + _pfoot)
+                cv2.rectangle(dbg, (px, py), (px + pw, py + ph), (0, 255, 0), 2)
+                cv2.circle(dbg, player_pos, 9, (0, 255, 0), -1)
+                cv2.putText(dbg, "player", (px, py - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                anchor_mode = f"player@{player_pos}"
+            else:
+                anchor_mode = "player:MISS"
+        except Exception as e:
+            anchor_mode = f"yolo_player ERROR: {e}"
+    elif anchor_mode == "nametag" and cfg.get("nametag_template"):
         try:
             # Draw BOTH anchors independently so each template can be checked: name tag = GREEN,
             # 稱號 title = CYAN. player_pos = name tag if found, else title (the loop's order).
