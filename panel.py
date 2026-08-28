@@ -202,6 +202,7 @@ def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, ro
         return {"ok": False, "msg": "no frame (is the game window visible / not minimized?)"}
     if roi is None and cfg.get("count_roi"):
         roi = tuple(cfg["count_roi"])
+    user_thr = thr                                            # explicit snap override (before reuse)
     if cfg.get("detector") == "mob_yolo":                     # match the loop's real detector
         import mob_detect
         m = mob_detect.load_yolo(cfg.get("mob_model", "models/mob_yolo.pt"))
@@ -230,7 +231,7 @@ def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, ro
             import mob_detect as _md
             _mp = _md.load_yolo(cfg.get("mob_model", "models/mob_yolo.pt"))
             _pfoot = int(cfg.get("yolo_foot_offset", 0))     # HP-bar box bottom -> feet (~123px down)
-            _pconf = thr if thr is not None else float(cfg.get("yolo_player_conf", cfg.get("mob_conf", 0.6)))
+            _pconf = user_thr if user_thr is not None else float(cfg.get("yolo_player_conf", cfg.get("mob_conf", 0.6)))
             _, pbox = _md.yolo_detect(_mp, f, roi=None, conf=_pconf, imgsz=int(cfg.get("mob_imgsz", 640)))
             if pbox is not None:
                 _s, px, py, pw, ph = pbox
@@ -238,9 +239,9 @@ def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, ro
                 cv2.rectangle(dbg, (px, py), (px + pw, py + ph), (0, 255, 0), 2)
                 cv2.circle(dbg, player_pos, 9, (0, 255, 0), -1)
                 cv2.putText(dbg, "player", (px, py - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                anchor_mode = f"player@{player_pos}"
+                anchor_mode = f"player@{player_pos} ({_s:.2f} conf>={_pconf})"
             else:
-                anchor_mode = "player:MISS"
+                anchor_mode = f"player:MISS (conf>={_pconf})"
         except Exception as e:
             anchor_mode = f"yolo_player ERROR: {e}"
     elif anchor_mode == "nametag" and cfg.get("nametag_template"):
