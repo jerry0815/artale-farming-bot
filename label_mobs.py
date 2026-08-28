@@ -79,6 +79,8 @@ def grab_from_video(video, count, model=None):
         if not ok:
             continue
         stem = f"real_{f:06d}"
+        if os.path.exists(os.path.join(LBL_DIR, stem + ".txt")):
+            continue                                  # already labeled -> never clobber hand work
         cv2.imwrite(os.path.join(IMG_DIR, stem + ".png"), fr)
         if model is not None:
             write_boxes(stem, _prelabel(fr, model))
@@ -95,6 +97,8 @@ def grab_from_dir(src, model=None):
         if fr is None:
             continue
         stem = "real_" + os.path.splitext(os.path.basename(p))[0]
+        if os.path.exists(os.path.join(LBL_DIR, stem + ".txt")):
+            continue                                  # already labeled -> never clobber hand work
         cv2.imwrite(os.path.join(IMG_DIR, stem + ".png"), fr)
         if model is not None:
             write_boxes(stem, _prelabel(fr, model))
