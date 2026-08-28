@@ -315,6 +315,9 @@ def _status_dict(controller):
     st["recorder_marks"] = controller.recorder.marks if controller.recorder else 0
     ba = st.get("buff_at")
     st["buff_ago"] = int(time.time() - ba) if ba else None   # seconds since last buff (server clock)
+    rs = st.get("run_started")                               # live elapsed while running (ticks each poll)
+    if rs and st.get("state") in ("farming", "paused"):
+        st["run_secs"] = int(time.time() - rs)
     return st
 
 

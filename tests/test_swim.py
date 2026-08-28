@@ -48,7 +48,7 @@ def test_swim_to_jumps_when_ascent_stalls(monkeypatch):
     monkeypatch.setattr(recovery.kb, "safe_press", lambda k: pressed.append(k))
     monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
     monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
-    recovery.swim_to(100, 100, tol=(3, 3), cap=3.0, jump_interval=0.1)
+    recovery.swim_to(100, 100, tol=(3, 3), cap=3.0, jump_burst=3)
     assert recovery.JUMP in pressed          # jump-swims up (no Up arrow)
     assert Key.up not in pressed
 

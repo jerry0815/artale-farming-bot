@@ -233,7 +233,7 @@ kb.f9_callback = silence_all_alarms   # F9 silences alarms wherever kb.on_press 
 # cooperative stop the UI sets to end a background-thread run (F8 pause still works).
 STATUS = {"state": "idle", "node": None, "count": None, "lie": False,
           "exp_per_min": None, "exp_10min": None, "exp_total": 0,
-          "run_secs": 0, "buff_at": None}
+          "run_secs": 0, "run_started": None, "buff_at": None}
 STOP = threading.Event()
 
 
@@ -1097,14 +1097,17 @@ def _apply_swim_keys(want):
 
 
 def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
-            jump_interval=0.1, jump_interval_max=0.5, axis="xy"):
+            jump_burst=4, jump_gap=0.04, axis="xy"):
     """Swim toward (target_x, target_y) until within `tol` on both axes or `cap` seconds.
     Returns True on arrival. F8 (kb.pause) aborts. `locate` (default get_character_full)
     is injectable for tests.
 
     Water-world movement: you RISE by JUMPING repeatedly (holding Up does nothing), so when
-    the target is above we spam JUMP every `jump_interval` s and NEVER press Up. Left/right
-    use arrow keys; descending just sinks.
+    the target is above we spam JUMP and NEVER press Up. Left/right use arrow keys; descending
+    just sinks. The position read (stable_char) is slow (~0.28s), so ONE jump per loop caps
+    the rate at ~3/s; instead we fire a BURST of hops per read, scaled by the gap: far below
+    -> up to `jump_burst` quick hops; near the target -> a single gentle hop (no overshoot).
+    `jump_gap` = seconds between hops in a burst.
 
     `axis="x"` reaches the target X only (ignores Y, no jump) -- used by the reset to reach
     the rightmost open column without fighting the descent.
@@ -1113,7 +1116,6 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
     spots (e.g. P6's far-right edge) don't flip the swim direction."""
     locate = locate or (lambda: stable_char(3))
     t0 = time.time()
-    last_jump = 0.0
     try:
         while time.time() - t0 < cap:
             if kb.pause:
@@ -1135,16 +1137,18 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
             # Only horizontal keys are ever held.
             _apply_swim_keys(want - {"up", "down"})
             if jump and "up" in want:
-                # jump cadence scales with the vertical gap: far below -> fast (jump_interval),
-                # near the target -> gentle (jump_interval_max) so she doesn't overshoot up.
+                # BURST of hops per read, scaled by the vertical gap: far below -> jump_burst
+                # quick hops; near the target -> 1 gentle hop (don't overshoot up).
                 dy = y - target_y
                 span = 30.0
                 frac = max(0.0, min(1.0, (dy - tol[1]) / span))
-                interval = jump_interval_max - frac * (jump_interval_max - jump_interval)
-                now = time.time()
-                if now - last_jump >= interval:
+                hops = 1 + int(round(frac * (jump_burst - 1)))
+                for _ in range(hops):
+                    if kb.pause:
+                        break
                     kb.safe_press(JUMP); time.sleep(0.02); kb.safe_release(JUMP)
-                    last_jump = now
+                    time.sleep(jump_gap)
+                continue                                   # burst paced this iter -> re-read now
             time.sleep(0.05)
         return False
     finally:
@@ -1698,10 +1702,9 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     if not farm_nodes:
         print("[water] no farm nodes in map config"); return
     tol = watermap.swim_tol(map_cfg)
-    # Jump cadence for RISING between platforms: fast when far below (_ji), gentler near the
-    # target (_jimax) to avoid overshooting. Lower _jimax = snappier final rise (P5->P4).
-    _ji = float(map_cfg.get("swim_jump_interval", 0.1))
-    _jimax = float(map_cfg.get("swim_jump_interval_max", 0.32))
+    # Jump burst for RISING between platforms: hops fired per position read (scaled by the
+    # gap). Higher = faster rise (the slow read no longer caps the rate). P5->P4 wants snappy.
+    _jb = int(map_cfg.get("swim_jump_burst", 4))
     if not focus():
         print("[water] could not focus"); return
     STOP.clear(); STATUS["state"] = "farming"
@@ -1837,6 +1840,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     beats_per_node = int(map_cfg.get("beats_per_node", 3))
     t_start = time.time()
     STATUS["run_secs"], STATUS["buff_at"] = 0, None      # fresh run (panel timers)
+    STATUS["run_started"] = t_start                       # panel computes live elapsed from this
     next_break = [time.time() + _r.uniform(*break_every)]
 
     # EXP tracker: per-10-min gain + running average (see make_exp_tracker).
@@ -1869,8 +1873,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         if time.time() < next_break[0]:
             return
         print("[water] break -> swim to base and idle")
-        swim_to(*centers[farm_nodes[0]], tol=tol, cap=12.0,
-                jump_interval=_ji, jump_interval_max=_jimax)
+        swim_to(*centers[farm_nodes[0]], tol=tol, cap=12.0, jump_burst=_jb)
         end = time.time() + _r.uniform(*rest_range)
         while time.time() < end and not kb.pause and not STOP.is_set():
             lie_check_fast_tick(); time.sleep(0.5)
@@ -1893,8 +1896,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         else:
             lift = _lift_override.get(node, _ylift)        # pin nodes (P4) use 0 -- target below
             print(f"[water] --> farm {node} (center {cx},{cy}) lift={lift}")  # the pin is unreachable
-            swim_to(cx, cy - lift, tol=tol, cap=12.0,       # aim a bit ABOVE so she lands on it
-                    jump_interval=_ji, jump_interval_max=_jimax)
+            swim_to(cx, cy - lift, tol=tol, cap=12.0, jump_burst=_jb)   # aim ABOVE so she lands on it
             extra = _arrive_jumps.get(node, 0)             # seat on a pin platform (P4): a few more hops
             for _ in range(extra):
                 if kb.pause:
