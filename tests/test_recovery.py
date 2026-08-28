@@ -67,7 +67,7 @@ def test_exp_tracker_window_gain_filters(monkeypatch):
         return nums[i] if i < len(nums) else None
     monkeypatch.setattr(recovery, "get_exp_number", fake_num)
 
-    tick = recovery.make_exp_tracker(sample_secs=1, window_secs=5, label="test")
+    tick = recovery.make_exp_tracker(sample_secs=1, window_secs=5, label="test", min_run_secs=0)
     for t in range(1001, 1006):              # samples at 1001..1005; window logs at 1005
         clock[0] = float(t)
         tick()
@@ -75,6 +75,28 @@ def test_exp_tracker_window_gain_filters(monkeypatch):
     assert recovery.STATUS["exp_total"] == 601   # cumulative gain since run start
     # live per-minute run average: 601 gained over 5s elapsed = 601 * 60/5 = 7212
     assert recovery.STATUS["exp_per_min"] == 7212
+
+
+def test_exp_tracker_per_min_gated_until_min_run(monkeypatch):
+    """exp_per_min stays None until the run has min_run_secs elapsed (avoids noisy early
+    estimates); exp_total still accrues immediately."""
+    clock = [500.0]
+    monkeypatch.setattr(recovery.time, "time", lambda: clock[0])
+    monkeypatch.setattr(recovery, "ExpProcessor", lambda *a, **k: object())
+    nums = [100, 200, 300, 400]
+    calls = [0]
+
+    def fake_num(_p):
+        i = calls[0]; calls[0] += 1
+        return nums[i] if i < len(nums) else None
+    monkeypatch.setattr(recovery, "get_exp_number", fake_num)
+    tick = recovery.make_exp_tracker(sample_secs=10, window_secs=999, label="t", min_run_secs=60)
+    for t in (510, 520, 530):                 # elapsed 10/20/30s -- all under 60s
+        clock[0] = float(t); tick()
+    assert recovery.STATUS["exp_per_min"] is None   # gated: run too young
+    assert recovery.STATUS["exp_total"] == 200      # but total accrues (100->200->300)
+    clock[0] = 570.0; tick()                        # elapsed 70s >= 60 -> now published
+    assert recovery.STATUS["exp_per_min"] is not None
 
 
 def test_exp_tracker_noop_when_disabled(monkeypatch):

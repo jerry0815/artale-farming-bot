@@ -320,19 +320,20 @@ def get_exp(exp_processor):
         return None
 
 
-def make_exp_tracker(log_exp=True, sample_secs=45, window_secs=600, label="exp"):
+def make_exp_tracker(log_exp=True, sample_secs=30, window_secs=600, label="exp", min_run_secs=60):
     """A per-window EXP logger, shared by the water and nav farming loops. Returns an
     `exp_tick()` to call each loop iteration: it samples the ABSOLUTE EXP number every
-    `sample_secs`, and every `window_secs` (10 min default) logs the gain over that window
-    (sum of positive consecutive deltas, skipping level-ups and digit-count OCR errors) plus
-    the running average across windows. Publishes STATUS['exp_10min'] (last window gain),
-    STATUS['exp_per_min'] (LIVE run-average EXP/min, updated each sample) and
-    STATUS['exp_total'] (cumulative gain) for the panel. No-op if log_exp is False.
-    Self-contained (closes over its own sample buffer)."""
+    `sample_secs` (the FIRST sample is taken immediately so a gain is available within a
+    couple of samples), and every `window_secs` (10 min default) logs the gain over that
+    window (sum of positive consecutive deltas, skipping level-ups and digit-count OCR
+    errors) plus the running average across windows. Publishes STATUS['exp_10min'] (last
+    window gain), STATUS['exp_per_min'] (LIVE run-average EXP/min, published once the run has
+    at least `min_run_secs` elapsed so the estimate is meaningful) and STATUS['exp_total']
+    (cumulative gain). No-op if log_exp is False. Self-contained (closes over its buffer)."""
     exp_proc = ExpProcessor() if log_exp else None
     STATUS["exp_per_min"], STATUS["exp_10min"], STATUS["exp_total"] = None, None, 0  # fresh run
     run_start = time.time()
-    next_sample = [time.time() + sample_secs]
+    next_sample = [time.time()]                                # sample immediately at run start
     next_log = [time.time() + window_secs]
     samples = []                                                # [(t, abs_exp_number)]
     windows = [0, 0.0]                                          # [count, cumulative gain]
@@ -365,10 +366,10 @@ def make_exp_tracker(log_exp=True, sample_secs=45, window_secs=600, label="exp")
                 samples.append((now, num))
                 if len(samples) > 400:
                     del samples[:200]
-                elapsed_min = (now - run_start) / 60.0
-                if elapsed_min > 0:                             # live run-average EXP per minute
-                    STATUS["exp_per_min"] = round(cumulative[0] / elapsed_min)
                 STATUS["exp_total"] = cumulative[0]
+                elapsed = now - run_start
+                if elapsed >= min_run_secs:                     # live run-average EXP per minute
+                    STATUS["exp_per_min"] = round(cumulative[0] / (elapsed / 60.0))
         if now >= next_log[0]:
             next_log[0] = now + window_secs
             gain = _window_gain(now - window_secs)
@@ -1272,7 +1273,7 @@ def walk_shoot(node_mm_x, seconds, detect_fn, attack_key='c', half=60, tol=(3, 3
 
 def approach_shoot(seconds, detect_fn, anchor,
                    attack_range=110, band=70, step=0.14, attack_key='c',
-                   deplete_reads=4, stall_limit=8, verbose=True, label="", confirm_scans=3,
+                   deplete_reads=4, stall_limit=8, verbose=True, label="",
                    mm_bounds=None):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
@@ -1310,34 +1311,6 @@ def approach_shoot(seconds, detect_fn, anchor,
                 kb.safe_release(held[0])
             kb.safe_press(key); held[0] = key
 
-    def confirm_clear():
-        """DOUBLE-CHECK before leaving: stop attacking so the VFX/floating numbers clear,
-        then re-scan a few clean frames. Returns True only if the platform is really empty
-        (so a single flaky detection never abandons a live mob). Paused -> False (don't leave)."""
-        kb.safe_release_all()
-        time.sleep(0.4)                                   # let attack effects fade
-        for _ in range(max(1, confirm_scans)):
-            if kb.pause:
-                return False
-            f2 = capture()
-            if f2 is None:
-                time.sleep(0.1); continue
-            p2 = anchor.locate(f2)
-            pf = p2[1] if p2 else (last_player[1] if last_player else None)
-            H2, W2 = f2.shape[:2]
-            if pf is not None:
-                s2 = (0, max(0, pf - band - 40), W2, min(H2, pf + 40))
-                m2 = [1 for (_s, _mx, my, _mw, mh) in detect_fn(f2, s2) if abs((my + mh) - pf) <= band]
-            else:                                         # anchor lost -> central play band
-                s2 = (0, int(H2 * 0.40), W2, int(H2 * 0.78))
-                m2 = detect_fn(f2, s2)
-            if m2:
-                log(f"double-check: {len(m2)} mob still here -> STAY")
-                return False
-            time.sleep(0.15)
-        log("double-check: platform confirmed clear -> advance")
-        return True
-
     try:
         while time.time() - t0 < seconds:
             if kb.pause:
@@ -1346,11 +1319,16 @@ def approach_shoot(seconds, detect_fn, anchor,
             f = capture()
             if f is None:
                 time.sleep(0.1); continue
-            p = anchor.locate(f)                          # HP-bar sticky OR name-tag anchor
-            if p is None:                                 # anchor lost -> brief blind attack
-                log("player NOT found -> blind attack")
-                stop_walk()
-                kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key); continue
+            p = anchor.locate(f)                          # HP-bar/name-tag anchor
+            if p is None:
+                if last_player is None:                   # never locked yet -> brief blind attack
+                    log("player NOT found (no prior lock) -> blind attack")
+                    stop_walk()
+                    kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key); continue
+                # The attack SKILL hides the HP bar (VFX) but also ROOTS her -- she hasn't
+                # moved -- so assume she's where she last was and keep farming from there.
+                p = last_player
+                log(f"player NOT found -> assume last position {p}")
             last_player = p
             px, pfeet = p
             # Scan the FULL platform-width strip at the player's y-band (YOLO is cheap on the
@@ -1379,11 +1357,8 @@ def approach_shoot(seconds, detect_fn, anchor,
                 feet = [my + mh for (_s, _mx, my, _mw, mh) in dets]
                 log(f"no same-platform mob ({empty_reads}/{deplete_reads}); "
                     f"pfeet={pfeet} band={band} detected feet={feet}")
-                if empty_reads >= deplete_reads:
-                    if confirm_clear():                   # double-check before leaving
-                        return DEPLETED
-                    empty_reads = 0                       # a mob is still there -> resume farming
-                    continue
+                if empty_reads >= deplete_reads:          # debounced empty -> platform done
+                    return DEPLETED
                 time.sleep(0.12); continue
             empty_reads = 0
             tx, _tfy = min(same, key=lambda m: abs(m[0] - px))
@@ -1845,7 +1820,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
 
     # EXP tracker: per-10-min gain + running average (see make_exp_tracker).
     exp_tick = make_exp_tracker(log_exp=map_cfg.get("log_exp", True),
-                                sample_secs=float(map_cfg.get("exp_sample_secs", 45)),
+                                sample_secs=float(map_cfg.get("exp_sample_secs", 30)),
                                 window_secs=float(map_cfg.get("exp_window_secs", 600)))
 
     def guard():
@@ -1921,7 +1896,6 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                                     attack_range=_arange, band=_aband, step=_astep,
                                     attack_key=attack_key, deplete_reads=_adeplete,
                                     stall_limit=_astall, label=node,
-                                    confirm_scans=int(map_cfg.get("confirm_scans", 3)),
                                     mm_bounds=(_ncx - _phalf, _ncx + _phalf))
                 heal_skill()
                 if ok is False:

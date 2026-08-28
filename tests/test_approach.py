@@ -76,29 +76,25 @@ def test_blind_attack_when_anchor_lost(monkeypatch):
     assert 'c' in pressed                            # no anchor -> still attacks
 
 
-def test_double_check_stays_when_mob_reappears_during_confirm(monkeypatch):
-    # Main loop reads empty (reaches deplete_reads), but the confirm re-scan finds a mob
-    # -> must NOT return DEPLETED (resume farming). Guards against one flaky frame leaving.
-    import numpy as np
-    calls = {"n": 0}
+class _AnchorSeq:                                     # anchor that returns a scripted sequence
+    def __init__(self, seq):
+        self.seq, self.i = list(seq), 0
 
-    def detect(f, roi):
-        calls["n"] += 1
-        return [] if calls["n"] <= 2 else [(0.9, 800, 480, 60, 40)]   # empty, then a mob
+    def locate(self, f):
+        v = self.seq[self.i] if self.i < len(self.seq) else self.seq[-1]
+        self.i += 1
+        return v
 
-    monkeypatch.setattr(recovery, "capture", lambda: np.zeros((1000, 1600, 3), np.uint8))
-    monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
-    monkeypatch.setattr(player, "find_player", lambda f, cfg=None, near=None: (800, 500))
-    monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
-    monkeypatch.setattr(recovery.kb, "safe_press", lambda k: None)
-    monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
-    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
-    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
-    it = iter([0, 0, 0, 0, 0])
-    monkeypatch.setattr(recovery.time, "time", lambda: next(it, 10_000))
 
-    r = recovery.approach_shoot(10, detect, _Anchor((800, 500)), deplete_reads=2, confirm_scans=1, verbose=False)
-    assert r is not recovery.DEPLETED     # mob reappeared in the double-check -> did not leave
+def test_assumes_last_position_when_anchor_lost_after_lock(monkeypatch):
+    # Skill VFX hides the HP bar (anchor -> None) but the skill ROOTS her, so once locked we
+    # assume her last position and keep farming from there (walk toward the mob), NOT a blind
+    # attack. Mob far right & out of range -> she should keep walking right, never firing 'c'.
+    mob = [(0.7, 1200, 480, 60, 40)]                 # cx=1230 vs player 800 -> far right
+    df, pressed, _ = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0] * 12)
+    anc = _AnchorSeq([(800, 500), None, None, None])  # lock, then bar hidden by VFX
+    recovery.approach_shoot(10, df, anc, attack_range=110, stall_limit=8, verbose=False)
+    assert Key.right in pressed and 'c' not in pressed   # walked from the assumed last pos
 
 
 def test_minimap_bound_fires_in_place_at_platform_edge(monkeypatch):
