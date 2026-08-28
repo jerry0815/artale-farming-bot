@@ -233,7 +233,7 @@ kb.f9_callback = silence_all_alarms   # F9 silences alarms wherever kb.on_press 
 # cooperative stop the UI sets to end a background-thread run (F8 pause still works).
 STATUS = {"state": "idle", "node": None, "count": None, "lie": False,
           "exp_per_min": None, "exp_10min": None, "exp_total": 0,
-          "run_secs": 0, "run_started": None, "buff_at": None}
+          "run_secs": 0, "run_active_base": None, "run_active_since": None, "buff_at": None}
 STOP = threading.Event()
 
 
@@ -254,15 +254,25 @@ def watch_loop(sleep=time.sleep):
 
 
 # --- game-logic safety, ported faithfully from the notebook (screen reads, no keys) ---
+ENEMY_THRESHOLD = 0.75      # red-dot match threshold; per-map via set_enemy_threshold(cfg)
+
+
+def set_enemy_threshold(t):
+    global ENEMY_THRESHOLD
+    ENEMY_THRESHOLD = float(t)
+
+
 def get_enemy():
     """Red dots (other players) on the minimap band. Non-empty -> escape."""
     _, np_img = capture_pil_np()
     if np_img is None:
         return []
-    ey = min(MM_Y + 145, np_img.shape[0]); ex = min(MM_X + 229, np_img.shape[1])
-    mm = np_img[MM_Y:ey, MM_X:ex]                 # notebook uses the 145-tall band here
+    ey = min(MM_Y + MM_H, np_img.shape[0]); ex = min(MM_X + MM_W, np_img.shape[1])
+    mm = np_img[MM_Y:ey, MM_X:ex]                 # FULL configured minimap band (water is 400 tall,
+    #                                              not the old hardcoded 145 -> lower platforms missed)
     try:
-        return detect_red_dots(mm, templates_folder="assets/minimap_other_character/", threshold=0.75)
+        return detect_red_dots(mm, templates_folder="assets/minimap_other_character/",
+                               threshold=ENEMY_THRESHOLD)
     except Exception:
         return []
 
@@ -1695,6 +1705,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     if isinstance(map_cfg, str):
         map_cfg = watermap.load_map(map_cfg)
     set_minimap(*watermap.minimap_crop(map_cfg))
+    set_enemy_threshold(map_cfg.get("enemy_threshold", 0.75))   # red-dot sensitivity (per map)
     if map_cfg.get("map_box"):                          # per-map valid dot box (reject phantoms)
         set_map_box(*map_cfg["map_box"])
     centers = watermap.node_centers(map_cfg)
@@ -1846,7 +1857,9 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     beats_per_node = int(map_cfg.get("beats_per_node", 3))
     t_start = time.time()
     STATUS["run_secs"], STATUS["buff_at"] = 0, None      # fresh run (panel timers)
-    STATUS["run_started"] = t_start                       # panel computes live elapsed from this
+    # ACTIVE farming time (excludes pauses) so total EXP / time / avg stay consistent.
+    _active = {"base": 0.0, "since": None}                # base = finished stretches, since = current start
+    STATUS["run_active_base"], STATUS["run_active_since"] = 0.0, None
     next_break = [time.time() + _r.uniform(*break_every)]
 
     # EXP tracker: per-10-min gain + running average (see make_exp_tracker).
@@ -1854,18 +1867,28 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                                 sample_secs=float(map_cfg.get("exp_sample_secs", 30)),
                                 window_secs=float(map_cfg.get("exp_window_secs", 600)))
 
+    def _freeze_active(now):                              # end the current active stretch (pause/stop)
+        if _active["since"] is not None:
+            _active["base"] += now - _active["since"]; _active["since"] = None
+        STATUS["run_active_base"], STATUS["run_active_since"] = _active["base"], None
+        STATUS["run_secs"] = int(_active["base"])
+
     def guard():
         """Per-tick housekeeping. Returns 'stop' (return now), 'pause'/'skip'
         (continue the outer loop), or 'ok'."""
+        now = time.time()
         if STOP.is_set():
-            kb.safe_release_all(); STATUS["state"] = "idle"; print("[water] STOP"); return "stop"
-        if max_seconds is not None and time.time() - t_start > max_seconds:
-            kb.safe_release_all(); STATUS["state"] = "idle"; print("[water] max_seconds"); return "stop"
+            kb.safe_release_all(); _freeze_active(now); STATUS["state"] = "idle"; print("[water] STOP"); return "stop"
+        if max_seconds is not None and now - t_start > max_seconds:
+            kb.safe_release_all(); _freeze_active(now); STATUS["state"] = "idle"; print("[water] max_seconds"); return "stop"
         if kb.pause:
-            kb.safe_release_all(); lie_check_silence()
+            kb.safe_release_all(); lie_check_silence(); _freeze_active(now)
             STATUS["state"] = "paused"; STATUS["lie"] = False; time.sleep(0.1); return "pause"
+        if _active["since"] is None:                       # (re)enter active farming after start/pause
+            _active["since"] = now
         STATUS["state"] = "farming"
-        STATUS["run_secs"] = int(time.time() - t_start)   # elapsed farming time (for the panel)
+        STATUS["run_active_base"], STATUS["run_active_since"] = _active["base"], _active["since"]
+        STATUS["run_secs"] = int(_active["base"] + (now - _active["since"]))
         lie_check_tick(); STATUS["lie"] = is_lie_check_active()
         exp_tick()
         if enemy_check and enemy_check():

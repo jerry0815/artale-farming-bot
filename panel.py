@@ -315,9 +315,14 @@ def _status_dict(controller):
     st["recorder_marks"] = controller.recorder.marks if controller.recorder else 0
     ba = st.get("buff_at")
     st["buff_ago"] = int(time.time() - ba) if ba else None   # seconds since last buff (server clock)
-    rs = st.get("run_started")                               # live elapsed while running (ticks each poll)
-    if rs and st.get("state") in ("farming", "paused"):
-        st["run_secs"] = int(time.time() - rs)
+    # ACTIVE farming time (excludes pauses): ticks live while farming, frozen when paused.
+    base = st.get("run_active_base")
+    if base is not None:
+        since = st.get("run_active_since")
+        active = base + (time.time() - since if (since and st.get("state") == "farming") else 0.0)
+        st["run_secs"] = int(active)
+        # Derive avg from the SAME active time so total / time / avg agree (>=1 min in).
+        st["exp_per_min"] = round(st.get("exp_total", 0) / (active / 60.0)) if active >= 60 else None
     return st
 
 
