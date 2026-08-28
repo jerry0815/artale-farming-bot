@@ -227,26 +227,38 @@ def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, ro
     player_pos, anchor_mode = None, cfg.get("anchor", "hpbar")
     if anchor_mode == "nametag" and cfg.get("nametag_template"):
         try:
+            # Draw BOTH anchors independently so each template can be checked: name tag = GREEN,
+            # 稱號 title = CYAN. player_pos = name tag if found, else title (the loop's order).
+            parts = []
             name_a = _player.NametagAnchor(_player.load_nametag(cfg["nametag_template"]),
                                            feet_offset=int(cfg.get("nametag_feet_offset", 6)),
                                            accept_thres=float(cfg.get("nametag_accept", 0.55)))
-            if cfg.get("title_template"):                    # 稱號 fallback
+            np_ = name_a.locate(f)
+            if np_ is not None and name_a.last is not None:
+                lx, ly = name_a.last
+                cv2.rectangle(dbg, (lx, ly), (lx + name_a.w, ly + name_a.h), (0, 255, 0), 2)
+                cv2.circle(dbg, np_, 9, (0, 255, 0), -1)
+                cv2.putText(dbg, "name", (lx, ly - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                parts.append(f"name@{np_}")
+                player_pos = np_
+            else:
+                parts.append("name:MISS")
+            if cfg.get("title_template"):
                 title_a = _player.NametagAnchor(_player.load_nametag(cfg["title_template"]),
                                                 feet_offset=int(cfg.get("title_feet_offset", 40)),
                                                 accept_thres=float(cfg.get("title_accept", 0.55)))
-                anc = _player.CompositeAnchor([name_a, title_a])
-            else:
-                anc = name_a
-            player_pos = anc.locate(f)
-            if player_pos is not None and anc.last is not None:
-                lx, ly = anc.last
-                which = getattr(anc, "which", 0)             # 1 = title fallback -> cyan box
-                col = (0, 255, 0) if not which else (255, 220, 0)
-                tw = (name_a if not which else title_a).w
-                th = (name_a if not which else title_a).h
-                cv2.rectangle(dbg, (lx, ly), (lx + tw, ly + th), col, 2)
-                cv2.circle(dbg, player_pos, 10, col, -1)
-                anchor_mode = "nametag" if not which else "title(fallback)"
+                tp = title_a.locate(f)
+                if tp is not None and title_a.last is not None:
+                    lx, ly = title_a.last
+                    cv2.rectangle(dbg, (lx, ly), (lx + title_a.w, ly + title_a.h), (255, 220, 0), 2)
+                    cv2.circle(dbg, tp, 9, (255, 220, 0), -1)
+                    cv2.putText(dbg, "title", (lx, ly - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 220, 0), 2)
+                    parts.append(f"title@{tp}")
+                    if player_pos is None:
+                        player_pos = tp
+                else:
+                    parts.append("title:MISS")
+            anchor_mode = " ".join(parts)                    # e.g. "name@(x,y) title@(x,y)"
         except Exception as e:
             anchor_mode = f"nametag ERROR: {e}"
     else:
