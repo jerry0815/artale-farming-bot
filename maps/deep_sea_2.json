@@ -184,6 +184,7 @@
   ],
   "anchor": "yolo_player",
   "yolo_foot_offset": 123,
+  "yolo_player_conf": 0.3,
   "_anchor_nametag_fallback": {
     "anchor": "nametag",
     "nametag_template": "assets/player/deep_sea_2_nametag.png",

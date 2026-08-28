@@ -1780,10 +1780,13 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 raise RuntimeError("anchor 'yolo_player' needs detector 'mob_yolo'")
             import mob_detect as _md
             _pfoot = int(map_cfg.get("yolo_foot_offset", 0))   # HP-bar box bottom -> feet (~123px down)
+            _pconf = float(map_cfg.get("yolo_player_conf", _mconf))   # player recall > mob (HP bar is small)
+            _pgrace = int(map_cfg.get("yolo_stale_grace", 0))  # 0 -> approach_shoot governs misses (rooted vs walk)
 
             def _make_anchor():
-                return _md.YoloPlayerAnchor(_mm, conf=_mconf, imgsz=_mimg, foot_offset=_pfoot)
-            print(f"[water] anchor: yolo_player (class 2 of {map_cfg.get('mob_model', 'models/mob_yolo.pt')})")
+                return _md.YoloPlayerAnchor(_mm, conf=_pconf, imgsz=_mimg, foot_offset=_pfoot,
+                                            stale_grace=_pgrace)
+            print(f"[water] anchor: yolo_player conf={_pconf} (class 2 of {map_cfg.get('mob_model', 'models/mob_yolo.pt')})")
         elif map_cfg.get("anchor") == "nametag":          # KenYu-style name-tag anchor
             _tagw = _p.load_nametag(map_cfg["nametag_template"])
             _titlew = _p.load_nametag(map_cfg["title_template"]) if map_cfg.get("title_template") else None
