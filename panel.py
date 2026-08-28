@@ -227,14 +227,26 @@ def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, ro
     player_pos, anchor_mode = None, cfg.get("anchor", "hpbar")
     if anchor_mode == "nametag" and cfg.get("nametag_template"):
         try:
-            tagw = _player.load_nametag(cfg["nametag_template"])
-            anc = _player.NametagAnchor(tagw, feet_offset=int(cfg.get("nametag_feet_offset", 6)),
-                                        accept_thres=float(cfg.get("nametag_accept", 0.55)))
+            name_a = _player.NametagAnchor(_player.load_nametag(cfg["nametag_template"]),
+                                           feet_offset=int(cfg.get("nametag_feet_offset", 6)),
+                                           accept_thres=float(cfg.get("nametag_accept", 0.55)))
+            if cfg.get("title_template"):                    # 稱號 fallback
+                title_a = _player.NametagAnchor(_player.load_nametag(cfg["title_template"]),
+                                                feet_offset=int(cfg.get("title_feet_offset", 40)),
+                                                accept_thres=float(cfg.get("title_accept", 0.55)))
+                anc = _player.CompositeAnchor([name_a, title_a])
+            else:
+                anc = name_a
             player_pos = anc.locate(f)
             if player_pos is not None and anc.last is not None:
-                lx, ly = anc.last                            # name-tag box (green) + feet dot
-                cv2.rectangle(dbg, (lx, ly), (lx + tagw.shape[1], ly + tagw.shape[0]), (0, 255, 0), 2)
-                cv2.circle(dbg, player_pos, 10, (0, 255, 0), -1)
+                lx, ly = anc.last
+                which = getattr(anc, "which", 0)             # 1 = title fallback -> cyan box
+                col = (0, 255, 0) if not which else (255, 220, 0)
+                tw = (name_a if not which else title_a).w
+                th = (name_a if not which else title_a).h
+                cv2.rectangle(dbg, (lx, ly), (lx + tw, ly + th), col, 2)
+                cv2.circle(dbg, player_pos, 10, col, -1)
+                anchor_mode = "nametag" if not which else "title(fallback)"
         except Exception as e:
             anchor_mode = f"nametag ERROR: {e}"
     else:

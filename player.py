@@ -73,13 +73,15 @@ class NametagAnchor:
     mob covering part of the name). locate(frame) -> (player_x, feet_y) or None."""
 
     def __init__(self, tag_white, feet_offset=6, split_width=45, local_radius=60,
-                 accept_thres=0.55, y_lo_frac=0.08, y_hi_frac=0.90):
+                 accept_thres=0.55, y_lo_frac=0.08, y_hi_frac=0.90, stale_grace=3):
         self.tag = tag_white
         self.h, self.w = tag_white.shape
         self.feet_offset = feet_offset
         self.local_radius = local_radius
         self.accept_thres = accept_thres
         self.y_lo_frac, self.y_hi_frac = y_lo_frac, y_hi_frac
+        self.stale_grace = stale_grace
+        self._miss = 0
         self.last = None                                  # top-left (x,y) of last good match
         n = max(1, self.w // max(8, split_width))
         ws = self.w // n
@@ -114,9 +116,35 @@ class NametagAnchor:
             if loc is not None and (best is None or score < best[0]):
                 best = (score, loc[0], loc[1])
         if best is None or best[0] >= self.accept_thres:
-            return None                                   # no confident lock this frame
+            # brief occlusion (VFX/mob over the tag): keep the last lock for a few frames
+            if self.last is not None and self._miss < self.stale_grace:
+                self._miss += 1
+                return (self.last[0] + self.w // 2, self.last[1] - self.feet_offset)
+            return None                                   # lost for real
+        self._miss = 0
         self.last = (best[1], best[2])
         return (best[1] + self.w // 2, best[2] - self.feet_offset)
+
+
+class CompositeAnchor:
+    """Try several anchors in order (e.g. name tag first, then the 稱號/title banner) and
+    return the first that locates the player -- so if one is covered (attack VFX, a mob),
+    the other still finds you. `which` names the anchor that last succeeded (for debug)."""
+
+    def __init__(self, anchors):
+        self.anchors = anchors
+        self.which = None
+        self.last = None
+
+    def locate(self, frame_bgr):
+        for i, a in enumerate(self.anchors):
+            p = a.locate(frame_bgr)
+            if p is not None:
+                self.which = i
+                self.last = getattr(a, "last", None)
+                return p
+        self.which = None
+        return None
 
 
 class HPBarAnchor:

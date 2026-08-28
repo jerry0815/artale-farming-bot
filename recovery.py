@@ -1702,11 +1702,18 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         _astall = int(map_cfg.get("stall_limit", 8))
         if map_cfg.get("anchor") == "nametag":            # KenYu-style name-tag anchor
             _tagw = _p.load_nametag(map_cfg["nametag_template"])
+            _titlew = _p.load_nametag(map_cfg["title_template"]) if map_cfg.get("title_template") else None
 
             def _make_anchor():
-                return _p.NametagAnchor(_tagw, feet_offset=int(map_cfg.get("nametag_feet_offset", 6)),
+                name = _p.NametagAnchor(_tagw, feet_offset=int(map_cfg.get("nametag_feet_offset", 6)),
                                         accept_thres=float(map_cfg.get("nametag_accept", 0.55)))
-            print(f"[water] anchor: nametag ({map_cfg['nametag_template']})")
+                if _titlew is None:
+                    return name
+                title = _p.NametagAnchor(_titlew, feet_offset=int(map_cfg.get("title_feet_offset", 40)),
+                                         accept_thres=float(map_cfg.get("title_accept", 0.55)))
+                return _p.CompositeAnchor([name, title])   # name tag first, 稱號 fallback
+            print(f"[water] anchor: nametag ({map_cfg['nametag_template']})"
+                  + (f" + title fallback ({map_cfg['title_template']})" if _titlew is not None else ""))
         else:
             def _make_anchor():
                 return _p.HPBarAnchor(cfg=map_cfg.get("player"))
