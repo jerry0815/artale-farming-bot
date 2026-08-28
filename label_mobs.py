@@ -6,6 +6,11 @@ Workflow:
      only fix its mistakes:
         python label_mobs.py --grab "C:/.../clip.mp4" 40
      (or --grab-dir <folder-of-pngs> to import existing screenshots)
+     ACTIVE LEARNING (recommended for player recall): grab ONLY frames where the current
+     model MISSES the player -- the hard cases that teach it the most:
+        python label_mobs.py --grab-misses "C:/.../clip.mp4" 60 [--conf 0.3]
+     Mobs are pre-labeled; the player box is (by definition) absent, so you draw it. Skip
+     (arrow past) any frame where the bar is genuinely hidden by VFX -- nothing to label.
   2. Label / correct in the browser:
         python label_mobs.py                 # http://localhost:8001
      drag = new box (in the ACTIVE class) | click a box then 1/2 = set its class,
@@ -87,6 +92,38 @@ def grab_from_video(video, count, model=None):
         saved += 1
     v.release()
     return saved
+
+
+def grab_misses_from_video(video, count, model, conf=0.3, imgsz=640):
+    """ACTIVE LEARNING: keep only frames where the model FAILS to detect the player (class 2)
+    at `conf` -- the hard cases. Mobs are pre-labeled (the model still finds them); the player
+    is absent, so you draw it. Scans denser than `count` since most frames are hits (skipped).
+    Returns (saved, scanned). Existing labels are never touched."""
+    player_cls = CLASSES.index("player")
+    os.makedirs(IMG_DIR, exist_ok=True)
+    v = cv2.VideoCapture(video)
+    n = int(v.get(cv2.CAP_PROP_FRAME_COUNT))
+    step = max(1, n // max(1, count * 4))          # scan ~4x count (many frames are hits -> skipped)
+    saved = scanned = 0
+    for f in range(0, n, step):
+        if saved >= count:
+            break
+        v.set(cv2.CAP_PROP_POS_FRAMES, f)
+        ok, fr = v.read()
+        if not ok:
+            continue
+        stem = f"real_{f:06d}"
+        if os.path.exists(os.path.join(LBL_DIR, stem + ".txt")):
+            continue                               # already labeled -> skip
+        scanned += 1
+        boxes = _prelabel(fr, model, conf=conf, imgsz=imgsz)
+        if any(int(b[0]) == player_cls for b in boxes):
+            continue                               # player DETECTED -> not a miss -> not informative
+        cv2.imwrite(os.path.join(IMG_DIR, stem + ".png"), fr)
+        write_boxes(stem, boxes)                   # mobs only; you add the player box
+        saved += 1
+    v.release()
+    return saved, scanned
 
 
 def grab_from_dir(src, model=None):
@@ -223,7 +260,19 @@ def make_handler():
 
 if __name__ == "__main__":
     import sys
-    if "--grab" in sys.argv or "--grab-dir" in sys.argv:
+    if "--grab-misses" in sys.argv:
+        from ultralytics import YOLO
+        model = YOLO("models/mob_yolo.pt")
+        i = sys.argv.index("--grab-misses")
+        video = sys.argv[i + 1]
+        count = int(sys.argv[i + 2]) if len(sys.argv) > i + 2 and sys.argv[i + 2].isdigit() else 60
+        conf = float(sys.argv[sys.argv.index("--conf") + 1]) if "--conf" in sys.argv else 0.3
+        print(f"[label] active learning: keeping frames where the model MISSES the player "
+              f"(conf {conf}) from {video}")
+        got, scanned = grab_misses_from_video(video, count, model, conf=conf)
+        print(f"[label] scanned {scanned} frames -> kept {got} player-MISS frames -> {IMG_DIR}")
+        print("[label] Now run: python label_mobs.py  (press 3, draw the HP bar; skip VFX-hidden ones)")
+    elif "--grab" in sys.argv or "--grab-dir" in sys.argv:
         model = None
         if "--no-prelabel" not in sys.argv:
             try:
