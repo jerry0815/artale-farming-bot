@@ -1727,7 +1727,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             if detector != "mob_yolo":
                 raise RuntimeError("anchor 'yolo_player' needs detector 'mob_yolo'")
             import mob_detect as _md
-            _pfoot = int((map_cfg.get("player") or {}).get("foot_offset", 0))
+            _pfoot = int(map_cfg.get("yolo_foot_offset", 0))   # HP-bar box bottom -> feet (~123px down)
 
             def _make_anchor():
                 return _md.YoloPlayerAnchor(_mm, conf=_mconf, imgsz=_mimg, foot_offset=_pfoot)

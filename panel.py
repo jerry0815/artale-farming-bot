@@ -229,7 +229,7 @@ def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, ro
         try:                                                 # class-2 player box = GREEN
             import mob_detect as _md
             _mp = _md.load_yolo(cfg.get("mob_model", "models/mob_yolo.pt"))
-            _pfoot = int((cfg.get("player") or {}).get("foot_offset", 0))
+            _pfoot = int(cfg.get("yolo_foot_offset", 0))     # HP-bar box bottom -> feet (~123px down)
             _pconf = thr if thr is not None else float(cfg.get("mob_conf", 0.6))
             _, pbox = _md.yolo_detect(_mp, f, roi=None, conf=_pconf, imgsz=int(cfg.get("mob_imgsz", 640)))
             if pbox is not None:

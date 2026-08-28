@@ -69,20 +69,27 @@ def yolo_detect(model, frame_bgr, roi=None, conf=0.3, imgsz=640):
 
 class YoloPlayerAnchor:
     """Player anchor backed by the class-2 (player) box of the mob YOLO. locate(frame) ->
-    (x, feet_y) or None, where x is the box center and feet_y its BOTTOM edge (the player
-    stands there). The training box includes the red HP bar, so YOLO tracks the player
-    through attack VFX that break the template/HP-bar anchors.
+    (x, feet_y) or None, where x is the box center and feet_y = box bottom + foot_offset.
+    The labeled box is the red HP BAR above the head (a clean, distinctive feature -> high
+    precision, and YOLO tracks it through attack VFX that break the template anchor), so
+    foot_offset is the bar-bottom-to-feet distance (~123px on deep_sea_2), NOT 0.
 
     Feed it the ALREADY-COMPUTED player box from yolo_detect() (set via .push) so the loop
-    runs a single inference per frame; if none was pushed, it runs its own predict()."""
+    runs a single inference per frame; if none was pushed, it runs its own predict().
 
-    def __init__(self, model, roi=None, conf=0.3, imgsz=640, foot_offset=0):
+    Player recall is ~0.7 (the HP bar is occluded by VFX some frames), so `stale_grace`
+    keeps the last position for a few missed frames -- the anchor stays put through a brief
+    miss instead of vanishing (the same trick NametagAnchor uses)."""
+
+    def __init__(self, model, roi=None, conf=0.3, imgsz=640, foot_offset=0, stale_grace=3):
         self.model = model
         self.roi = roi
         self.conf = conf
         self.imgsz = imgsz
         self.foot_offset = foot_offset
+        self.stale_grace = stale_grace
         self.last = None
+        self._miss = 0
         self._pushed = False
         self._box = None
 
@@ -102,6 +109,10 @@ class YoloPlayerAnchor:
         else:
             _mobs, box = yolo_detect(self.model, frame_bgr, self.roi, self.conf, self.imgsz)
         if box is None:
+            if self.last is not None and self._miss < self.stale_grace:  # ride a brief miss
+                self._miss += 1
+                return self.last
             return None
+        self._miss = 0
         self.last = self._to_pos(box)
         return self.last

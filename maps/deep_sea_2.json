@@ -182,11 +182,15 @@
     50,
     385
   ],
-  "anchor": "nametag",
-  "nametag_template": "assets/player/deep_sea_2_nametag.png",
-  "nametag_feet_offset": 6,
-  "nametag_accept": 0.55,
-  "title_template": "assets/player/deep_sea_2_title.png",
-  "title_feet_offset": 40,
-  "title_accept": 0.55
+  "anchor": "yolo_player",
+  "yolo_foot_offset": 123,
+  "_anchor_nametag_fallback": {
+    "anchor": "nametag",
+    "nametag_template": "assets/player/deep_sea_2_nametag.png",
+    "nametag_feet_offset": 6,
+    "nametag_accept": 0.55,
+    "title_template": "assets/player/deep_sea_2_title.png",
+    "title_feet_offset": 40,
+    "title_accept": 0.55
+  }
 }

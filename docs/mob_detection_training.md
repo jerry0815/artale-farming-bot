@@ -127,17 +127,28 @@ Because the HP bar is the anchor feature, **record the label clip with the HP ba
 on-screen** (take a hit at the start so it shows). Then:
 
 1. Grab + prelabel real frames as usual (`python label_mobs.py --grab "<clip>" 40`).
-2. In the browser, press **3** and drag a box around the character **from the HP bar down
-   to the feet**, one per frame. Fix any mob boxes too.
+2. In the browser, press **3** and drag a **tight box around just the red HP bar** above
+   the head, one per frame. Box the bar only (not the whole body) — it's the clean,
+   distinctive feature, which keeps player **precision ~1.0** (it won't fire on the same
+   character when the bar is hidden, nor on other players). Frames where the bar is fully
+   occluded by VFX: leave unlabeled. Fix any mob boxes too.
 3. Retrain hybrid: `python train_mobs.py 80 640 --real` (now writes `nc: 3`,
    names `[fishhouse, goby, player]`).
 4. Switch the map to the YOLO anchor in `maps/<name>.json`:
    ```json
-   "anchor": "yolo_player"
+   "anchor": "yolo_player",
+   "yolo_foot_offset": 123
    ```
-   (drop `nametag_template` / `title_template`; keep `detector: "mob_yolo"`). Feet =
-   bottom-center of the player box; add `"player": {"foot_offset": N}` to nudge if needed.
-5. Snap-verify in the panel — the player box draws GREEN, labeled `player`.
+   (keep `detector: "mob_yolo"`). The anchor's x = bar center; feet_y = bar-box bottom +
+   `yolo_foot_offset` (the bar-to-feet distance, ~123px on deep_sea_2). Measure it once:
+   crop a frame, read the bar-bottom and feet y, subtract.
+5. Snap-verify in the panel — the HP-bar box draws GREEN (labeled `player`) and the feet
+   dot should land at the character's feet; nudge `yolo_foot_offset` if the dot is high/low.
+
+Note: player recall is ~0.7 (the bar is occluded by VFX some frames), so `YoloPlayerAnchor`
+has a `stale_grace` (holds the last position through a few missed frames). Frames of the
+same character WITHOUT a visible bar (e.g. an older clip) are useful *unlabeled* — they
+train the model that the bar is required, sharpening precision.
 
 `mob_detect.yolo_detect()` returns `(mobs, player)` from a single inference; the farming
 loop's `YoloPlayerAnchor` exposes the player box as `.locate(frame) -> (x, feet_y)`. Until

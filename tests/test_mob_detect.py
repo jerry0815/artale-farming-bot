@@ -73,9 +73,21 @@ def test_anchor_foot_offset_applied():
 
 
 def test_anchor_returns_none_when_no_player():
-    boxes = [_B(0, 0.9, [10, 10, 30, 40])]            # only a mob
-    a = mob_detect.YoloPlayerAnchor(_FakeModel(boxes))
+    boxes = [_B(0, 0.9, [10, 10, 30, 40])]            # only a mob, never any player
+    a = mob_detect.YoloPlayerAnchor(_FakeModel(boxes), stale_grace=0)
     assert a.locate(_frame()) is None
+
+
+def test_anchor_stale_grace_rides_brief_miss():
+    model = _FakeModel([_B(2, 0.7, [100, 100, 140, 200])])
+    a = mob_detect.YoloPlayerAnchor(model, stale_grace=2)
+    assert a.locate(_frame()) == (120, 200)           # lock
+    model._boxes = []                                 # player now missing
+    assert a.locate(_frame()) == (120, 200)           # miss 1 -> hold last
+    assert a.locate(_frame()) == (120, 200)           # miss 2 -> hold last
+    assert a.locate(_frame()) is None                 # grace exhausted -> lost
+    model._boxes = [_B(2, 0.7, [100, 100, 140, 200])]
+    assert a.locate(_frame()) == (120, 200)           # re-acquire resets grace
 
 
 def test_anchor_push_avoids_second_inference():
