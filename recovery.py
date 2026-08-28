@@ -319,6 +319,53 @@ def get_exp(exp_processor):
         return None
 
 
+def make_exp_tracker(log_exp=True, sample_secs=45, window_secs=600, label="exp"):
+    """A per-window EXP logger, shared by the water and nav farming loops. Returns an
+    `exp_tick()` to call each loop iteration: it samples the ABSOLUTE EXP number every
+    `sample_secs`, and every `window_secs` (10 min default) logs the gain over that window
+    (sum of positive consecutive deltas, skipping level-ups and digit-count OCR errors) plus
+    the running average across windows. Also publishes STATUS['exp_10min']. No-op if
+    log_exp is False. Self-contained (closes over its own sample buffer)."""
+    exp_proc = ExpProcessor() if log_exp else None
+    next_sample = [time.time() + sample_secs]
+    next_log = [time.time() + window_secs]
+    samples = []                                                # [(t, abs_exp_number)]
+    windows = [0, 0.0]                                          # [count, cumulative gain]
+
+    def _window_gain(since):
+        win = [(t, n) for t, n in samples if t >= since]
+        total = 0
+        for (_t0, n0), (_t1, n1) in zip(win, win[1:]):
+            d = n1 - n0
+            if d > 0 and len(str(n0)) == len(str(n1)):          # positive, same digits (not lvl-up/OCR error)
+                total += d
+        return total
+
+    def exp_tick():
+        if exp_proc is None:
+            return
+        now = time.time()
+        if now >= next_sample[0]:
+            next_sample[0] = now + sample_secs
+            num = get_exp_number(exp_proc)
+            if num:
+                samples.append((now, num))
+                if len(samples) > 400:
+                    del samples[:200]
+        if now >= next_log[0]:
+            next_log[0] = now + window_secs
+            gain = _window_gain(now - window_secs)
+            windows[0] += 1
+            windows[1] += gain
+            avg = windows[1] / windows[0]
+            STATUS["exp_10min"] = round(gain)
+            mins = int(round(window_secs / 60))
+            print(f"[{label}] last {mins} min: {gain:,.0f} EXP  |  avg/{mins}min: {avg:,.0f} "
+                  f"(over {windows[0]} window{'s' if windows[0] != 1 else ''})")
+
+    return exp_tick
+
+
 def _minimap(np_img):
     ey = min(MM_Y + MM_H, np_img.shape[0]); ex = min(MM_X + MM_W, np_img.shape[1])
     return np_img[MM_Y:ey, MM_X:ex]
@@ -1497,6 +1544,8 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
             monsters.detect_dragons_yolo(_f0, model, monsters.DEFAULT_MOTION_ROI)
     print(f"[nav] reactive deplete-check: {'YOLO (single-frame)' if reactive else 'off -> motion fallback'}")
 
+    exp_tick = make_exp_tracker(label="nav")     # per-10-min EXP gain + running average
+
     def one_count(nd):
         roi = monsters.MOTION_ROI_BY_NODE.get(nd, monsters.DEFAULT_MOTION_ROI)
         f = capture()
@@ -1533,6 +1582,7 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
         STATUS["state"] = "farming"
         lie_check_tick()
         STATUS["lie"] = is_lie_check_active()
+        exp_tick()                                    # per-10-min EXP logging (no-op between samples)
 
         # locate; recover onto a farm node if off-map
         node = _nav_locate()
@@ -1776,46 +1826,10 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     t_start = time.time()
     next_break = [time.time() + _r.uniform(*break_every)]
 
-    # EXP tracker: sample the absolute EXP number periodically; log the gain per 10-min
-    # window (sum of positive consecutive deltas, skipping level-ups and digit-count OCR
-    # errors -- robust to the 'reasonable gain' rejection get_exp used to trip on).
-    exp_proc = ExpProcessor() if map_cfg.get("log_exp", True) else None
-    _exp_sample_s = float(map_cfg.get("exp_sample_secs", 45))
-    _exp_window_s = float(map_cfg.get("exp_window_secs", 600))   # 10 min
-    _exp_next_sample = [time.time() + _exp_sample_s]
-    _exp_next_log = [time.time() + _exp_window_s]
-    _exp_samples = []                                           # [(t, abs_exp_number)]
-    _exp_windows = [0, 0.0]                                      # [count, cumulative gain]
-
-    def _window_gain(since):
-        win = [(t, n) for t, n in _exp_samples if t >= since]
-        total = 0
-        for (_t0, n0), (_t1, n1) in zip(win, win[1:]):
-            d = n1 - n0
-            if d > 0 and len(str(n0)) == len(str(n1)):           # positive, same digits (not lvl-up/OCR error)
-                total += d
-        return total
-
-    def exp_tick():
-        if exp_proc is None:
-            return
-        now = time.time()
-        if now >= _exp_next_sample[0]:
-            _exp_next_sample[0] = now + _exp_sample_s
-            num = get_exp_number(exp_proc)
-            if num:
-                _exp_samples.append((now, num))
-                if len(_exp_samples) > 400:
-                    del _exp_samples[:200]
-        if now >= _exp_next_log[0]:
-            _exp_next_log[0] = now + _exp_window_s
-            gain = _window_gain(now - _exp_window_s)
-            _exp_windows[0] += 1
-            _exp_windows[1] += gain
-            avg = _exp_windows[1] / _exp_windows[0]
-            STATUS["exp_10min"] = round(gain)
-            print(f"[exp] last 10 min: {gain:,.0f} EXP  |  avg/10min: {avg:,.0f} "
-                  f"(over {_exp_windows[0]} window{'s' if _exp_windows[0] != 1 else ''})")
+    # EXP tracker: per-10-min gain + running average (see make_exp_tracker).
+    exp_tick = make_exp_tracker(log_exp=map_cfg.get("log_exp", True),
+                                sample_secs=float(map_cfg.get("exp_sample_secs", 45)),
+                                window_secs=float(map_cfg.get("exp_window_secs", 600)))
 
     def guard():
         """Per-tick housekeeping. Returns 'stop' (return now), 'pause'/'skip'

@@ -51,3 +51,30 @@ def test_reactive_deplete_debounce():
     assert recovery._reactive_deplete(1, 0, 2, 2) == (2, True)
     # a failed frame (count is None) resets the streak (conservative, no rotate)
     assert recovery._reactive_deplete(1, None, 2, 2) == (0, False)
+
+
+def test_exp_tracker_window_gain_filters(monkeypatch):
+    """make_exp_tracker sums positive same-digit-count deltas per window, skipping
+    negatives (bad OCR) and digit-count changes (level-ups / OCR errors)."""
+    clock = [1000.0]
+    monkeypatch.setattr(recovery.time, "time", lambda: clock[0])
+    monkeypatch.setattr(recovery, "ExpProcessor", lambda *a, **k: object())
+    nums = [100, 150, 149, 700, 1200]        # +50 | -1 skip | +551 | +500 digit-change skip
+    calls = [0]
+
+    def fake_num(_proc):
+        i = calls[0]; calls[0] += 1
+        return nums[i] if i < len(nums) else None
+    monkeypatch.setattr(recovery, "get_exp_number", fake_num)
+
+    tick = recovery.make_exp_tracker(sample_secs=1, window_secs=5, label="test")
+    for t in range(1001, 1006):              # samples at 1001..1005; window logs at 1005
+        clock[0] = float(t)
+        tick()
+    assert recovery.STATUS["exp_10min"] == 601   # 50 + 551, negatives & digit-change dropped
+
+
+def test_exp_tracker_noop_when_disabled(monkeypatch):
+    monkeypatch.setattr(recovery, "ExpProcessor", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not construct")))
+    tick = recovery.make_exp_tracker(log_exp=False)
+    tick()                                        # must not raise / not sample
