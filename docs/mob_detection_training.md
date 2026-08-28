@@ -132,8 +132,11 @@ on-screen** (take a hit at the start so it shows). Then:
    distinctive feature, which keeps player **precision ~1.0** (it won't fire on the same
    character when the bar is hidden, nor on other players). Frames where the bar is fully
    occluded by VFX: leave unlabeled. Fix any mob boxes too.
-3. Retrain hybrid: `python train_mobs.py 80 640 --real` (now writes `nc: 3`,
-   names `[fishhouse, goby, player]`).
+3. Retrain hybrid **at imgsz 960**: `python train_mobs.py 80 960 --real` (writes `nc: 3`,
+   names `[fishhouse, goby, player]`). The HP bar is small (~73x19px); training at 960 vs
+   640 lifted player recall 0.79 -> 0.92 (and FPs 3 -> 0) on real frames -- resolution
+   matters for the tiny bar. Set `"mob_imgsz": 960` in the map so inference matches training
+   (a 960-trained model run at 640 underperforms). 960 inference is ~23ms/frame.
 4. Switch the map to the YOLO anchor in `maps/<name>.json`:
    ```json
    "anchor": "yolo_player",
