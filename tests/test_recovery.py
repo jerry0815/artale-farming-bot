@@ -72,6 +72,9 @@ def test_exp_tracker_window_gain_filters(monkeypatch):
         clock[0] = float(t)
         tick()
     assert recovery.STATUS["exp_10min"] == 601   # 50 + 551, negatives & digit-change dropped
+    assert recovery.STATUS["exp_total"] == 601   # cumulative gain since run start
+    # live per-minute run average: 601 gained over 5s elapsed = 601 * 60/5 = 7212
+    assert recovery.STATUS["exp_per_min"] == 7212
 
 
 def test_exp_tracker_noop_when_disabled(monkeypatch):

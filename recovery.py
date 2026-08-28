@@ -231,7 +231,8 @@ kb.f9_callback = silence_all_alarms   # F9 silences alarms wherever kb.on_press 
 # --- shared status + cooperative stop, for the control UI (panel.py) --------------
 # STATUS is a plain dict updated in-place by the loops; the UI polls it. STOP is a
 # cooperative stop the UI sets to end a background-thread run (F8 pause still works).
-STATUS = {"state": "idle", "node": None, "count": None, "lie": False}
+STATUS = {"state": "idle", "node": None, "count": None, "lie": False,
+          "exp_per_min": None, "exp_10min": None, "exp_total": 0}
 STOP = threading.Event()
 
 
@@ -324,13 +325,19 @@ def make_exp_tracker(log_exp=True, sample_secs=45, window_secs=600, label="exp")
     `exp_tick()` to call each loop iteration: it samples the ABSOLUTE EXP number every
     `sample_secs`, and every `window_secs` (10 min default) logs the gain over that window
     (sum of positive consecutive deltas, skipping level-ups and digit-count OCR errors) plus
-    the running average across windows. Also publishes STATUS['exp_10min']. No-op if
-    log_exp is False. Self-contained (closes over its own sample buffer)."""
+    the running average across windows. Publishes STATUS['exp_10min'] (last window gain),
+    STATUS['exp_per_min'] (LIVE run-average EXP/min, updated each sample) and
+    STATUS['exp_total'] (cumulative gain) for the panel. No-op if log_exp is False.
+    Self-contained (closes over its own sample buffer)."""
     exp_proc = ExpProcessor() if log_exp else None
+    STATUS["exp_per_min"], STATUS["exp_10min"], STATUS["exp_total"] = None, None, 0  # fresh run
+    run_start = time.time()
     next_sample = [time.time() + sample_secs]
     next_log = [time.time() + window_secs]
     samples = []                                                # [(t, abs_exp_number)]
     windows = [0, 0.0]                                          # [count, cumulative gain]
+    cumulative = [0]                                            # gain since run start (incremental)
+    prev = [None]                                              # last (t, num) for the running delta
 
     def _window_gain(since):
         win = [(t, n) for t, n in samples if t >= since]
@@ -349,9 +356,19 @@ def make_exp_tracker(log_exp=True, sample_secs=45, window_secs=600, label="exp")
             next_sample[0] = now + sample_secs
             num = get_exp_number(exp_proc)
             if num:
+                if prev[0] is not None:                         # accumulate the run total incrementally
+                    pn = prev[0][1]
+                    d = num - pn
+                    if d > 0 and len(str(pn)) == len(str(num)):
+                        cumulative[0] += d
+                prev[0] = (now, num)
                 samples.append((now, num))
                 if len(samples) > 400:
                     del samples[:200]
+                elapsed_min = (now - run_start) / 60.0
+                if elapsed_min > 0:                             # live run-average EXP per minute
+                    STATUS["exp_per_min"] = round(cumulative[0] / elapsed_min)
+                STATUS["exp_total"] = cumulative[0]
         if now >= next_log[0]:
             next_log[0] = now + window_secs
             gain = _window_gain(now - window_secs)

@@ -333,6 +333,10 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
  #log{font-family:ui-monospace,monospace;font-size:12px;background:#0d0d12;color:#cdd;
       border-radius:8px;padding:10px;height:240px;overflow:auto;white-space:pre-wrap;line-height:1.4}
  #log .exp{color:#7fdd7f} #log .app{color:#9ad} #log .wtr{color:#e8c06a}
+ #exp{background:#161d16;border:1px solid #2b4d2b;border-radius:8px;padding:12px;margin-top:12px;text-align:center}
+ #exp .big{font-size:26px;font-weight:700;color:#7fdd7f;line-height:1.1}
+ #exp .big small{font-size:13px;color:#9ad;font-weight:400}
+ #exp .sub{font-size:12px;color:#9a9;margin-top:5px}
 </style></head><body><div id=wrap>
  <h1>MapleStory bot — control panel</h1>
  <div id=lie class=ok>lie-check: OK</div>
@@ -377,6 +381,10 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      <button class=stop onclick="cmd('record_stop')">■ Stop recording</button>
    </div>
  </fieldset>
+ <div id=exp>
+   <div class=big><span id=exppm>–</span> <small>EXP / min (run avg)</small></div>
+   <div class=sub>total <span id=exptot>–</span> &middot; last 10 min <span id=exp10>–</span></div>
+ </div>
  <div id=stat>loading…</div>
  <fieldset><legend>Log</legend>
    <div class=row><button onclick="document.getElementById('log').innerHTML=''">clear</button>
@@ -445,6 +453,10 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      lie.textContent = s.lie ? '⚠ lie-check: NEEDS HUMAN' : 'lie-check: OK';
      document.getElementById('stat').textContent =
        `mode: ${s.mode}\nstate: ${s.state}\nnode: ${s.node}\ndragons: ${s.count}\nmarks: ${s.recorder_marks}`;
+     const fmt = n => (n==null ? '–' : Number(n).toLocaleString());
+     document.getElementById('exppm').textContent = fmt(s.exp_per_min);
+     document.getElementById('exptot').textContent = fmt(s.exp_total);
+     document.getElementById('exp10').textContent = fmt(s.exp_10min);
    }catch(e){}
    setTimeout(poll, 500);
  }
