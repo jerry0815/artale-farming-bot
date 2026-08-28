@@ -11,11 +11,18 @@ See docs/superpowers/specs/2026-08-24-route-recorder-and-ui-design.md.
 """
 import json
 import sys
+import time
 import threading
 import http.server
 import socketserver
 import urllib.parse
 from collections import deque
+
+
+def _ts():
+    """Wall-clock HH:MM:SS.mmm for log lines -- sync the panel Log to a screen recording."""
+    t = time.time()
+    return time.strftime("%H:%M:%S", time.localtime(t)) + f".{int((t % 1) * 1000):03d}"
 
 # --- stdout tee: mirror loop prints into a ring buffer the panel can serve ---
 _LOG = deque(maxlen=800)          # (seq, line)
@@ -36,7 +43,7 @@ class _Tee:
             while "\n" in self._buf:
                 line, self._buf = self._buf.split("\n", 1)
                 _LOG_SEQ[0] += 1
-                _LOG.append((_LOG_SEQ[0], line))
+                _LOG.append((_LOG_SEQ[0], f"{_ts()} {line}" if line else line))
 
     def flush(self):
         self._real.flush()
@@ -477,7 +484,8 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    setTimeout(poll, 500);
  }
  let logCursor=0;
- function logClass(s){ if(s.startsWith('[exp]'))return'exp'; if(s.startsWith('[approach'))return'app';
+ function logClass(s){ s=s.replace(/^\d\d:\d\d:\d\d\.\d\d\d /,'');   // drop timestamp prefix
+   if(s.startsWith('[exp]'))return'exp'; if(s.startsWith('[approach'))return'app';
    if(s.startsWith('[water')||s.startsWith('[nav'))return'wtr'; return''; }
  async function pollLog(){
    try{
