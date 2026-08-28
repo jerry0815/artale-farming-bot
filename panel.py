@@ -215,28 +215,43 @@ def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, ro
         ds = cfg.get("match_downscale", 0.5)
         result = fish.scan(f, tmpls, roi=roi, threshold=thr, downscale=ds)
         best, dets = result["best"], result["dets"]
-    # player anchor overlay (green), all red-bar candidates (yellow)
+    # player anchor overlay (green) -- use the map's CONFIGURED anchor so the preview matches
+    # what the loop uses (name-tag or HP bar).
     import player as _player
-    pinfo = _player.find_player(f, cfg=cfg.get("player"), debug=True)
     dbg = f.copy()
     if roi:
         cv2.rectangle(dbg, (roi[0], roi[1]), (roi[2], roi[3]), (0, 255, 255), 2)
     for s, x, y, w, h in dets:
         cv2.rectangle(dbg, (x, y), (x + w, y + h), (0, 0, 255), 2)
         cv2.putText(dbg, f"{s:.2f}", (x, max(y - 3, 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-    for cx, cy, w, h in pinfo["candidates"]:                  # candidate red bars = yellow
-        cv2.rectangle(dbg, (cx - w // 2, cy - h // 2), (cx + w // 2, cy + h // 2), (0, 220, 220), 1)
-    if pinfo["bar"] is not None:                              # chosen player = green
-        bx, by = pinfo["bar"][0], pinfo["bar"][1]
-        px, py = pinfo["player"]
-        cv2.circle(dbg, (bx, by), 8, (0, 255, 0), 2)         # the HP bar
-        cv2.circle(dbg, (px, py), 10, (0, 255, 0), -1)       # estimated feet
-        cv2.line(dbg, (bx, by), (px, py), (0, 255, 0), 2)
+    player_pos, anchor_mode = None, cfg.get("anchor", "hpbar")
+    if anchor_mode == "nametag" and cfg.get("nametag_template"):
+        try:
+            tagw = _player.load_nametag(cfg["nametag_template"])
+            anc = _player.NametagAnchor(tagw, feet_offset=int(cfg.get("nametag_feet_offset", 6)),
+                                        accept_thres=float(cfg.get("nametag_accept", 0.55)))
+            player_pos = anc.locate(f)
+            if player_pos is not None and anc.last is not None:
+                lx, ly = anc.last                            # name-tag box (green) + feet dot
+                cv2.rectangle(dbg, (lx, ly), (lx + tagw.shape[1], ly + tagw.shape[0]), (0, 255, 0), 2)
+                cv2.circle(dbg, player_pos, 10, (0, 255, 0), -1)
+        except Exception as e:
+            anchor_mode = f"nametag ERROR: {e}"
+    else:
+        pinfo = _player.find_player(f, cfg=cfg.get("player"), debug=True)
+        for cx, cy, w, h in pinfo["candidates"]:             # candidate red bars = yellow
+            cv2.rectangle(dbg, (cx - w // 2, cy - h // 2), (cx + w // 2, cy + h // 2), (0, 220, 220), 1)
+        if pinfo["bar"] is not None:
+            bx, by = pinfo["bar"][0], pinfo["bar"][1]
+            player_pos = pinfo["player"]
+            cv2.circle(dbg, (bx, by), 8, (0, 255, 0), 2)
+            cv2.circle(dbg, player_pos, 10, (0, 255, 0), -1)
+            cv2.line(dbg, (bx, by), player_pos, (0, 255, 0), 2)
     sc = min(1.0, max_w / dbg.shape[1])
     small = cv2.resize(dbg, None, fx=sc, fy=sc) if sc < 1.0 else dbg
     ok, buf = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 70])
     return {"ok": True, "count": len(dets), "best": best, "mode": mode, "thr": round(thr, 3),
-            "player": pinfo["player"], "bars": len(pinfo["candidates"]),
+            "player": player_pos, "anchor": anchor_mode,
             "img": "data:image/jpeg;base64," + base64.b64encode(buf).decode()}
 
 
@@ -358,7 +373,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      else{
        const pl = j.player ? `player@(${j.player[0]},${j.player[1]})` : 'player: NOT FOUND';
        document.getElementById('dstat').textContent =
-         `[${j.mode} thr=${j.thr}] count: ${j.count}   ${pl} (bars:${j.bars})   best: ${Object.entries(j.best).map(([k,v])=>k+'='+v).join('  ')}`;
+         `[${j.mode} thr=${j.thr}] count: ${j.count}   ${pl} [${j.anchor}]   best: ${Object.entries(j.best).map(([k,v])=>k+'='+v).join('  ')}`;
        const im=document.getElementById('detimg'); im.src=j.img; im.style.display='block';
      }
    }catch(e){ document.getElementById('dstat').textContent='error: '+e; }
