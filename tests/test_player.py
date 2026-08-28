@@ -44,3 +44,21 @@ def test_find_player_debug_shape():
     d = player.find_player(f, debug=True)
     assert set(d) == {"player", "bar", "candidates"}
     assert d["bar"] is not None and len(d["candidates"]) >= 1
+
+
+def test_nametag_anchor_locates_and_tracks():
+    import numpy as np, cv2, player
+    # a synthetic frame with a white "name" block on a dark bg
+    frame = np.full((600, 800, 3), 30, np.uint8)
+    frame[300:320, 400:470] = 220                     # white name text at (435,300)
+    tagw = cv2.inRange(cv2.GaussianBlur(cv2.cvtColor(frame[298:322, 398:472], cv2.COLOR_BGR2GRAY), (3, 3), 0), 150, 255)
+    a = player.NametagAnchor(tagw, feet_offset=6)
+    p = a.locate(frame)
+    assert p is not None
+    assert abs(p[0] - 435) <= 8                        # name-tag center x ~ player x
+    assert a.last is not None                          # locked -> caches location
+    # a second frame with the name shifted right by 20 -> local-cache still finds it
+    f2 = np.full((600, 800, 3), 30, np.uint8)
+    f2[300:320, 420:490] = 220
+    p2 = a.locate(f2)
+    assert p2 is not None and abs(p2[0] - 455) <= 10

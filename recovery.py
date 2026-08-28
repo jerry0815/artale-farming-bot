@@ -1206,7 +1206,7 @@ def walk_shoot(node_mm_x, seconds, detect_fn, attack_key='c', half=60, tol=(3, 3
         kb.safe_release_all()
 
 
-def approach_shoot(seconds, detect_fn, player_cfg,
+def approach_shoot(seconds, detect_fn, anchor,
                    attack_range=110, band=70, step=0.14, attack_key='c',
                    deplete_reads=4, stall_limit=8, verbose=True, label="", confirm_scans=3,
                    mm_bounds=None):
@@ -1245,7 +1245,7 @@ def approach_shoot(seconds, detect_fn, player_cfg,
             f2 = capture()
             if f2 is None:
                 time.sleep(0.1); continue
-            p2 = _player.find_player(f2, cfg=player_cfg, near=last_player)
+            p2 = anchor.locate(f2)
             pf = p2[1] if p2 else (last_player[1] if last_player else None)
             H2, W2 = f2.shape[:2]
             if pf is not None:
@@ -1269,7 +1269,7 @@ def approach_shoot(seconds, detect_fn, player_cfg,
             f = capture()
             if f is None:
                 time.sleep(0.1); continue
-            p = _player.find_player(f, cfg=player_cfg, near=last_player)   # sticky anchor
+            p = anchor.locate(f)                          # HP-bar sticky OR name-tag anchor
             if p is None:                                 # anchor lost -> brief blind attack
                 log("player NOT found -> blind attack")
                 kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key); continue
@@ -1690,15 +1690,27 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             raise RuntimeError("walk_shoot needs detector 'mob_yolo' or 'fish'")
         print(f"[water] walk_shoot ON: detector={detector} platform_half={_phalf}")
     approach = farm_mode == "approach"
+    _make_anchor = None
     if approach:
         if detect_fn is None:
             raise RuntimeError("approach needs detector 'mob_yolo' or 'fish'")
-        _pcfg = map_cfg.get("player")
+        import player as _p
         _arange = int(map_cfg.get("attack_range", 110))
         _aband = int(map_cfg.get("same_platform_band", 70))
         _astep = float(map_cfg.get("approach_step", 0.14))
         _adeplete = int(map_cfg.get("deplete_reads", 4))
         _astall = int(map_cfg.get("stall_limit", 8))
+        if map_cfg.get("anchor") == "nametag":            # KenYu-style name-tag anchor
+            _tagw = _p.load_nametag(map_cfg["nametag_template"])
+
+            def _make_anchor():
+                return _p.NametagAnchor(_tagw, feet_offset=int(map_cfg.get("nametag_feet_offset", 6)),
+                                        accept_thres=float(map_cfg.get("nametag_accept", 0.55)))
+            print(f"[water] anchor: nametag ({map_cfg['nametag_template']})")
+        else:
+            def _make_anchor():
+                return _p.HPBarAnchor(cfg=map_cfg.get("player"))
+            print("[water] anchor: hpbar (sticky)")
         print(f"[water] approach ON: detector={detector} range={_arange} band={_aband}")
 
     buff_keys = map_cfg.get("buff_keys", [])          # per-character buffs; empty = none
@@ -1819,6 +1831,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 if kb.pause:
                     break
                 kb.safe_press(JUMP); time.sleep(0.12); kb.safe_release(JUMP); time.sleep(0.05)
+        node_anchor = _make_anchor() if _make_anchor else None   # fresh lock per platform, tracks across beats
         for _ in range(max(1, beats_per_node)):
             if kb.pause or STOP.is_set():
                 return False
@@ -1834,7 +1847,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 continue
             if approach:
                 _ncx = centers[node][0]                    # keep her on THIS platform (minimap)
-                ok = approach_shoot(_r.uniform(*stand_secs), detect_fn, _pcfg,
+                ok = approach_shoot(_r.uniform(*stand_secs), detect_fn, node_anchor,
                                     attack_range=_arange, band=_aband, step=_astep,
                                     attack_key=attack_key, deplete_reads=_adeplete,
                                     stall_limit=_astall, label=node,
