@@ -1226,12 +1226,25 @@ def approach_shoot(seconds, detect_fn, anchor,
     best_absdx = None       # closest we've gotten to the current target (net-progress stall)
     no_improve = 0
     last_player = None      # sticky anchor: lock onto the bar nearest last frame's player
+    held = [None]           # currently-held walk key -> HELD across frames for smooth motion
     last_log = [0.0]
 
     def log(msg):
         if verbose and time.time() - last_log[0] > 0.6:
             last_log[0] = time.time()
             print(f"[approach {label}] " + msg if label else "[approach] " + msg)
+
+    def stop_walk():
+        if held[0] is not None:
+            kb.safe_release(held[0]); held[0] = None
+
+    def walk(key):
+        """Hold `key` continuously (only (re)press on a direction change) so motion doesn't
+        stutter between detection frames."""
+        if held[0] != key:
+            if held[0] is not None:
+                kb.safe_release(held[0])
+            kb.safe_press(key); held[0] = key
 
     def confirm_clear():
         """DOUBLE-CHECK before leaving: stop attacking so the VFX/floating numbers clear,
@@ -1272,6 +1285,7 @@ def approach_shoot(seconds, detect_fn, anchor,
             p = anchor.locate(f)                          # HP-bar sticky OR name-tag anchor
             if p is None:                                 # anchor lost -> brief blind attack
                 log("player NOT found -> blind attack")
+                stop_walk()
                 kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key); continue
             last_player = p
             px, pfeet = p
@@ -1293,8 +1307,10 @@ def approach_shoot(seconds, detect_fn, anchor,
                 if occlude_grace > 0:
                     occlude_grace -= 1
                     log(f"no mob (occlusion grace {occlude_grace}) -> hold fire")
+                    stop_walk()
                     kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key)
                     continue
+                stop_walk()
                 empty_reads += 1                          # DEBOUNCED: several empty frames -> clear
                 feet = [my + mh for (_s, _mx, my, _mw, mh) in dets]
                 log(f"no same-platform mob ({empty_reads}/{deplete_reads}); "
@@ -1313,6 +1329,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                 best_absdx = None; no_improve = 0
                 occlude_grace = 2                         # tolerate VFX hiding this mob next frames
                 log(f"IN RANGE dx={dx} px={px} -> attack '{attack_key}' burst (same={len(same)})")
+                stop_walk()
                 kb.safe_press(key); time.sleep(0.03); kb.safe_release(key)
                 for _ in range(3):                        # commit: several hits before re-evaluating
                     kb.safe_press(attack_key); time.sleep(0.35); kb.safe_release(attack_key)
@@ -1324,6 +1341,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                 if occlude_grace > 0:
                     occlude_grace -= 1
                     log(f"nearest far (dx={dx}) but recently in range -> hold fire (occluded?)")
+                    stop_walk()
                     kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key)
                     continue
                 # NET-progress stall: only give up if we stop getting CLOSER (best |dx| not
@@ -1345,11 +1363,15 @@ def approach_shoot(seconds, detect_fn, anchor,
                     if mmx >= 0 and ((key == Key.right and mmx >= mm_bounds[1]) or
                                      (key == Key.left and mmx <= mm_bounds[0])):
                         log(f"platform edge (mmx={mmx} bounds={mm_bounds}) -> fire in place")
+                        stop_walk()
                         kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key)
                         continue
-                log(f"dx={dx} px={px} -> step {'right' if dx > 0 else 'left'} "
+                # CONTINUOUS walk: hold the key across frames (only re-press on a turn), so
+                # motion is smooth instead of stutter-stepping between detections.
+                log(f"dx={dx} px={px} -> walk {'right' if dx > 0 else 'left'} "
                     f"(same={len(same)}, best={best_absdx}, noimp={no_improve})")
-                kb.safe_press(key); time.sleep(step); kb.safe_release(key)
+                walk(key)
+                time.sleep(step)
         return True
     finally:
         kb.safe_release(attack_key)

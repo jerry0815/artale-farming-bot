@@ -33,7 +33,7 @@
   "attack_key": "x",
   "attack_range": 130,
   "same_platform_band": 70,
-  "approach_step": 0.28,
+  "approach_step": 0.15,
   "deplete_reads": 4,
   "stall_limit": 8,
   "buff_keys": [
