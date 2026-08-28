@@ -1821,10 +1821,16 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         skill_interval = (float(_bi), float(_bi))
     next_skill = [time.time() + 5.0]              # cast buffs ~5s in (active early + verifiable)
 
+    _buff_settle = float(map_cfg.get("buff_settle_secs", 0.6))   # wait out the attack root first
+
     def heal_skill():
         if not buff_keys or time.time() < next_skill[0]:
             return
         next_skill[0] = time.time() + _r.uniform(*skill_interval)
+        # The attack skill ROOTS her (its animation eats a key pressed too soon), so drop all
+        # keys and let the root clear BEFORE casting -- otherwise the buff press is swallowed.
+        kb.safe_release_all()
+        time.sleep(_buff_settle)
         print(f"[water] buff -> press {buff_keys} (next in {int(skill_interval[0])}s)")
         for k in buff_keys:
             kb.safe_press(k); time.sleep(0.3); kb.safe_release(k)
@@ -1902,6 +1908,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 if kb.pause:
                     break
                 kb.safe_press(JUMP); time.sleep(0.12); kb.safe_release(JUMP); time.sleep(0.05)
+        heal_skill()                                   # cast buffs here: just arrived, NOT mid-attack
         node_anchor = _make_anchor() if _make_anchor else None   # fresh lock per platform, tracks across beats
         for _ in range(max(1, beats_per_node)):
             if kb.pause or STOP.is_set():
