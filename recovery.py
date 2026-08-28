@@ -232,7 +232,8 @@ kb.f9_callback = silence_all_alarms   # F9 silences alarms wherever kb.on_press 
 # STATUS is a plain dict updated in-place by the loops; the UI polls it. STOP is a
 # cooperative stop the UI sets to end a background-thread run (F8 pause still works).
 STATUS = {"state": "idle", "node": None, "count": None, "lie": False,
-          "exp_per_min": None, "exp_10min": None, "exp_total": 0}
+          "exp_per_min": None, "exp_10min": None, "exp_total": 0,
+          "run_secs": 0, "buff_at": None}
 STOP = threading.Event()
 
 
@@ -1697,6 +1698,10 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     if not farm_nodes:
         print("[water] no farm nodes in map config"); return
     tol = watermap.swim_tol(map_cfg)
+    # Jump cadence for RISING between platforms: fast when far below (_ji), gentler near the
+    # target (_jimax) to avoid overshooting. Lower _jimax = snappier final rise (P5->P4).
+    _ji = float(map_cfg.get("swim_jump_interval", 0.1))
+    _jimax = float(map_cfg.get("swim_jump_interval_max", 0.32))
     if not focus():
         print("[water] could not focus"); return
     STOP.clear(); STATUS["state"] = "farming"
@@ -1811,14 +1816,16 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     _bi = map_cfg.get("buff_interval_secs")           # exact interval (else skill_interval range)
     if _bi:
         skill_interval = (float(_bi), float(_bi))
-    next_skill = [time.time() + _r.uniform(*skill_interval)]   # don't fire on the first beat
+    next_skill = [time.time() + 5.0]              # cast buffs ~5s in (active early + verifiable)
 
     def heal_skill():
         if not buff_keys or time.time() < next_skill[0]:
             return
         next_skill[0] = time.time() + _r.uniform(*skill_interval)
+        print(f"[water] buff -> press {buff_keys} (next in {int(skill_interval[0])}s)")
         for k in buff_keys:
             kb.safe_press(k); time.sleep(0.3); kb.safe_release(k)
+        STATUS["buff_at"] = time.time()
 
     # rotation: 'sweep' = farm the list in order (bottom->top) then reset via reset_node;
     # 'cyclic' (default) = farm current until depleted, advance to the next (wrapping).
@@ -1829,6 +1836,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     reset_node = map_cfg.get("reset_node")
     beats_per_node = int(map_cfg.get("beats_per_node", 3))
     t_start = time.time()
+    STATUS["run_secs"], STATUS["buff_at"] = 0, None      # fresh run (panel timers)
     next_break = [time.time() + _r.uniform(*break_every)]
 
     # EXP tracker: per-10-min gain + running average (see make_exp_tracker).
@@ -1847,6 +1855,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             kb.safe_release_all(); lie_check_silence()
             STATUS["state"] = "paused"; STATUS["lie"] = False; time.sleep(0.1); return "pause"
         STATUS["state"] = "farming"
+        STATUS["run_secs"] = int(time.time() - t_start)   # elapsed farming time (for the panel)
         lie_check_tick(); STATUS["lie"] = is_lie_check_active()
         exp_tick()
         if enemy_check and enemy_check():
@@ -1860,7 +1869,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         if time.time() < next_break[0]:
             return
         print("[water] break -> swim to base and idle")
-        swim_to(*centers[farm_nodes[0]], tol=tol, cap=12.0)
+        swim_to(*centers[farm_nodes[0]], tol=tol, cap=12.0,
+                jump_interval=_ji, jump_interval_max=_jimax)
         end = time.time() + _r.uniform(*rest_range)
         while time.time() < end and not kb.pause and not STOP.is_set():
             lie_check_fast_tick(); time.sleep(0.5)
@@ -1883,7 +1893,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         else:
             lift = _lift_override.get(node, _ylift)        # pin nodes (P4) use 0 -- target below
             print(f"[water] --> farm {node} (center {cx},{cy}) lift={lift}")  # the pin is unreachable
-            swim_to(cx, cy - lift, tol=tol, cap=12.0)      # aim a bit ABOVE so she lands on it
+            swim_to(cx, cy - lift, tol=tol, cap=12.0,       # aim a bit ABOVE so she lands on it
+                    jump_interval=_ji, jump_interval_max=_jimax)
             extra = _arrive_jumps.get(node, 0)             # seat on a pin platform (P4): a few more hops
             for _ in range(extra):
                 if kb.pause:

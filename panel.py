@@ -309,10 +309,12 @@ def list_maps(maps_dir="maps"):
 
 
 def _status_dict(controller):
-    import recovery
+    import recovery, time
     st = dict(recovery.STATUS)
     st["mode"] = controller.mode
     st["recorder_marks"] = controller.recorder.marks if controller.recorder else 0
+    ba = st.get("buff_at")
+    st["buff_ago"] = int(time.time() - ba) if ba else None   # seconds since last buff (server clock)
     return st
 
 
@@ -452,8 +454,13 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      const lie = document.getElementById('lie');
      lie.className = s.lie ? 'bad' : 'ok';
      lie.textContent = s.lie ? '⚠ lie-check: NEEDS HUMAN' : 'lie-check: OK';
+     const hms = t => { if(t==null) return '–'; t=Math.max(0,t|0);
+       const h=t/3600|0, m=(t%3600)/60|0, x=t%60;
+       return (h? h+':'+String(m).padStart(2,'0') : m) + ':' + String(x).padStart(2,'0'); };
+     const buff = s.buff_ago==null ? 'not yet' : hms(s.buff_ago)+' ago';
      document.getElementById('stat').textContent =
-       `mode: ${s.mode}\nstate: ${s.state}\nnode: ${s.node}\ndragons: ${s.count}\nmarks: ${s.recorder_marks}`;
+       `farming time: ${hms(s.run_secs)}\nmode: ${s.mode}\nstate: ${s.state}\nnode: ${s.node}`
+       + `\ndragons: ${s.count}\nbuff: ${buff}\nmarks: ${s.recorder_marks}`;
      const fmt = n => (n==null ? '–' : Number(n).toLocaleString());
      document.getElementById('exppm').textContent = fmt(s.exp_per_min);
      document.getElementById('exptot').textContent = fmt(s.exp_total);

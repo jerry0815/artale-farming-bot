@@ -11,6 +11,8 @@
     "tol_x": 3,
     "tol_y": 7
   },
+  "swim_jump_interval": 0.1,
+  "swim_jump_interval_max": 0.3,
   "rotation": "sweep",
   "reset_node": "RIGHT",
   "beats_per_node": 3,
