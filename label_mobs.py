@@ -94,7 +94,7 @@ def grab_from_video(video, count, model=None):
     return saved
 
 
-def grab_misses_from_video(video, count, model, conf=0.3, imgsz=640):
+def grab_misses_from_video(video, count, model, conf=0.3, imgsz=960):
     """ACTIVE LEARNING: keep only frames where the model FAILS to detect the player (class 2)
     at `conf` -- the hard cases. Mobs are pre-labeled (the model still finds them); the player
     is absent, so you draw it. Scans denser than `count` since most frames are hits (skipped).
@@ -267,9 +267,10 @@ if __name__ == "__main__":
         video = sys.argv[i + 1]
         count = int(sys.argv[i + 2]) if len(sys.argv) > i + 2 and sys.argv[i + 2].isdigit() else 60
         conf = float(sys.argv[sys.argv.index("--conf") + 1]) if "--conf" in sys.argv else 0.3
+        imgsz = int(sys.argv[sys.argv.index("--imgsz") + 1]) if "--imgsz" in sys.argv else 960
         print(f"[label] active learning: keeping frames where the model MISSES the player "
-              f"(conf {conf}) from {video}")
-        got, scanned = grab_misses_from_video(video, count, model, conf=conf)
+              f"(conf {conf}, imgsz {imgsz}) from {video}")
+        got, scanned = grab_misses_from_video(video, count, model, conf=conf, imgsz=imgsz)
         print(f"[label] scanned {scanned} frames -> kept {got} player-MISS frames -> {IMG_DIR}")
         print("[label] Now run: python label_mobs.py  (press 3, draw the HP bar; skip VFX-hidden ones)")
     elif "--grab" in sys.argv or "--grab-dir" in sys.argv:
