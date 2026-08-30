@@ -372,7 +372,10 @@ def _status_dict(controller):
 PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</title>
 <style>
  body{margin:0;font-family:system-ui;background:#14141a;color:#eee}
- #wrap{max-width:640px;margin:0 auto;padding:18px}
+ #wrap{max-width:1180px;margin:0 auto;padding:18px;display:flex;gap:18px;align-items:flex-start}
+ #main{flex:0 0 600px;max-width:600px;min-width:0}
+ #side{flex:1;min-width:0;position:sticky;top:18px}
+ @media(max-width:900px){ #wrap{flex-direction:column} #main{flex-basis:auto;max-width:100%;width:100%} #side{width:100%} }
  h1{font-size:18px;color:#6cf;margin:0 0 12px}
  #lie{font-size:22px;font-weight:700;text-align:center;padding:18px;border-radius:10px;margin:12px 0}
  .ok{background:#173d17;color:#7fdd7f} .bad{background:#4d1414;color:#ff8a8a}
@@ -385,7 +388,8 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
  fieldset{border:1px solid #333;border-radius:8px;margin-top:14px}
  legend{color:#9ad}
  #log{font-family:ui-monospace,monospace;font-size:12px;background:#0d0d12;color:#cdd;
-      border-radius:8px;padding:10px;height:240px;overflow:auto;white-space:pre-wrap;line-height:1.4}
+      border-radius:8px;padding:10px;height:calc(100vh - 150px);overflow:auto;white-space:pre-wrap;line-height:1.4}
+ @media(max-width:900px){ #log{height:280px} }
  #log .exp{color:#7fdd7f} #log .app{color:#9ad} #log .wtr{color:#e8c06a}
  #exp{background:#161d16;border:1px solid #2b4d2b;border-radius:8px;padding:12px;margin-top:12px;text-align:center}
  #exp .big{font-size:26px;font-weight:700;color:#7fdd7f;line-height:1.1}
@@ -398,6 +402,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
  .pane{border-top:1px solid #333;padding-top:14px}
  .hidden{display:none}
 </style></head><body><div id=wrap>
+ <div id=main>
  <h1>MapleStory bot — control panel</h1>
  <div id=lie class=ok>lie-check: OK</div>
  <div id=tabs>
@@ -468,11 +473,14 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    </fieldset>
  </div>
 
+ </div>
+ <div id=side>
  <fieldset><legend>Log</legend>
    <div class=row><button onclick="document.getElementById('log').innerHTML=''">clear</button>
      <label><input type=checkbox id=autoscroll checked> auto-scroll</label></div>
    <div id=log></div>
  </fieldset>
+ </div>
 </div>
 <script>
  async function cmd(action, mode){
