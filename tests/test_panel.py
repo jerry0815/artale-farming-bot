@@ -20,8 +20,7 @@ class _Rec:
 def _make():
     log = []
     c = panel.Controller({
-        "farm": lambda: log.append("farm"),
-        "water": lambda mp: log.append(("water", mp)),
+        "farm": lambda mp: log.append(("farm", mp)),   # map-driven; config's loop picks nav/water
         "watch": lambda: log.append("watch"),
         "recover": lambda: log.append("recover"),
         "make_recorder": lambda mp: log.append(("rec", mp)) or _Rec(log),
@@ -33,11 +32,11 @@ def _make():
 
 def test_single_worker_enforced():
     log, c = _make()
-    assert c.start("farm")[0] is True
+    assert c.start("farm", map_path="maps/deep_sea_2.json")[0] is True
     assert c.start("watch")[0] is False        # busy
     assert c.stop()[0] is True
     assert c.start("watch")[0] is True
-    assert "farm" in log and "watch" in log and "stop" in log
+    assert ("farm", "maps/deep_sea_2.json") in log and "watch" in log and "stop" in log
 
 
 def test_unknown_mode_rejected():
@@ -60,7 +59,7 @@ def test_record_flow():
 def test_record_requires_idle_and_active():
     log, c = _make()
     assert c.record_mark("X")[0] is False       # not recording
-    c.start("farm")
+    c.start("farm", map_path="maps/deep_sea_2.json")
     assert c.record_start("m")[0] is False       # busy farming
 
 
@@ -78,13 +77,13 @@ def test_pause_toggles():
     assert log.count("pause") == 1
 
 
-def test_water_mode_requires_map_and_dispatches():
+def test_farm_requires_map_and_dispatches():
     log, c = _make()
-    assert c.start("water")[0] is False          # no map selected
-    ok, mode = c.start("water", map_path="maps/deep_sea_2.json")
+    assert c.start("farm")[0] is False           # no map selected
+    ok, mode = c.start("farm", map_path="maps/deep_sea_2.json")
     assert ok is True and mode == "farming"
-    assert ("water", "maps/deep_sea_2.json") in log
-    assert c.start("farm")[0] is False           # busy
+    assert ("farm", "maps/deep_sea_2.json") in log
+    assert c.start("farm", map_path="maps/deep_sea_2.json")[0] is False   # busy
 
 
 def test_list_maps_finds_starter(tmp_path):

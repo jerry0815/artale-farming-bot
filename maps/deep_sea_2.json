@@ -1,5 +1,6 @@
 {
   "name": "deep_sea_2",
+  "loop": "water",
   "note": "水世界 / 深海峽谷2 (Water World, Deep Sea Canyon 2). Swimming map: direct dot sensing, no scroll-pin. minimap crop measured from video (dot spans full-frame x~47-185, y~247-543); TUNE h if lower platforms clip. nodes/farm_nodes are placeholders -- regenerate from a recording (see docs/superpowers/plans/2026-08-25-water-map-workflow.md). detector 'fish' template-matches bombing_fish_house/goby/bone_fish; TUNE fish_scale/fish_threshold/count_roi with `python recovery.py fishcount --map maps/deep_sea_2.json`, or set detector 'time' for pure timed rotation.",
   "minimap": {
     "x": 20,

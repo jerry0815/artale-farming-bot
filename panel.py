@@ -72,20 +72,19 @@ class Controller:
         self.mode = "idle"           # idle|farming|watching|recovering|recording
         self.recorder = None
 
-    _MODE_NAME = {"farm": "farming", "watch": "watching", "recover": "recovering",
-                  "water": "farming"}
+    _MODE_NAME = {"farm": "farming", "watch": "watching", "recover": "recovering"}
 
     def start(self, mode, map_path=None):
         if self.mode != "idle":
             return False, f"busy ({self.mode})"
         if mode not in self._MODE_NAME:
             return False, f"unknown mode {mode}"
-        if mode == "water":
-            if not map_path:
+        if mode == "farm":                            # map-driven: the config's `loop` field
+            if not map_path:                          # picks nav vs water (see the farm action)
                 return False, "no map selected"
-            self.mode = self._MODE_NAME[mode]
-            self.actions["water"](map_path)
-            return True, self.mode
+            self.mode = "farming"
+            self.actions["farm"](map_path)
+            return True, "farming"
         self.mode = self._MODE_NAME[mode]
         self.actions[mode]()
         return True, self.mode
@@ -146,16 +145,17 @@ def _build_actions(controller_ref):
         print("[panel] safety -> release keys and PAUSE (F8 to resume).")
         kb.pause = True
 
-    def farm():
+    def farm(map_path):
+        """One farm entry: the selected map's `loop` field picks the loop -- 'nav' = the
+        land dragon-nest loop (map geometry unused), else the water swim loop."""
+        import watermap
         def _go():
             kb.pause = False
-            recovery.farming_loop_nav(exp_check=None, enemy_check=_enemy_check, panic=_panic)
-        _run_bg(_go)
-
-    def water(map_path):
-        def _go():
-            kb.pause = False
-            recovery.farming_loop_water(map_path, enemy_check=_enemy_check, panic=_panic)
+            cfg = watermap.load_map(map_path) if map_path else {}
+            if cfg.get("loop") == "nav":
+                recovery.farming_loop_nav(exp_check=None, enemy_check=_enemy_check, panic=_panic)
+            else:
+                recovery.farming_loop_water(map_path, enemy_check=_enemy_check, panic=_panic)
         _run_bg(_go)
 
     def watch():
@@ -185,7 +185,7 @@ def _build_actions(controller_ref):
         recovery.lie_check_silence()
         kb.safe_release_all()
 
-    return {"farm": farm, "water": water, "watch": watch, "recover": recover,
+    return {"farm": farm, "watch": watch, "recover": recover,
             "make_recorder": make_recorder, "pause_toggle": pause_toggle, "stop": stop}
 
 
@@ -358,22 +358,21 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
 </style></head><body><div id=wrap>
  <h1>MapleStory bot — control panel</h1>
  <div id=lie class=ok>lie-check: OK</div>
- <div class=row>
-   <button class=go onclick="cmd('start','farm')">▶ Start farm</button>
-   <button onclick="cmd('pause')">⏸ Pause / Resume</button>
-   <button class=stop onclick="cmd('stop')">■ Stop</button>
- </div>
+ <fieldset><legend>Farm</legend>
+   <div class=row>
+     <select id=mapsel></select>
+     <button class=go onclick="startFarm()">▶ Start farm</button>
+     <button onclick="loadMaps()">↻</button>
+   </div>
+   <div class=row>
+     <button onclick="cmd('pause')">⏸ Pause / Resume</button>
+     <button class=stop onclick="cmd('stop')">■ Stop</button>
+   </div>
+ </fieldset>
  <div class=row>
    <button onclick="cmd('start','recover')">↥ Recover to top</button>
    <button class=go onclick="cmd('start','watch')">👁 Watch-only (lie-check)</button>
  </div>
- <fieldset><legend>Water world</legend>
-   <div class=row>
-     <select id=mapsel></select>
-     <button class=go onclick="startWater()">🌊 Start water farm</button>
-     <button onclick="loadMaps()">↻</button>
-   </div>
- </fieldset>
  <fieldset><legend>Detection preview (fish)</legend>
    <div class=row>
      scale <input id=dscale placeholder="auto" style="width:56px">
@@ -457,10 +456,10 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    sel.innerHTML = maps.length ? '' : '<option value="">(no maps/*.json)</option>';
    for(const m of maps){ const o=document.createElement('option'); o.value=m.path; o.textContent=m.name; sel.appendChild(o); }
  }
- async function startWater(){
+ async function startFarm(){
    const map = document.getElementById('mapsel').value;
    if(!map){ alert('no map selected'); return; }
-   const j = await (await fetch('/cmd?'+new URLSearchParams({action:'start',mode:'water',map}))).json();
+   const j = await (await fetch('/cmd?'+new URLSearchParams({action:'start',mode:'farm',map}))).json();
    if(!j.ok) alert(j.msg);
  }
  async function poll(){
