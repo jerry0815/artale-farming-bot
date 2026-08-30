@@ -92,3 +92,13 @@ def test_list_maps_finds_starter(tmp_path):
     maps = panel.list_maps(str(tmp_path))
     assert [m["name"] for m in maps] == ["a", "b"]
     assert maps[0]["path"].endswith("a.json")
+
+
+def test_train_action_validates_without_launching():
+    # _build_actions exposes a "train" action; the no-op/validation paths must NOT spawn a
+    # subprocess (only 'retrain'/'grab_misses'/'labeler' with valid args would).
+    actions = panel._build_actions([None])
+    assert "train" in actions
+    assert actions["train"]("grab_misses", "") == (False, "clip path required")
+    ok, _ = actions["train"]("bogus_step")
+    assert ok is False

@@ -137,6 +137,42 @@ def _build_actions(controller_ref):
     def _run_bg(target):
         threading.Thread(target=target, daemon=True).start()
 
+    import subprocess
+    import sys as _sys
+
+    def _run_cmd_bg(args, label):
+        """Run a CLI step (train/label) as a subprocess, streaming its output to the panel Log."""
+        def _go():
+            print(f"[{label}] $ {' '.join(str(a) for a in args)}")
+            try:
+                p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                     text=True, bufsize=1)
+                for line in p.stdout:
+                    line = line.rstrip()
+                    if line:
+                        print(f"[{label}] {line}")
+                p.wait()
+                print(f"[{label}] done (exit {p.returncode})")
+            except Exception as e:
+                print(f"[{label}] error: {e}")
+        _run_bg(_go)
+
+    def train(step, clip="", count="60"):
+        """Setup-tab training pipeline. Output streams to the Log."""
+        py = _sys.executable
+        if step == "retrain":
+            _run_cmd_bg([py, "train_mobs.py", "80", "960", "--real"], "train")
+            return True, "retrain started (GPU, ~25min) -> watch Log"
+        if step == "grab_misses":
+            if not clip:
+                return False, "clip path required"
+            _run_cmd_bg([py, "label_mobs.py", "--grab-misses", clip, str(count)], "grab")
+            return True, "grabbing player-miss frames -> watch Log, then Open labeler"
+        if step == "labeler":
+            _run_cmd_bg([py, "label_mobs.py"], "label")
+            return True, "labeler starting -> open http://localhost:8001"
+        return False, f"unknown step {step}"
+
     def _enemy_check():
         return len(recovery.get_enemy()) > 0
 
@@ -185,7 +221,7 @@ def _build_actions(controller_ref):
         recovery.lie_check_silence()
         kb.safe_release_all()
 
-    return {"farm": farm, "watch": watch, "recover": recover,
+    return {"farm": farm, "watch": watch, "recover": recover, "train": train,
             "make_recorder": make_recorder, "pause_toggle": pause_toggle, "stop": stop}
 
 
@@ -355,54 +391,83 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
  #exp .big{font-size:26px;font-weight:700;color:#7fdd7f;line-height:1.1}
  #exp .big small{font-size:13px;color:#9ad;font-weight:400}
  #exp .sub{font-size:12px;color:#9a9;margin-top:5px}
+ #tabs{display:flex;gap:6px;margin:14px 0 0}
+ .tab{background:#1c1c22;border:1px solid #333;border-bottom:none;border-radius:8px 8px 0 0;
+      padding:8px 18px;color:#bbb}
+ .tab.active{background:#2a2a33;color:#6cf;border-color:#444}
+ .pane{border-top:1px solid #333;padding-top:14px}
+ .hidden{display:none}
 </style></head><body><div id=wrap>
  <h1>MapleStory bot — control panel</h1>
  <div id=lie class=ok>lie-check: OK</div>
- <fieldset><legend>Farm</legend>
-   <div class=row>
-     <select id=mapsel></select>
-     <button class=go onclick="startFarm()">▶ Start farm</button>
-     <button onclick="loadMaps()">↻</button>
-   </div>
-   <div class=row>
-     <button onclick="cmd('pause')">⏸ Pause / Resume</button>
-     <button class=stop onclick="cmd('stop')">■ Stop</button>
-   </div>
- </fieldset>
- <div class=row>
-   <button onclick="cmd('start','recover')">↥ Recover to top</button>
-   <button class=go onclick="cmd('start','watch')">👁 Watch-only (lie-check)</button>
+ <div id=tabs>
+   <button id=tab-b-control class="tab active" onclick="showTab('control')">Control</button>
+   <button id=tab-b-setup class=tab onclick="showTab('setup')">Setup</button>
  </div>
- <fieldset><legend>Detection preview (fish)</legend>
+
+ <div id=tab-control class=pane>
+   <fieldset><legend>Farm</legend>
+     <div class=row>
+       <select id=mapsel></select>
+       <button class=go onclick="startFarm()">▶ Start farm</button>
+       <button onclick="loadMaps()">↻</button>
+     </div>
+     <div class=row>
+       <button onclick="cmd('pause')">⏸ Pause / Resume</button>
+       <button class=stop onclick="cmd('stop')">■ Stop</button>
+     </div>
+   </fieldset>
    <div class=row>
-     scale <input id=dscale placeholder="auto" style="width:56px">
-     thr <input id=dthr placeholder="auto" style="width:56px">
-     species <input id=dspecies placeholder="sprite mode only" style="width:170px">
+     <button onclick="cmd('start','recover')">↥ Recover to top</button>
+     <button class=go onclick="cmd('start','watch')">👁 Watch-only (lie-check)</button>
    </div>
-   <div class=row>
-     roi <input id=droi placeholder="x0,y0,x1,y1 (blank=full)" style="width:200px">
-     <button class=go onclick="snap()">📸 Snap</button>
-     <label><input type=checkbox id=dlive> live (2s)</label>
+   <div id=exp>
+     <div class=big><span id=exppm>–</span> <small>EXP / min (run avg)</small></div>
+     <div class=sub>total <span id=exptot>–</span> &middot; last 10 min <span id=exp10>–</span></div>
    </div>
-   <div id=dstat style="font-family:ui-monospace,monospace;font-size:12px;margin:6px 0"></div>
-   <img id=detimg style="max-width:100%;border-radius:6px;display:none">
- </fieldset>
- <fieldset><legend>Record route</legend>
-   <div class=row>
-     <input id=map placeholder="map name (e.g. blue_dragon)" value="blue_dragon">
-     <button class=go onclick="recStart()">● Start recording</button>
-   </div>
-   <div class=row>
-     <input id=node placeholder="node name (blank = auto)">
-     <button onclick="recMark()">＋ Mark node</button>
-     <button class=stop onclick="cmd('record_stop')">■ Stop recording</button>
-   </div>
- </fieldset>
- <div id=exp>
-   <div class=big><span id=exppm>–</span> <small>EXP / min (run avg)</small></div>
-   <div class=sub>total <span id=exptot>–</span> &middot; last 10 min <span id=exp10>–</span></div>
+   <div id=stat>loading…</div>
  </div>
- <div id=stat>loading…</div>
+
+ <div id=tab-setup class="pane hidden">
+   <fieldset><legend>Record route (per map)</legend>
+     <div class=row>
+       map <input id=map placeholder="map name (e.g. deep_sea_2)" value="deep_sea_2" style="width:200px">
+       <button class=go onclick="recStart()">● Start recording</button>
+     </div>
+     <div class=row>
+       <input id=node placeholder="node name (blank = auto)">
+       <button onclick="recMark()">＋ Mark node</button>
+       <button class=stop onclick="cmd('record_stop')">■ Stop recording</button>
+     </div>
+   </fieldset>
+   <fieldset><legend>Train detection</legend>
+     <div class=row>
+       clip <input id=tclip placeholder="C:/path/to/clip.mp4" style="width:250px">
+       n <input id=tcount placeholder="60" style="width:44px">
+       <button class=go onclick="train('grab_misses')">🎯 Grab misses</button>
+     </div>
+     <div class=row>
+       <button class=go onclick="train('labeler')">🏷 Open labeler (:8001)</button>
+       <button class=go onclick="train('retrain')">🧠 Retrain (GPU)</button>
+     </div>
+     <div id=tstat style="font-family:ui-monospace,monospace;font-size:12px;margin:6px 0;color:#9ad">idle &middot; output goes to the Log below</div>
+   </fieldset>
+   <fieldset><legend>Detection preview</legend>
+     <div class=row>
+       scale <input id=dscale placeholder="auto" style="width:56px">
+       thr <input id=dthr placeholder="auto" style="width:56px">
+       species <input id=dspecies placeholder="sprite mode only" style="width:150px">
+     </div>
+     <div class=row>
+       roi <input id=droi placeholder="x0,y0,x1,y1 (blank=full)" style="width:190px">
+       <button class=go onclick="snap()">📸 Snap</button>
+       <label><input type=checkbox id=dlive> live (2s)</label>
+     </div>
+     <div id=dstat style="font-family:ui-monospace,monospace;font-size:12px;margin:6px 0"></div>
+     <img id=detimg style="max-width:100%;border-radius:6px;display:none">
+   </fieldset>
+ </div>
+
  <fieldset><legend>Log</legend>
    <div class=row><button onclick="document.getElementById('log').innerHTML=''">clear</button>
      <label><input type=checkbox id=autoscroll checked> auto-scroll</label></div>
@@ -414,6 +479,21 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    const q = new URLSearchParams({action}); if(mode) q.set('mode', mode);
    const r = await fetch('/cmd?'+q); const j = await r.json();
    if(!j.ok) alert(j.msg);
+ }
+ function showTab(name){
+   for(const t of ['control','setup']){
+     document.getElementById('tab-'+t).classList.toggle('hidden', t!==name);
+     document.getElementById('tab-b-'+t).classList.toggle('active', t===name);
+   }
+ }
+ async function train(step){
+   const q = new URLSearchParams({action:'train', step});
+   if(step==='grab_misses'){
+     q.set('clip', document.getElementById('tclip').value.trim());
+     q.set('count', document.getElementById('tcount').value.trim()||'60');
+   }
+   const j = await (await fetch('/cmd?'+q)).json();
+   document.getElementById('tstat').textContent = j.msg || (j.ok?'started':'error');
  }
  async function recStart(){
    const q = new URLSearchParams({action:'record_start', map:document.getElementById('map').value});
@@ -560,6 +640,12 @@ def make_handler(controller):
                 return controller.record_mark(q.get("name", [""])[0])
             if action == "record_stop":
                 return controller.record_stop()
+            if action == "train":
+                fn = controller.actions.get("train")
+                if not fn:
+                    return False, "training unavailable"
+                return fn(q.get("step", [""])[0], q.get("clip", [""])[0],
+                          q.get("count", ["60"])[0])
             return False, f"unknown action {action}"
 
         def log_message(self, *a):
