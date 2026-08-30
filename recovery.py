@@ -1446,14 +1446,16 @@ def approach_shoot(seconds, detect_fn, anchor,
                     stop_walk(); rooted = True             # firing in place
                     kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key)
                     continue
-                # NEVER give up a same-platform mob (per user): keep pursuing it. Progress is
-                # only tracked for the log; there is no stall-based abandon anymore. The beat's
-                # own time limit + farm_node's while-until-DEPLETED loop keep her farming this
-                # platform until it is actually empty. (mm_bounds still fires-in-place at edges.)
+                # NET-progress stall: give up (advance) only if we stop getting CLOSER (best
+                # |dx| not improving) for stall_limit frames -- tolerates jitter + slow approach,
+                # and escapes a genuinely unreachable mob so the platform can't hang.
                 if best_absdx is None or abs(dx) < best_absdx - 4:
                     best_absdx = abs(dx); no_improve = 0
                 else:
                     no_improve += 1
+                if no_improve >= stall_limit:
+                    log(f"stalled at dx={dx} (best={best_absdx}, unreachable) -> advance")
+                    return DEPLETED
                 # WALK ONLY -- do NOT attack while approaching: the attack skill roots her in
                 # place, so firing mid-walk cancels her movement and she never closes in.
                 # MINIMAP BOUND: navigation stays on the minimap. Never step OFF the platform
