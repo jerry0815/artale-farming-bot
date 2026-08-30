@@ -1132,10 +1132,16 @@ def _apply_swim_keys(want):
 
 
 def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
-            jump_burst=4, jump_gap=0.04, axis="xy"):
+            jump_burst=4, jump_gap=0.04, axis="xy", settle=2):
     """Swim toward (target_x, target_y) until within `tol` on both axes or `cap` seconds.
     Returns True on arrival. F8 (kb.pause) aborts. `locate` (default get_character_full)
     is injectable for tests.
+
+    LANDING: arrival requires `settle` CONSECUTIVE in-band reads (not one), and no jump is
+    fired while confirming -- so she must be RESTING on the platform, not just passing
+    through the target y mid-jump-arc. If she isn't seated she sinks back out of the band,
+    the streak resets, and she jumps again. This is what makes her actually LAND (critical
+    for the stacked P4 pin, where a momentary y-touch used to count as 'arrived').
 
     Water-world movement: you RISE by JUMPING repeatedly (holding Up does nothing), so when
     the target is above we spam JUMP and NEVER press Up. Left/right use arrow keys; descending
@@ -1151,6 +1157,7 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
     spots (e.g. P6's far-right edge) don't flip the swim direction."""
     locate = locate or (lambda: stable_char(3))
     t0 = time.time()
+    settle_hits = 0
     try:
         while time.time() - t0 < cap:
             if kb.pause:
@@ -1166,8 +1173,13 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
                     return True
                 _apply_swim_keys(horiz)
                 time.sleep(0.05); continue
-            if not want:
-                return True
+            if not want:                                  # in the target band -> confirm she's SEATED
+                settle_hits += 1
+                if settle_hits >= settle:
+                    return True                           # rested here `settle` reads -> landed
+                _apply_swim_keys(set())                   # release arrows; DON'T jump -> let her settle
+                time.sleep(0.08); continue
+            settle_hits = 0                               # drifted out of band -> not landed yet
             # Water-world vertical: rise = jump (no Up), descend = just sink (no Down).
             # Only horizontal keys are ever held.
             _apply_swim_keys(want - {"up", "down"})
@@ -1946,6 +1958,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             t_end = time.time() + stacked_jump_secs
             while time.time() < t_end and not kb.pause:
                 kb.safe_press(JUMP); time.sleep(0.1); kb.safe_release(JUMP)
+            kb.safe_release_all(); time.sleep(0.4)     # let her fall onto the upper platform (seat) before farming
         else:
             lift = _lift_override.get(node, _ylift)        # pin nodes (P4) use 0 -- target below
             print(f"[water] --> farm {node} (center {cx},{cy}) lift={lift}")  # the pin is unreachable

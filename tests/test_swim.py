@@ -69,6 +69,23 @@ def test_swim_to_no_jump_when_descending(monkeypatch):
     assert Key.down not in pressed           # descend = just sink, never hold Down
 
 
+def test_swim_to_requires_settle_not_momentary_touch(monkeypatch):
+    # She hits the target y once (mid jump-arc), sinks back out, then finally seats. With
+    # settle=2 the momentary touch must NOT count as arrival -> she re-rises (JUMP) and only
+    # returns once she has rested in-band `settle` reads. Guards the "actually land" fix.
+    seq = iter([(100, 100), (100, 120), (100, 100), (100, 100)])   # touch, sink, rest, rest
+    monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
+    pressed = []
+    monkeypatch.setattr(recovery.kb, "safe_press", lambda k: pressed.append(k))
+    monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
+    ok = recovery.swim_to(100, 100, tol=(3, 3), cap=5.0, settle=2,
+                          locate=lambda: next(seq, (100, 100)))
+    assert ok is True
+    assert recovery.JUMP in pressed          # sank after the touch -> had to jump to re-rise
+
+
 def test_sink_to_bottom_stops_at_bottom_y(monkeypatch):
     # y rises 150 -> 220; bottom_y=210 -> returns True once y crosses it, releasing keys.
     ys = iter([150, 170, 190, 210, 230])
