@@ -11,7 +11,7 @@
     "tol_x": 3,
     "tol_y": 7
   },
-  "swim_jump_burst": 4,
+  "swim_jump_burst": 6,
   "rotation": "sweep",
   "reset_node": "RIGHT",
   "beats_per_node": 3,
@@ -32,7 +32,7 @@
   "count_roi": null,
   "approach": true,
   "attack_key": "x",
-  "attack_range": 130,
+  "attack_range": 190,
   "same_platform_band": 110,
   "approach_step": 0,
   "deplete_reads": 4,
