@@ -2029,10 +2029,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             _near = int(map_cfg.get("sink_near", 35))              # buffer: landing a bit high = arrived
             print(f"[water] reset -> sink to bottom (land within {_near} of y={bottom_y})")
             sink_to_bottom(bottom_y, cap=15.0, near=_near)
-            # slide left to P6's center (x-only, no jump) -- off the sensing-bad right edge
-            print(f"[water] reset -> reposition to {farm_nodes[0]} center (x-only)")
-            swim_to(centers[farm_nodes[0]][0], centers[farm_nodes[0]][1],
-                    tol=tol, cap=8.0, jump=False, axis="x")
+            # next sweep's farm_node(farm_nodes[0]) swims to it -> no separate re-center needed
     else:
         current = farm_nodes[0]
         while True:
