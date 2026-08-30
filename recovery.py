@@ -1382,7 +1382,9 @@ def approach_shoot(seconds, detect_fn, anchor,
             # Scan the FULL platform-width strip at the player's y-band (YOLO is cheap on the
             # whole frame). Catches far mobs (P6's rightmost fishhouse) without any patrol.
             H, W = f.shape[:2]
-            strip = (0, max(0, pfeet - band - 40), W, min(H, pfeet + 40))
+            # scan a strip that spans the full same-platform band both ways (+margins), so a
+            # wider band actually reaches mobs above AND below her feet.
+            strip = (0, max(0, pfeet - band - 40), W, min(H, pfeet + band // 2 + 40))
 
             def same_platform(dets):
                 return [(mx + mw // 2, my + mh) for (_s, mx, my, mw, mh) in dets

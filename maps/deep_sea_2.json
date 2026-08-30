@@ -33,7 +33,7 @@
   "approach": true,
   "attack_key": "x",
   "attack_range": 130,
-  "same_platform_band": 70,
+  "same_platform_band": 110,
   "approach_step": 0,
   "deplete_reads": 4,
   "stall_limit": 8,
