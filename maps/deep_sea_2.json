@@ -194,5 +194,6 @@
     "title_template": "assets/player/deep_sea_2_title.png",
     "title_feet_offset": 40,
     "title_accept": 0.55
-  }
+  },
+  "breaks": false
 }

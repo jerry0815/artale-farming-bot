@@ -395,6 +395,31 @@ def make_exp_tracker(log_exp=True, sample_secs=30, window_secs=600, label="exp",
     return exp_tick
 
 
+def make_active_timer():
+    """ACTIVE farming-time tracker (excludes pauses), shared by the water and nav loops.
+    Returns (tick, freeze): call tick(now) each iteration WHILE farming to advance the
+    timer, and freeze(now) on pause/stop to end the current stretch. Publishes
+    STATUS['run_active_base'] / ['run_active_since'] (so the panel can extend the timer
+    live) and STATUS['run_secs']. base = sum of finished stretches, since = current start."""
+    _active = {"base": 0.0, "since": None}
+    STATUS["run_secs"] = 0
+    STATUS["run_active_base"], STATUS["run_active_since"] = 0.0, None
+
+    def freeze(now):                                     # end the current active stretch
+        if _active["since"] is not None:
+            _active["base"] += now - _active["since"]; _active["since"] = None
+        STATUS["run_active_base"], STATUS["run_active_since"] = _active["base"], None
+        STATUS["run_secs"] = int(_active["base"])
+
+    def tick(now):                                       # (re)enter active farming and advance
+        if _active["since"] is None:
+            _active["since"] = now
+        STATUS["run_active_base"], STATUS["run_active_since"] = _active["base"], _active["since"]
+        STATUS["run_secs"] = int(_active["base"] + (now - _active["since"]))
+
+    return tick, freeze
+
+
 def _minimap(np_img):
     ey = min(MM_Y + MM_H, np_img.shape[0]); ex = min(MM_X + MM_W, np_img.shape[1])
     return np_img[MM_Y:ey, MM_X:ex]
@@ -1562,6 +1587,8 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
     print(f"[nav] reactive deplete-check: {'YOLO (single-frame)' if reactive else 'off -> motion fallback'}")
 
     exp_tick = make_exp_tracker(label="nav")     # per-10-min EXP gain + running average
+    STATUS["buff_at"] = None                      # fresh run (panel timers)
+    active_tick, active_freeze = make_active_timer()  # ACTIVE farm time (excludes pauses)
 
     def one_count(nd):
         roi = monsters.MOTION_ROI_BY_NODE.get(nd, monsters.DEFAULT_MOTION_ROI)
@@ -1578,6 +1605,7 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
         next_skill[0] = time.time() + _r.uniform(*skill_interval)
         kb.safe_press('a'); time.sleep(0.4); kb.safe_release('a')
         kb.safe_press('j'); time.sleep(0.4); kb.safe_release('j')
+        STATUS["buff_at"] = time.time()               # panel buff timer
 
     def cast_h():
         # 'H' (heal/potion) before every STAND_SHOOT -- not throttled, per user request.
@@ -1587,16 +1615,18 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
         return navmap.travel(dst, locate_fn=_nav_locate, execute_fn=execute_edge)
 
     while True:
+        now = time.time()
         if STOP.is_set():
-            kb.safe_release_all(); STATUS["state"] = "idle"
+            kb.safe_release_all(); active_freeze(now); STATUS["state"] = "idle"
             print("[nav] STOP -> stop"); return
-        if max_seconds is not None and time.time() - t_start > max_seconds:
-            kb.safe_release_all(); STATUS["state"] = "idle"
+        if max_seconds is not None and now - t_start > max_seconds:
+            kb.safe_release_all(); active_freeze(now); STATUS["state"] = "idle"
             print("[nav] max_seconds -> stop"); return
         if kb.pause:
-            kb.safe_release_all(); lie_check_silence()
+            kb.safe_release_all(); lie_check_silence(); active_freeze(now)
             STATUS["state"] = "paused"; STATUS["lie"] = False; time.sleep(0.1); continue
         STATUS["state"] = "farming"
+        active_tick(now)                              # advance ACTIVE farm time
         lie_check_tick()
         STATUS["lie"] = is_lie_check_active()
         exp_tick()                                    # per-10-min EXP logging (no-op between samples)
@@ -1856,22 +1886,15 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     reset_node = map_cfg.get("reset_node")
     beats_per_node = int(map_cfg.get("beats_per_node", 3))
     t_start = time.time()
-    STATUS["run_secs"], STATUS["buff_at"] = 0, None      # fresh run (panel timers)
+    STATUS["buff_at"] = None                             # fresh run (panel timers)
     # ACTIVE farming time (excludes pauses) so total EXP / time / avg stay consistent.
-    _active = {"base": 0.0, "since": None}                # base = finished stretches, since = current start
-    STATUS["run_active_base"], STATUS["run_active_since"] = 0.0, None
+    active_tick, _freeze_active = make_active_timer()
     next_break = [time.time() + _r.uniform(*break_every)]
 
     # EXP tracker: per-10-min gain + running average (see make_exp_tracker).
     exp_tick = make_exp_tracker(log_exp=map_cfg.get("log_exp", True),
                                 sample_secs=float(map_cfg.get("exp_sample_secs", 30)),
                                 window_secs=float(map_cfg.get("exp_window_secs", 600)))
-
-    def _freeze_active(now):                              # end the current active stretch (pause/stop)
-        if _active["since"] is not None:
-            _active["base"] += now - _active["since"]; _active["since"] = None
-        STATUS["run_active_base"], STATUS["run_active_since"] = _active["base"], None
-        STATUS["run_secs"] = int(_active["base"])
 
     def guard():
         """Per-tick housekeeping. Returns 'stop' (return now), 'pause'/'skip'
@@ -1884,11 +1907,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         if kb.pause:
             kb.safe_release_all(); lie_check_silence(); _freeze_active(now)
             STATUS["state"] = "paused"; STATUS["lie"] = False; time.sleep(0.1); return "pause"
-        if _active["since"] is None:                       # (re)enter active farming after start/pause
-            _active["since"] = now
         STATUS["state"] = "farming"
-        STATUS["run_active_base"], STATUS["run_active_since"] = _active["base"], _active["since"]
-        STATUS["run_secs"] = int(_active["base"] + (now - _active["since"]))
+        active_tick(now)                                   # advance ACTIVE farm time
         lie_check_tick(); STATUS["lie"] = is_lie_check_active()
         exp_tick()
         if enemy_check and enemy_check():
@@ -1898,8 +1918,10 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             time.sleep(1); return "skip"
         return "ok"
 
+    _breaks = map_cfg.get("breaks", True)              # False -> farm continuously (no rest)
+
     def take_break_if_due():
-        if time.time() < next_break[0]:
+        if not _breaks or time.time() < next_break[0]:
             return
         print("[water] break -> swim to base and idle")
         swim_to(*centers[farm_nodes[0]], tol=tol, cap=12.0, jump_burst=_jb)
