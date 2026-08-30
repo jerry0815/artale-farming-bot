@@ -14,7 +14,6 @@
   "swim_jump_burst": 6,
   "rotation": "sweep",
   "reset_node": "RIGHT",
-  "beats_per_node": 3,
   "detector": "mob_yolo",
   "mob_model": "models/mob_yolo.pt",
   "mob_conf": 0.5,
@@ -195,5 +194,6 @@
     "title_feet_offset": 40,
     "title_accept": 0.55
   },
-  "breaks": false
+  "breaks": false,
+  "node_max_secs": 90
 }

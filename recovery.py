@@ -1446,15 +1446,14 @@ def approach_shoot(seconds, detect_fn, anchor,
                     stop_walk(); rooted = True             # firing in place
                     kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key)
                     continue
-                # NET-progress stall: only give up if we stop getting CLOSER (best |dx| not
-                # improving) for stall_limit frames -- tolerates jitter + slow approach.
+                # NEVER give up a same-platform mob (per user): keep pursuing it. Progress is
+                # only tracked for the log; there is no stall-based abandon anymore. The beat's
+                # own time limit + farm_node's while-until-DEPLETED loop keep her farming this
+                # platform until it is actually empty. (mm_bounds still fires-in-place at edges.)
                 if best_absdx is None or abs(dx) < best_absdx - 4:
                     best_absdx = abs(dx); no_improve = 0
                 else:
                     no_improve += 1
-                if no_improve >= stall_limit:
-                    log(f"stalled at dx={dx} (best={best_absdx}, unreachable) -> advance")
-                    return DEPLETED
                 # WALK ONLY -- do NOT attack while approaching: the attack skill roots her in
                 # place, so firing mid-walk cancels her movement and she never closes in.
                 # MINIMAP BOUND: navigation stays on the minimap. Never step OFF the platform
@@ -1898,7 +1897,10 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     _arrive_jumps = map_cfg.get("node_arrive_jumps", {})   # extra hops after arriving (seat on pin)
     rotation = map_cfg.get("rotation", "cyclic")
     reset_node = map_cfg.get("reset_node")
-    beats_per_node = int(map_cfg.get("beats_per_node", 3))
+    # Farm each platform until it's actually DEPLETED (no beat cap). node_max_secs is a
+    # SAFETY only -- if a platform never clears (e.g. an unreachable edge mob), rotate after
+    # this many seconds so the loop can't hang. 0 = no cap (farm until clear, may hang).
+    _node_max = float(map_cfg.get("node_max_secs", 90))
     t_start = time.time()
     STATUS["buff_at"] = None                             # fresh run (panel timers)
     # ACTIVE farming time (excludes pauses) so total EXP / time / avg stay consistent.
@@ -1970,9 +1972,13 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 kb.safe_press(JUMP); time.sleep(0.12); kb.safe_release(JUMP); time.sleep(0.05)
         heal_skill()                                   # cast buffs here: just arrived, NOT mid-attack
         node_anchor = _make_anchor() if _make_anchor else None   # fresh lock per platform, tracks across beats
-        for _ in range(max(1, beats_per_node)):
+        _node_t0 = time.time()
+        while True:                                    # farm THIS platform until DEPLETED (no beat cap)
             if kb.pause or STOP.is_set():
                 return False
+            if _node_max and time.time() - _node_t0 > _node_max:
+                print(f"[water] {node}: {_node_max:.0f}s safety cap -> rotate (couldn't clear)")
+                break
             if farm_mode == "walk_shoot":
                 ok = walk_shoot(centers[node][0], _r.uniform(*stand_secs), detect_fn,
                                 attack_key=attack_key, half=_phalf, tol=tol,
