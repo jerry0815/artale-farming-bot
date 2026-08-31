@@ -457,22 +457,22 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      </div>
      <div id=tstat style="font-family:ui-monospace,monospace;font-size:12px;margin:6px 0;color:#9ad">idle &middot; output goes to the Log below</div>
    </fieldset>
-   <fieldset><legend>Detection preview</legend>
-     <div class=row>
-       scale <input id=dscale placeholder="auto" style="width:56px">
-       thr <input id=dthr placeholder="auto" style="width:56px">
-       species <input id=dspecies placeholder="sprite mode only" style="width:150px">
-     </div>
-     <div class=row>
-       roi <input id=droi placeholder="x0,y0,x1,y1 (blank=full)" style="width:190px">
-       <button class=go onclick="snap()">📸 Snap</button>
-       <label><input type=checkbox id=dlive> live (2s)</label>
-     </div>
-     <div id=dstat style="font-family:ui-monospace,monospace;font-size:12px;margin:6px 0"></div>
-     <img id=detimg style="max-width:100%;border-radius:6px;display:none">
-   </fieldset>
  </div>
 
+ <fieldset><legend>Detection preview</legend>
+   <div class=row>
+     scale <input id=dscale placeholder="auto" style="width:56px">
+     thr <input id=dthr placeholder="auto" style="width:56px">
+     species <input id=dspecies placeholder="sprite mode only" style="width:150px">
+   </div>
+   <div class=row>
+     roi <input id=droi placeholder="x0,y0,x1,y1 (blank=full)" style="width:190px">
+     <button class=go onclick="snap()">📸 Snap</button>
+     <label><input type=checkbox id=dlive> live (2s)</label>
+   </div>
+   <div id=dstat style="font-family:ui-monospace,monospace;font-size:12px;margin:6px 0"></div>
+   <img id=detimg style="max-width:100%;border-radius:6px;display:none">
+ </fieldset>
  </div>
  <div id=side>
  <fieldset><legend>Log</legend>
