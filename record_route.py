@@ -97,6 +97,10 @@ class RouteRecorder:
         gx, gy = self._resolve_get_xy()()            # exact center at the mark instant
         if gx is not None and gx >= 0:
             rec["x"], rec["y"] = int(gx), int(gy)
+            print(f"[record] MARK #{self.marks} '{name}' at minimap ({int(gx)},{int(gy)})")
+        else:                                        # no dot -> position unknown at this instant
+            print(f"[record] MARK #{self.marks} '{name}' -- WARNING: no minimap dot read "
+                  f"(is she visible on the minimap? re-mark)")
         self._emit(rec)
         return name
 
@@ -121,6 +125,7 @@ class RouteRecorder:
             self._lis.start()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+        print(f"[record] recording '{self.map_name}' -> {self.out_path}  (Mark node per platform)")
         return self.out_path
 
     def stop(self):
@@ -132,6 +137,7 @@ class RouteRecorder:
         if self._fh is not None:
             self._fh.close()
             self._fh = None
+        print(f"[record] stopped '{self.map_name}': {self.marks} node(s) marked -> {self.out_path}")
         return self.out_path
 
 

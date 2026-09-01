@@ -475,8 +475,9 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      <div class=row>
        <input id=node placeholder="node name (blank = auto)">
        <button onclick="recMark()">＋ Mark node</button>
-       <button class=stop onclick="cmd('record_stop')">■ Stop recording</button>
+       <button class=stop onclick="recStop()">■ Stop recording</button>
      </div>
+     <div id=recstat style="font-family:ui-monospace,monospace;font-size:12px;margin:6px 0;color:#9ad">not recording</div>
    </fieldset>
    <fieldset><legend>Train detection</legend>
      <div class=row>
@@ -536,14 +537,25 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    const j = await (await fetch('/cmd?'+q)).json();
    document.getElementById('tstat').textContent = j.msg || (j.ok?'started':'error');
  }
+ let recMarks=[];
+ function recShow(t){ document.getElementById('recstat').textContent=t; }
  async function recStart(){
    const q = new URLSearchParams({action:'record_start', map:document.getElementById('map').value});
-   const j = await (await fetch('/cmd?'+q)).json(); if(!j.ok) alert(j.msg);
+   const j = await (await fetch('/cmd?'+q)).json();
+   if(j.ok){ recMarks=[]; recShow('● recording '+document.getElementById('map').value+' — 0 marks'); }
+   else alert(j.msg);
  }
  async function recMark(){
    const q = new URLSearchParams({action:'record_mark', name:document.getElementById('node').value});
    const j = await (await fetch('/cmd?'+q)).json();
-   if(j.ok){ document.getElementById('node').value=''; } else alert(j.msg);
+   if(j.ok){ recMarks.push(j.msg); document.getElementById('node').value='';
+     recShow('● '+recMarks.length+' marks: '+recMarks.join(', ')); }
+   else { recShow('⚠ '+j.msg); alert(j.msg); }
+ }
+ async function recStop(){
+   const j = await (await fetch('/cmd?action=record_stop')).json();
+   if(j.ok) recShow('■ stopped — '+recMarks.length+' marks: '+recMarks.join(', '));
+   else alert(j.msg);
  }
  let snapping=false;
  async function snap(){
