@@ -1132,7 +1132,7 @@ def _apply_swim_keys(want):
 
 
 def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
-            jump_burst=4, jump_gap=0.04, axis="xy", settle=2):
+            jump_burst=4, jump_gap=0.04, axis="xy", settle=2, verbose=False, label=""):
     """Swim toward (target_x, target_y) until within `tol` on both axes or `cap` seconds.
     Returns True on arrival. F8 (kb.pause) aborts. `locate` (default get_character_full)
     is injectable for tests.
@@ -1158,6 +1158,14 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
     locate = locate or (lambda: stable_char(3))
     t0 = time.time()
     settle_hits = 0
+    last = (-1, -1)
+    _llog = [0.0]
+    _pfx = f"[swim {label}]" if label else "[swim]"
+
+    def _arrived(x, y):
+        if verbose:
+            print(f"{_pfx} ARRIVED at ({x},{y}) tgt ({target_x},{target_y}) "
+                  f"gap dx={x - target_x} dy={y - target_y}")
     try:
         while time.time() - t0 < cap:
             if kb.pause:
@@ -1166,17 +1174,22 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
             x, y = locate()
             if x is None or x < 0:
                 time.sleep(0.04); continue
+            last = (x, y)
             want = watermap.swim_keys((x, y), (target_x, target_y), tol)
+            if verbose and time.time() - _llog[0] > 0.5:
+                _llog[0] = time.time()
+                print(f"{_pfx} at ({x},{y}) tgt ({target_x},{target_y}) "
+                      f"dx={x - target_x} dy={y - target_y} want={sorted(want)} hits={settle_hits}")
             if axis == "x":                               # horizontal only; arrived when x is close
                 horiz = want & {"left", "right"}
                 if not horiz:
-                    return True
+                    _arrived(x, y); return True
                 _apply_swim_keys(horiz)
                 time.sleep(0.05); continue
             if not want:                                  # in the target band -> confirm she's SEATED
                 settle_hits += 1
                 if settle_hits >= settle:
-                    return True                           # rested here `settle` reads -> landed
+                    _arrived(x, y); return True           # rested here `settle` reads -> landed
                 _apply_swim_keys(set())                   # release arrows; DON'T jump -> let her settle
                 time.sleep(0.08); continue
             settle_hits = 0                               # drifted out of band -> not landed yet
@@ -1197,6 +1210,9 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
                     time.sleep(jump_gap)
                 continue                                   # burst paced this iter -> re-read now
             time.sleep(0.05)
+        if verbose:
+            print(f"{_pfx} CAP {cap:.0f}s at {last} tgt ({target_x},{target_y}) "
+                  f"gap dx={last[0] - target_x} dy={last[1] - target_y} (never seated in tol)")
         return False
     finally:
         for key in _ARROW.values():
@@ -1761,6 +1777,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     # Jump burst for RISING between platforms: hops fired per position read (scaled by the
     # gap). Higher = faster rise (the slow read no longer caps the rate). P5->P4 wants snappy.
     _jb = int(map_cfg.get("swim_jump_burst", 4))
+    _jg = float(map_cfg.get("swim_jump_gap", 0.04))    # seconds between hops in a burst (lower=faster)
+    _log_swim = bool(map_cfg.get("log_swim", False))   # log player vs target pos during swim_to
     if not focus():
         print("[water] could not focus"); return
     STOP.clear(); STATUS["state"] = "farming"
@@ -1968,11 +1986,12 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             kb.safe_release_all(); time.sleep(0.4)     # let her fall onto the upper platform (seat) before farming
         elif node in _x_align:                         # already at the bottom y (just sank) -> x-only
             print(f"[water] --> farm {node}: align x to {cx} (no jump)")
-            swim_to(cx, cy, tol=tol, cap=6.0, jump=False, axis="x")
+            swim_to(cx, cy, tol=tol, cap=6.0, jump=False, axis="x", verbose=_log_swim, label=node)
         else:
             lift = _lift_override.get(node, _ylift)        # pin nodes (P4) use 0 -- target below
             print(f"[water] --> farm {node} (center {cx},{cy}) lift={lift}")  # the pin is unreachable
-            swim_to(cx, cy - lift, tol=tol, cap=12.0, jump_burst=_jb)   # aim ABOVE so she lands on it
+            swim_to(cx, cy - lift, tol=tol, cap=12.0, jump_burst=_jb, jump_gap=_jg,
+                    verbose=_log_swim, label=node)          # aim ABOVE so she lands on it
             extra = _arrive_jumps.get(node, 0)             # seat on a pin platform (P4): a few more hops
             for _ in range(extra):
                 if kb.pause:
@@ -2055,7 +2074,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             if reset_node and reset_node in centers:
                 STATUS["node"] = reset_node
                 print(f"[water] reset -> swim to {reset_node} (x-only)")
-                swim_to(*centers[reset_node], tol=tol, cap=12.0, jump=False, axis="x")
+                swim_to(*centers[reset_node], tol=tol, cap=12.0, jump=False, axis="x",
+                        verbose=_log_swim, label=reset_node)
             bottom_y = centers[farm_nodes[0]][1]                   # P6 y (land here before looping)
             _near = int(map_cfg.get("sink_near", 35))              # buffer: landing a bit high = arrived
             print(f"[water] reset -> sink to bottom (land within {_near} of y={bottom_y})")
