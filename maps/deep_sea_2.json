@@ -204,5 +204,6 @@
     "P6"
   ],
   "swim_jump_gap": 0.03,
-  "debug_log": true
+  "debug_log": true,
+  "stacked_drift_secs": 0.6
 }

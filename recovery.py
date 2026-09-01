@@ -2034,9 +2034,20 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         cx, cy = centers[node]
         STATUS["node"] = node
         if node in stacked_up and prev == stacked_up[node]:
-            print(f"[water] --> {node}: jump-up from {prev} (stacked, same minimap y)")
-            t_end = time.time() + stacked_jump_secs
+            # The upper node isn't always DIRECTLY above -- P3 sits 18px right of P4 -- so a
+            # straight-up jump falls back onto the lower platform. Drift toward the upper node's
+            # x (for `stacked_drift_secs`) WHILE jumping, then jump straight up to seat on it.
+            lo_x = centers[prev][0]
+            hkey = Key.right if cx > lo_x + 2 else (Key.left if cx < lo_x - 2 else None)
+            drift = float(map_cfg.get("stacked_drift_secs", 0.6))
+            _hd = "R" if hkey == Key.right else ("L" if hkey == Key.left else "-")
+            print(f"[water] --> {node}: jump-up from {prev} (stacked); drift {_hd} {drift}s (x {lo_x}->{cx})")
+            t0j = time.time(); t_end = t0j + stacked_jump_secs
             while time.time() < t_end and not kb.pause:
+                if hkey and time.time() - t0j < drift:
+                    kb.safe_press(hkey)                # drift toward the upper node's x...
+                elif hkey:
+                    kb.safe_release(hkey)              # ...then straight up to land on it
                 kb.safe_press(JUMP); time.sleep(0.1); kb.safe_release(JUMP)
             kb.safe_release_all(); time.sleep(0.4)     # let her fall onto the upper platform (seat) before farming
         elif node in _x_align:                         # already at the bottom y (just sank) -> x-only
