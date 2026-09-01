@@ -2022,6 +2022,10 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
 
     if rotation == "sweep":
         print(f"[water] sweep {farm_nodes} then reset via {reset_node or '(bottom)'}")
+        if map_cfg.get("start_sink"):                     # farm_nodes[0] is the bottom -> drop
+            _b0 = centers[farm_nodes[0]][1]               # straight down instead of swim-wandering
+            print(f"[water] start -> sink to bottom (y={_b0}) before first sweep")
+            sink_to_bottom(_b0, cap=15.0, near=int(map_cfg.get("sink_near", 35)))
         while True:
             g = guard()
             if g == "stop":

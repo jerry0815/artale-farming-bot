@@ -196,5 +196,6 @@
     "title_accept": 0.55
   },
   "breaks": false,
-  "node_max_secs": 90
+  "node_max_secs": 90,
+  "start_sink": true
 }
