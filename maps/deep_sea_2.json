@@ -9,8 +9,8 @@
     "h": 400
   },
   "swim": {
-    "tol_x": 3,
-    "tol_y": 7
+    "tol_x": 10,
+    "tol_y": 10
   },
   "swim_jump_burst": 8,
   "rotation": "sweep",
