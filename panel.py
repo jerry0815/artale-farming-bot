@@ -31,10 +31,12 @@ _LOG_LOCK = threading.Lock()
 
 
 class _Tee:
-    """Wrap a stream: write through, and buffer complete lines into _LOG."""
-    def __init__(self, real):
+    """Wrap a stream: write through, buffer complete lines into _LOG, and append each line to
+    the persistent log FILES, flushed per line so a mid-run shutdown loses nothing."""
+    def __init__(self, real, logfiles=()):
         self._real = real
         self._buf = ""
+        self._logfiles = list(logfiles)
 
     def write(self, s):
         self._real.write(s)
@@ -43,15 +45,46 @@ class _Tee:
             while "\n" in self._buf:
                 line, self._buf = self._buf.split("\n", 1)
                 _LOG_SEQ[0] += 1
-                _LOG.append((_LOG_SEQ[0], f"{_ts()} {line}" if line else line))
+                stamped = f"{_ts()} {line}" if line else line
+                _LOG.append((_LOG_SEQ[0], stamped))
+                for lf in self._logfiles:
+                    try:
+                        lf.write(stamped + "\n")
+                        lf.flush()                        # survive an abrupt shutdown mid-run
+                    except Exception:
+                        pass
 
     def flush(self):
         self._real.flush()
+        for lf in self._logfiles:
+            try:
+                lf.flush()
+            except Exception:
+                pass
 
 
-def install_log_tee():
-    if not isinstance(sys.stdout, _Tee):
-        sys.stdout = _Tee(sys.stdout)
+LOG_PATH = [None]                                          # path of the current session's log file
+
+
+def install_log_tee(logdir="logs"):
+    """Tee stdout into the in-memory ring AND persistent files: a timestamped run_<ts>.log
+    (durable history) plus logs/latest.log (stable path, always the current session)."""
+    if isinstance(sys.stdout, _Tee):
+        return
+    files = []
+    try:
+        import os
+        os.makedirs(logdir, exist_ok=True)
+        stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+        path = os.path.join(logdir, f"run_{stamp}.log")
+        files.append(open(path, "a", buffering=1, encoding="utf-8"))       # durable, line-buffered
+        files.append(open(os.path.join(logdir, "latest.log"), "w", buffering=1, encoding="utf-8"))
+        LOG_PATH[0] = path
+    except Exception as e:
+        sys.stderr.write(f"[panel] log file disabled: {e}\n")
+    sys.stdout = _Tee(sys.stdout, files)
+    if LOG_PATH[0]:
+        print(f"[panel] logging to {LOG_PATH[0]}  (and logs/latest.log)")
 
 
 def log_since(cursor):

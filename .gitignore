@@ -54,3 +54,4 @@ routes/*.capture.jsonl
 assets/bg/
 datasets/mobs/
 models/mob_yolo.pt
+logs/
