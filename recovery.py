@@ -1400,7 +1400,6 @@ def approach_shoot(seconds, detect_fn, anchor,
     import player as _player
     t0 = time.time()
     empty_reads = 0
-    occlude_grace = 0       # keep firing after being in range (VFX hides the mob briefly)
     best_absdx = None       # closest we've gotten to the current target (net-progress stall)
     no_improve = 0
     last_player = None      # sticky anchor: lock onto the bar nearest last frame's player
@@ -1470,15 +1469,6 @@ def approach_shoot(seconds, detect_fn, anchor,
                 dbg(f"[app {label}] player=({px},{pfeet}) band={band} "
                     f"dets(score,cx,feet)={_md} same_platform={[m[0] for m in same]}")
             if not same:
-                # The attack VFX often OCCLUDES the mob we just hit, so it vanishes from
-                # detection for a beat. If we were just in range, keep firing in place a few
-                # frames (assume occluded) rather than abandoning a live mob.
-                if occlude_grace > 0:
-                    occlude_grace -= 1
-                    log(f"no mob (occlusion grace {occlude_grace}) -> hold fire")
-                    stop_walk(); rooted = True             # firing in place
-                    kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key)
-                    continue
                 stop_walk(); rooted = False                # idle scan (not firing) -> she may drift
                 empty_reads += 1                          # DEBOUNCED: several empty frames -> clear
                 feet = [my + mh for (_s, _mx, my, _mw, mh) in dets]
@@ -1494,7 +1484,6 @@ def approach_shoot(seconds, detect_fn, anchor,
             if abs(dx) <= attack_range:                   # in range: face + fire a burst
                 best_absdx = None; no_improve = 0
                 rooted = True                             # firing in place -> assume-last-pos is valid
-                occlude_grace = 2                         # tolerate VFX hiding this mob next frames
                 log(f"IN RANGE dx={dx} px={px} -> attack '{attack_key}' burst (same={len(same)})")
                 stop_walk()
                 kb.safe_press(key); time.sleep(0.03); kb.safe_release(key)
@@ -1502,15 +1491,6 @@ def approach_shoot(seconds, detect_fn, anchor,
                     kb.safe_press(attack_key); time.sleep(0.35); kb.safe_release(attack_key)
                     time.sleep(0.05)
             else:                                         # nearest visible mob is OUT of range
-                # If we were just in range, the mob under/next to us is likely OCCLUDED by the
-                # player sprite (the far one is a different mob). Hold and keep firing instead
-                # of walking off the mob we're standing on.
-                if occlude_grace > 0:
-                    occlude_grace -= 1
-                    log(f"nearest far (dx={dx}) but recently in range -> hold fire (occluded?)")
-                    stop_walk(); rooted = True             # firing in place
-                    kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key)
-                    continue
                 # NET-progress stall: give up (advance) only if we stop getting CLOSER (best
                 # |dx| not improving) for stall_limit frames -- tolerates jitter + slow approach,
                 # and escapes a genuinely unreachable mob so the platform can't hang.
