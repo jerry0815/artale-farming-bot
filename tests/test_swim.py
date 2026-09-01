@@ -7,7 +7,6 @@ def test_swim_to_presses_toward_target_and_stops(monkeypatch):
     # Scripted positions: start below-left of target (100,100), then arrive.
     seq = iter([(90, 130), (95, 115), (100, 100)])
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
-    monkeypatch.setattr(recovery, "enemy_fast_tick", lambda *a, **k: False)
     monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
     pressed, released = [], []
     monkeypatch.setattr(recovery.kb, "safe_press", lambda k: pressed.append(k))
@@ -29,7 +28,6 @@ def test_swim_to_presses_toward_target_and_stops(monkeypatch):
 def test_swim_to_times_out_when_never_arrives(monkeypatch):
     monkeypatch.setattr(recovery, "get_character_full", lambda: (0, 0))   # never reaches (100,100)
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
-    monkeypatch.setattr(recovery, "enemy_fast_tick", lambda *a, **k: False)
     monkeypatch.setattr(recovery.kb, "safe_press", lambda k: None)
     monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
     monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
@@ -43,7 +41,6 @@ def test_swim_to_jumps_when_ascent_stalls(monkeypatch):
     # Wants to go UP (y 130 > target 100) but never rises -> must JUMP to climb.
     monkeypatch.setattr(recovery, "get_character_full", lambda: (100, 130))
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
-    monkeypatch.setattr(recovery, "enemy_fast_tick", lambda *a, **k: False)
     monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
     t = {"v": 0.0}
     monkeypatch.setattr(recovery.time, "time", lambda: t.__setitem__("v", t["v"] + 0.2) or t["v"])
@@ -60,7 +57,6 @@ def test_swim_to_no_jump_when_descending(monkeypatch):
     # Going DOWN (y 80 < target 130) must NOT jump.
     monkeypatch.setattr(recovery, "get_character_full", lambda: (100, 80))
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
-    monkeypatch.setattr(recovery, "enemy_fast_tick", lambda *a, **k: False)
     monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
     t = {"v": 0.0}
     monkeypatch.setattr(recovery.time, "time", lambda: t.__setitem__("v", t["v"] + 0.2) or t["v"])
@@ -79,7 +75,6 @@ def test_swim_to_requires_settle_not_momentary_touch(monkeypatch):
     # returns once she has rested in-band `settle` reads. Guards the "actually land" fix.
     seq = iter([(100, 100), (100, 120), (100, 100), (100, 100)])   # touch, sink, rest, rest
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
-    monkeypatch.setattr(recovery, "enemy_fast_tick", lambda *a, **k: False)
     monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
     pressed = []
     monkeypatch.setattr(recovery.kb, "safe_press", lambda k: pressed.append(k))
@@ -96,7 +91,6 @@ def test_sink_to_bottom_stops_at_bottom_y(monkeypatch):
     ys = iter([150, 170, 190, 210, 230])
     monkeypatch.setattr(recovery, "get_character_full", lambda: (176, next(ys, 230)))
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
-    monkeypatch.setattr(recovery, "enemy_fast_tick", lambda *a, **k: False)
     monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
     t = {"v": 0.0}
     monkeypatch.setattr(recovery.time, "time", lambda: t.__setitem__("v", t["v"] + 0.2) or t["v"])
@@ -111,7 +105,6 @@ def test_sink_to_bottom_settles_when_not_sinking(monkeypatch):
     # y stuck at 180 (< bottom 210) for several reads -> landed -> True
     monkeypatch.setattr(recovery, "get_character_full", lambda: (176, 180))
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
-    monkeypatch.setattr(recovery, "enemy_fast_tick", lambda *a, **k: False)
     monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
     t = {"v": 0.0}
     monkeypatch.setattr(recovery.time, "time", lambda: t.__setitem__("v", t["v"] + 0.2) or t["v"])

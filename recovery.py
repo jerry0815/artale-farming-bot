@@ -152,10 +152,10 @@ if not _lie_enabled:
     print(f"[lie-check] '{_LIE_DIR}' 沒有模板，警報停用。")
 
 def lie_check_fast_tick(interval=0.8):
-    """Cheap transparent-shape check (~40ms). Call it often -- inside STAND_SHOOT and
-    at the loop top -- so the 3s transparent screen alarms within ~1s. Immediate."""
-    if not _lie_enabled:
-        return
+    """Fast SAFETY scan (~40ms) on ONE capture at `interval` cadence, run in the hot loops:
+    BOTH the transparent-shape lie-check (captcha -> alarm) AND the another-player check
+    (red dot on the minimap -> alarm + auto-pause). They share this single tick so they run
+    at the same time and frequency -- neither can be missed while the other is checked."""
     now = time.time()
     if now - _last_fast_tick[0] < interval:
         return
@@ -163,10 +163,17 @@ def lie_check_fast_tick(interval=0.8):
     f = capture()
     if f is None or not hasattr(f, "shape"):
         return
-    hits = detect_lie_check(f, templates_folder=_LIE_DIR,
-                            template_filter=_FAST_TEMPLATES, work_width=520)
-    if _fast_alert.update(bool(hits)) and hits:
-        print(f"[lie-check] ⚠️ 透明圖形驗證 {[(n, round(s, 2)) for n, s in hits]} -- ALARM (F8 暫停)")
+    if _lie_enabled:                                       # transparent-shape captcha -> alarm
+        hits = detect_lie_check(f, templates_folder=_LIE_DIR,
+                                template_filter=_FAST_TEMPLATES, work_width=520)
+        if _fast_alert.update(bool(hits)) and hits:
+            print(f"[lie-check] ⚠️ 透明圖形驗證 {[(n, round(s, 2)) for n, s in hits]} -- ALARM (F8 暫停)")
+    dots = _enemy_dots(f)                                  # another player -> alarm + pause
+    if dbg_on():
+        dbg(f"[enemy] scan -> {len(dots)} red dot(s)" + (f" at {dots}" if dots else ""))
+    if dots:
+        print("[water] another player -> ALARM + PAUSE (F9 silence, F8 resume)")
+        enemy_alarm_on(); kb.safe_release_all(); kb.pause = True
 
 def lie_check_full_tick(interval=1.5):
     """Full check for the slower screens (curse / monster). Loop top only."""
@@ -309,14 +316,12 @@ def set_enemy_threshold(t):
     ENEMY_THRESHOLD = float(t)
 
 
-def get_enemy():
-    """Red dots (other players) on the minimap band. Non-empty -> escape."""
-    _, np_img = capture_pil_np()
-    if np_img is None:
+def _enemy_dots(frame):
+    """Red dots (other players) in the minimap band of a captured BGR frame."""
+    if frame is None:
         return []
-    ey = min(MM_Y + MM_H, np_img.shape[0]); ex = min(MM_X + MM_W, np_img.shape[1])
-    mm = np_img[MM_Y:ey, MM_X:ex]                 # FULL configured minimap band (water is 400 tall,
-    #                                              not the old hardcoded 145 -> lower platforms missed)
+    ey = min(MM_Y + MM_H, frame.shape[0]); ex = min(MM_X + MM_W, frame.shape[1])
+    mm = frame[MM_Y:ey, MM_X:ex]                  # FULL configured minimap band (lower platforms too)
     try:
         return detect_red_dots(mm, templates_folder="assets/minimap_other_character/",
                                threshold=ENEMY_THRESHOLD)
@@ -324,32 +329,10 @@ def get_enemy():
         return []
 
 
-_enemy_next = [0.0]
-ENEMY_CHECK_SECS = 3.0          # how often to scan for another player DURING farming
-
-
-def enemy_fast_tick():
-    """Throttled another-player (red-dot) scan for the hot loops -- guard() only runs
-    per-node, so a player appearing MID-FARM was missed for the whole platform. On a hit:
-    ALARM + release keys + pause (F9 silences, F8 resumes). Only scans every ENEMY_CHECK_SECS.
-    Returns True if a player was detected. Logs the scan count to the debug file."""
-    if time.time() < _enemy_next[0]:
-        return False
-    _enemy_next[0] = time.time() + ENEMY_CHECK_SECS
-    try:
-        hits = get_enemy()
-    except Exception:
-        hits = []
-    if dbg_on():
-        dbg(f"[enemy] scan -> {len(hits)} red dot(s)"
-            + (f" at {hits}" if hits else ""))
-    if hits:
-        print("[water] another player (mid-farm) -> ALARM + PAUSE (F9 silence, F8 resume)")
-        enemy_alarm_on()
-        kb.safe_release_all()
-        kb.pause = True
-        return True
-    return False
+def get_enemy():
+    """Red dots (other players) on the minimap band. Non-empty -> escape. Standalone capture
+    (used by guard/panel); the hot-loop scan shares lie_check_fast_tick's frame."""
+    return _enemy_dots(capture())
 
 
 def get_exp_number(exp_processor):
@@ -1307,8 +1290,7 @@ def sink_to_bottom(bottom_y, cap=15.0, locate=None, settle=4, near=35):
     while time.time() - t0 < cap:
         if kb.pause:
             return False
-        lie_check_fast_tick()
-        enemy_fast_tick()                  # another-player scan during navigation (throttled ~3s)
+        lie_check_fast_tick()              # unified safety scan: lie-check + another-player
         x, y = locate()
         if y is not None and y >= 0:
             if prev_y is not None:
@@ -1459,9 +1441,7 @@ def approach_shoot(seconds, detect_fn, anchor,
         while time.time() - t0 < seconds:
             if kb.pause:
                 return False
-            lie_check_fast_tick()
-            if enemy_fast_tick():          # another-player scan DURING farming (throttled ~3s)
-                return False
+            lie_check_fast_tick()          # unified safety scan: lie-check + another-player
             f = capture()
             if f is None:
                 time.sleep(0.1); continue
