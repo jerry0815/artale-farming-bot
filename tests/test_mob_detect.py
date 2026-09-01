@@ -98,3 +98,13 @@ def test_anchor_push_avoids_second_inference():
     assert model.calls == []                          # model was NOT queried
     a.locate(_frame())                                # push consumed -> falls back to own predict
     assert len(model.calls) == 1
+
+
+def test_yolo_boxes_per_class_conf():
+    # fishhouse(0) weak @0.35 kept (floor 0.3); goby(1) weak @0.4 dropped (floor 0.5)
+    boxes = [_B(0, 0.35, [10, 10, 30, 40]), _B(1, 0.4, [50, 50, 70, 90]),
+             _B(0, 0.9, [80, 80, 100, 120])]
+    dets = mob_detect.yolo_boxes(_FakeModel(boxes), _frame(), conf=0.5,
+                                 class_conf={0: 0.3, 1: 0.5})
+    scores = sorted(d[0] for d in dets)
+    assert scores == [0.35, 0.9]          # both fishhouse kept, weak goby filtered out

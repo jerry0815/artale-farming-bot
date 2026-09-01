@@ -1844,10 +1844,17 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         _mm = mob_detect.load_yolo(map_cfg.get("mob_model", "models/mob_yolo.pt"))
         _mconf = float(map_cfg.get("mob_conf", 0.6))
         _mimg = int(map_cfg.get("mob_imgsz", 640))
+        _cconf = {}                                        # per-class conf floor (fishhouse=0, goby=1)
+        if map_cfg.get("fishhouse_conf") is not None:
+            _cconf[0] = float(map_cfg["fishhouse_conf"])   # lower -> keep it through attack VFX
+        if map_cfg.get("goby_conf") is not None:
+            _cconf[1] = float(map_cfg["goby_conf"])
+        _cconf = _cconf or None
 
         def detect_fn(frame, roi):
-            return mob_detect.yolo_boxes(_mm, frame, roi, _mconf, _mimg)
-        print(f"[water] detector: mob_yolo conf={_mconf} imgsz={_mimg}")
+            return mob_detect.yolo_boxes(_mm, frame, roi, _mconf, _mimg, class_conf=_cconf)
+        print(f"[water] detector: mob_yolo conf={_mconf} imgsz={_mimg}"
+              + (f" class_conf={_cconf}" if _cconf else ""))
     elif detector == "fish":
         import fish as _fish
         _templates, _mode = _fish.templates_for(map_cfg)

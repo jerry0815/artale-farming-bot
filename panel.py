@@ -283,7 +283,13 @@ def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, ro
         import mob_detect
         m = mob_detect.load_yolo(cfg.get("mob_model", "models/mob_yolo.pt"))
         conf = thr if thr is not None else float(cfg.get("mob_conf", 0.6))
-        dets = mob_detect.yolo_boxes(m, f, roi=roi, conf=conf, imgsz=int(cfg.get("mob_imgsz", 640)))
+        _cc = {}                                          # per-class conf floor (match the loop)
+        if cfg.get("fishhouse_conf") is not None:
+            _cc[0] = float(cfg["fishhouse_conf"])
+        if cfg.get("goby_conf") is not None:
+            _cc[1] = float(cfg["goby_conf"])
+        dets = mob_detect.yolo_boxes(m, f, roi=roi, conf=conf, imgsz=int(cfg.get("mob_imgsz", 640)),
+                                     class_conf=_cc or None)
         best, mode, thr = {}, "mob_yolo", conf
     else:
         tmpls, mode = fish.templates_for(cfg, scale=scale)

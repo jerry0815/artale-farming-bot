@@ -203,5 +203,6 @@
   ],
   "swim_jump_gap": 0.03,
   "debug_log": true,
-  "stacked_drift_secs": 0.3
+  "stacked_drift_secs": 0.3,
+  "fishhouse_conf": 0.3
 }
