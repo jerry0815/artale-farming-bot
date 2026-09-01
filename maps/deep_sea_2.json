@@ -197,5 +197,8 @@
   },
   "breaks": false,
   "node_max_secs": 90,
-  "start_sink": true
+  "start_sink": true,
+  "x_align_nodes": [
+    "P6"
+  ]
 }

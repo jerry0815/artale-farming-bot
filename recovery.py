@@ -1953,6 +1953,9 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     # blindly instead of swimming (the "arrive P4 -> target P3" flag).
     stacked_up = {up: lo for lo, up in map_cfg.get("stacked_up", [])}
     stacked_jump_secs = float(map_cfg.get("stacked_jump_secs", 0.9))
+    # Nodes reached AFTER a sink (start_sink / reset): she's already at the right y, so align
+    # x-only (no jump) instead of a full swim_to that fights vertically off the floor.
+    _x_align = set(map_cfg.get("x_align_nodes", []))
 
     def farm_node(node, prev=None):
         cx, cy = centers[node]
@@ -1963,6 +1966,9 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             while time.time() < t_end and not kb.pause:
                 kb.safe_press(JUMP); time.sleep(0.1); kb.safe_release(JUMP)
             kb.safe_release_all(); time.sleep(0.4)     # let her fall onto the upper platform (seat) before farming
+        elif node in _x_align:                         # already at the bottom y (just sank) -> x-only
+            print(f"[water] --> farm {node}: align x to {cx} (no jump)")
+            swim_to(cx, cy, tol=tol, cap=6.0, jump=False, axis="x")
         else:
             lift = _lift_override.get(node, _ylift)        # pin nodes (P4) use 0 -- target below
             print(f"[water] --> farm {node} (center {cx},{cy}) lift={lift}")  # the pin is unreachable
