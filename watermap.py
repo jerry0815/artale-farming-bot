@@ -24,18 +24,25 @@ def swim_keys(cur, target, tol=(3, 3)):
 
     Minimap convention: smaller y is HIGHER on the map, so a target above (smaller y)
     -> 'up'. Returns a set drawn from {'left','right','up','down'}; an empty set means
-    'arrived' (within tolerance on both axes)."""
+    'arrived' (within tolerance on both axes).
+
+    `tol` is (tol_x, tol_y) symmetric, OR (tol_x, tol_below, tol_above) for an ASYMMETRIC
+    y-band: `tol_below` = how far the player may sit BELOW the target and still count as
+    arrived (keep tight -- below means she hasn't risen to the platform yet); `tol_above` =
+    how far ABOVE (jumped high -- she'll sink onto it, so this can be generous)."""
     cx, cy = cur
     tx, ty = target
-    tol_x, tol_y = tol
+    tol_x = tol[0]
+    tol_below = tol[1]
+    tol_above = tol[2] if len(tol) >= 3 else tol[1]
     keys = set()
     if tx < cx - tol_x:
         keys.add("left")
     elif tx > cx + tol_x:
         keys.add("right")
-    if ty < cy - tol_y:
+    if ty < cy - tol_below:        # player is BELOW target (lower) by > tol_below -> rise
         keys.add("up")
-    elif ty > cy + tol_y:
+    elif ty > cy + tol_above:      # player is ABOVE target (higher) by > tol_above -> sink
         keys.add("down")
     return keys
 
@@ -85,5 +92,11 @@ def minimap_crop(cfg):
 
 
 def swim_tol(cfg):
+    """(tol_x, tol_y) or, if the map sets tol_y_down/tol_y_up, the asymmetric
+    (tol_x, tol_below, tol_above) 3-tuple that swim_keys accepts."""
     s = cfg.get("swim", {})
-    return (s.get("tol_x", 3), s.get("tol_y", 3))
+    tol_x = s.get("tol_x", 3)
+    if "tol_y_down" in s or "tol_y_up" in s:
+        base = s.get("tol_y", 3)
+        return (tol_x, s.get("tol_y_down", base), s.get("tol_y_up", base))
+    return (tol_x, s.get("tol_y", 3))
