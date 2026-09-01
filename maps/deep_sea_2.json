@@ -174,9 +174,7 @@
     "P4": 0,
     "P6": 0
   },
-  "node_arrive_jumps": {
-    "P4": 2
-  },
+  "node_arrive_jumps": {},
   "buff_interval_secs": 300,
   "platform_half": 60,
   "map_box": [
