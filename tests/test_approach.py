@@ -16,6 +16,7 @@ class _Anchor:                                        # stand-in for a player an
 def _setup(monkeypatch, mobs, ptuple, clock_vals):
     monkeypatch.setattr(recovery, "capture", lambda: np.zeros((10, 10, 3), np.uint8))
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(recovery, "enemy_fast_tick", lambda *a, **k: False)
     monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
     it = iter(clock_vals)
     monkeypatch.setattr(recovery.time, "time", lambda: next(it, 10_000))
@@ -114,6 +115,7 @@ def test_minimap_bound_fires_in_place_at_platform_edge(monkeypatch):
     mob = [(0.9, 1600, 480, 60, 40)]                 # cx=1630, dx large, out of range
     monkeypatch.setattr(recovery, "capture", lambda: np.zeros((1000, 1600, 3), np.uint8))
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(recovery, "enemy_fast_tick", lambda *a, **k: False)
     monkeypatch.setattr(player, "find_player", lambda f, cfg=None, near=None: (800, 500))
     monkeypatch.setattr(recovery, "stable_char", lambda n=2: (180, 136))   # at right bound
     monkeypatch.setattr(recovery.kb, "pause", False, raising=False)

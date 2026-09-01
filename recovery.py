@@ -324,6 +324,34 @@ def get_enemy():
         return []
 
 
+_enemy_next = [0.0]
+ENEMY_CHECK_SECS = 3.0          # how often to scan for another player DURING farming
+
+
+def enemy_fast_tick():
+    """Throttled another-player (red-dot) scan for the hot loops -- guard() only runs
+    per-node, so a player appearing MID-FARM was missed for the whole platform. On a hit:
+    ALARM + release keys + pause (F9 silences, F8 resumes). Only scans every ENEMY_CHECK_SECS.
+    Returns True if a player was detected. Logs the scan count to the debug file."""
+    if time.time() < _enemy_next[0]:
+        return False
+    _enemy_next[0] = time.time() + ENEMY_CHECK_SECS
+    try:
+        hits = get_enemy()
+    except Exception:
+        hits = []
+    if dbg_on():
+        dbg(f"[enemy] scan -> {len(hits)} red dot(s)"
+            + (f" at {hits}" if hits else ""))
+    if hits:
+        print("[water] another player (mid-farm) -> ALARM + PAUSE (F9 silence, F8 resume)")
+        enemy_alarm_on()
+        kb.safe_release_all()
+        kb.pause = True
+        return True
+    return False
+
+
 def get_exp_number(exp_processor):
     """Absolute EXP number via OCR (or None). Unlike get_exp it does NOT run the delta /
     'reasonable gain' logic, so it never prints the anomaly warning -- the per-10-min
@@ -1280,6 +1308,7 @@ def sink_to_bottom(bottom_y, cap=15.0, locate=None, settle=4, near=35):
         if kb.pause:
             return False
         lie_check_fast_tick()
+        enemy_fast_tick()                  # another-player scan during navigation (throttled ~3s)
         x, y = locate()
         if y is not None and y >= 0:
             if prev_y is not None:
@@ -1431,6 +1460,8 @@ def approach_shoot(seconds, detect_fn, anchor,
             if kb.pause:
                 return False
             lie_check_fast_tick()
+            if enemy_fast_tick():          # another-player scan DURING farming (throttled ~3s)
+                return False
             f = capture()
             if f is None:
                 time.sleep(0.1); continue
