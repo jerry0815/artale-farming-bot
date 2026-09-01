@@ -203,6 +203,6 @@
   "x_align_nodes": [
     "P6"
   ],
-  "log_swim": true,
-  "swim_jump_gap": 0.03
+  "swim_jump_gap": 0.03,
+  "debug_log": true
 }

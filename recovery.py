@@ -237,6 +237,53 @@ STATUS = {"state": "idle", "node": None, "count": None, "lie": False,
 STOP = threading.Event()
 
 
+# --- DEBUG log: fine-grained per-frame traces written to a FILE only (never console/panel),
+# so the operational Log stays clean while a full trace is captured for post-run debugging.
+_DBG = [None]
+
+
+def open_debug_log(logdir="logs"):
+    """Open logs/debug_<ts>.log for the fine-grained trace. Returns the path (or None)."""
+    import os
+    close_debug_log()                                      # close a prior run's handle first
+    try:
+        os.makedirs(logdir, exist_ok=True)
+        stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+        path = os.path.join(logdir, f"debug_{stamp}.log")
+        _DBG[0] = open(path, "a", buffering=1, encoding="utf-8")   # line-buffered
+        return path
+    except Exception:
+        _DBG[0] = None
+        return None
+
+
+def close_debug_log():
+    if _DBG[0] is not None:
+        try:
+            _DBG[0].close()
+        except Exception:
+            pass
+        _DBG[0] = None
+
+
+def dbg_on():
+    return _DBG[0] is not None
+
+
+def dbg(msg):
+    """Append a timestamped DEBUG line to the debug file (no-op if not open). File-only."""
+    f = _DBG[0]
+    if f is None:
+        return
+    try:
+        t = time.time()
+        ts = time.strftime("%H:%M:%S", time.localtime(t)) + f".{int((t % 1) * 1000):03d}"
+        f.write(f"{ts} {msg}\n")
+        f.flush()                                          # survive a mid-run shutdown
+    except Exception:
+        pass
+
+
 def watch_loop(sleep=time.sleep):
     """Passive 'quick easy loop': run the lie-check ticks (no movement) until STOP is
     set, keeping STATUS['lie'] current. The zero-risk always-on human-check monitor."""
@@ -1159,13 +1206,12 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
     t0 = time.time()
     settle_hits = 0
     last = (-1, -1)
-    _llog = [0.0]
     _pfx = f"[swim {label}]" if label else "[swim]"
 
     def _arrived(x, y):
         if verbose:
-            print(f"{_pfx} ARRIVED at ({x},{y}) tgt ({target_x},{target_y}) "
-                  f"gap dx={x - target_x} dy={y - target_y}")
+            dbg(f"{_pfx} ARRIVED at ({x},{y}) tgt ({target_x},{target_y}) "
+                f"gap dx={x - target_x} dy={y - target_y}")
     try:
         while time.time() - t0 < cap:
             if kb.pause:
@@ -1176,10 +1222,9 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
                 time.sleep(0.04); continue
             last = (x, y)
             want = watermap.swim_keys((x, y), (target_x, target_y), tol)
-            if verbose and time.time() - _llog[0] > 0.5:
-                _llog[0] = time.time()
-                print(f"{_pfx} at ({x},{y}) tgt ({target_x},{target_y}) "
-                      f"dx={x - target_x} dy={y - target_y} want={sorted(want)} hits={settle_hits}")
+            if verbose:
+                dbg(f"{_pfx} at ({x},{y}) tgt ({target_x},{target_y}) "
+                    f"dx={x - target_x} dy={y - target_y} want={sorted(want)} hits={settle_hits}")
             if axis == "x":                               # horizontal only; arrived when x is close
                 horiz = want & {"left", "right"}
                 if not horiz:
@@ -1211,8 +1256,8 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
                 continue                                   # burst paced this iter -> re-read now
             time.sleep(0.05)
         if verbose:
-            print(f"{_pfx} CAP {cap:.0f}s at {last} tgt ({target_x},{target_y}) "
-                  f"gap dx={last[0] - target_x} dy={last[1] - target_y} (never seated in tol)")
+            dbg(f"{_pfx} CAP {cap:.0f}s at {last} tgt ({target_x},{target_y}) "
+                f"gap dx={last[0] - target_x} dy={last[1] - target_y} (never seated in tol)")
         return False
     finally:
         for key in _ARROW.values():
@@ -1420,6 +1465,10 @@ def approach_shoot(seconds, detect_fn, anchor,
 
             dets = detect_fn(f, strip)
             same = same_platform(dets)
+            if dbg_on():                                   # full per-frame trace (file only)
+                _md = [(round(s, 2), mx + mw // 2, my + mh) for (s, mx, my, mw, mh) in dets]
+                dbg(f"[app {label}] player=({px},{pfeet}) band={band} "
+                    f"dets(score,cx,feet)={_md} same_platform={[m[0] for m in same]}")
             if not same:
                 # The attack VFX often OCCLUDES the mob we just hit, so it vanishes from
                 # detection for a beat. If we were just in range, keep firing in place a few
@@ -1778,7 +1827,13 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     # gap). Higher = faster rise (the slow read no longer caps the rate). P5->P4 wants snappy.
     _jb = int(map_cfg.get("swim_jump_burst", 4))
     _jg = float(map_cfg.get("swim_jump_gap", 0.04))    # seconds between hops in a burst (lower=faster)
-    _log_swim = bool(map_cfg.get("log_swim", False))   # log player vs target pos during swim_to
+    # debug_log: write a fine-grained per-frame trace to logs/debug_<ts>.log (file only, NOT
+    # the console/panel), collecting what's needed to debug a run. Implies swim/approach traces.
+    _debug = bool(map_cfg.get("debug_log", False))
+    if _debug:
+        _p = open_debug_log()
+        print(f"[water] debug trace -> {_p}" if _p else "[water] debug trace: could not open file")
+    _log_swim = _debug or bool(map_cfg.get("log_swim", False))   # swim pos vs target (-> debug file)
     if not focus():
         print("[water] could not focus"); return
     STOP.clear(); STATUS["state"] = "farming"
