@@ -112,13 +112,27 @@ def _window_box():
     return box
 
 
+_sct_local = threading.local()
+
+
+def _sct():
+    """One mss handle per thread, reused across grabs. mss.mss() opens display/GDI
+    resources on every call (~a few ms); reusing a per-thread handle makes every grab
+    -- position, detection, count -- cheaper. Thread-local because an mss handle must be
+    used on the thread that created it and is not shared-thread-safe."""
+    s = getattr(_sct_local, "sct", None)
+    if s is None:
+        s = mss.mss()
+        _sct_local.sct = s
+    return s
+
+
 def capture():
     box = _window_box()
     if box is None:
         return None
-    with mss.mss() as sct:
-        shot = sct.grab(box)
-        return cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
+    shot = _sct().grab(box)
+    return cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
 
 
 def capture_pil_np():
@@ -126,10 +140,25 @@ def capture_pil_np():
     box = _window_box()
     if box is None:
         return None, None
-    with mss.mss() as sct:
-        shot = sct.grab(box)
-        pil = Image.frombytes("RGB", shot.size, shot.rgb)
-        return pil, cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
+    shot = _sct().grab(box)
+    pil = Image.frombytes("RGB", shot.size, shot.rgb)
+    return pil, cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
+
+
+def capture_minimap():
+    """Grab ONLY the minimap sub-box (~229x259) instead of the whole window, returning
+    the SAME pixels as _minimap(capture()). Position reads dominate non-attacking time
+    (stable_char takes >=4 grabs/read), so this is a large per-read win."""
+    box = _window_box()
+    if box is None:
+        return None
+    ey = min(MM_Y + MM_H, box["height"]); ex = min(MM_X + MM_W, box["width"])
+    w, h = ex - MM_X, ey - MM_Y
+    if w <= 0 or h <= 0:
+        return None
+    sub = {"left": box["left"] + MM_X, "top": box["top"] + MM_Y, "width": w, "height": h}
+    shot = _sct().grab(sub)
+    return cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
 
 
 # --- lie-check alarm: beep when a "needs a human" screen appears (captcha / curse) ---
@@ -154,16 +183,17 @@ if not _lie_enabled:
 if notify.notifier().enabled:
     print("[notify] Discord webhook 已啟用 (lie-check / another-player -> Discord)")
 
-def lie_check_fast_tick(interval=0.8):
+def lie_check_fast_tick(interval=0.8, frame=None):
     """Fast SAFETY scan (~40ms) on ONE capture at `interval` cadence, run in the hot loops:
     BOTH the transparent-shape lie-check (captcha -> alarm) AND the another-player check
     (red dot on the minimap -> alarm + auto-pause). They share this single tick so they run
-    at the same time and frequency -- neither can be missed while the other is checked."""
+    at the same time and frequency -- neither can be missed while the other is checked.
+    Pass `frame` (a full-window BGR capture already in hand) to reuse it instead of grabbing again, so one grab can serve the count + safety scan in the same beat."""
     now = time.time()
     if now - _last_fast_tick[0] < interval:
         return
     _last_fast_tick[0] = now
-    f = capture()
+    f = frame if frame is not None else capture()
     if f is None or not hasattr(f, "shape"):
         return
     if _lie_enabled:                                       # transparent-shape captcha -> alarm
@@ -180,7 +210,7 @@ def lie_check_fast_tick(interval=0.8):
         notify.send("another_player", "⚠️ Another player entered the map — bot PAUSED (F9 silence, F8 resume)")
         enemy_alarm_on(); kb.safe_release_all(); kb.pause = True
 
-def lie_check_full_tick(interval=1.5):
+def lie_check_full_tick(interval=1.5, frame=None):
     """Full check for the slower screens (curse / monster). Loop top only."""
     if not _lie_enabled:
         return
@@ -188,7 +218,7 @@ def lie_check_full_tick(interval=1.5):
     if now - _last_full_tick[0] < interval:
         return
     _last_full_tick[0] = now
-    f = capture()
+    f = frame if frame is not None else capture()
     if f is None or not hasattr(f, "shape"):
         return
     # higher work_width keeps the curse banner/lock detail (fine 2-line text + icon)
@@ -489,16 +519,15 @@ def _minimap(np_img):
     return np_img[MM_Y:ey, MM_X:ex]
 
 
-def get_character_color(np_img=None, near=None):
-    """Character (x,y) via COLOR (bright yellow blob) on the full minimap. Far more
-    robust than template matching, which returns a phantom (122,188) at some spots.
-    If `near`=(x,y) is given and several yellow blobs exist, pick the closest one
-    (temporal continuity); else pick the largest plausible blob. (-1,-1) if none."""
-    if np_img is None:
-        np_img = capture()
-    if np_img is None:
-        return -1, -1
-    mm = _minimap(np_img)
+def _mm_for(np_img):
+    """Minimap crop for a position read: grab minimap-only (fast) when np_img is None,
+    else crop the given full frame. None on capture failure."""
+    return capture_minimap() if np_img is None else _minimap(np_img)
+
+
+def _color_on_mm(mm, near=None):
+    """Character (x,y) by COLOR (bright yellow blob) on an ALREADY-cropped minimap.
+    (-1,-1) if no plausible blob."""
     hsv = cv2.cvtColor(mm, cv2.COLOR_BGR2HSV)
     # tight to the real dot's signature (hue~29, sat~245, val~242). A translucent buff/
     # heat-aura glow reads as lower saturation/value -> excluded. Size ~54px; keep 15-120.
@@ -510,6 +539,18 @@ def get_character_color(np_img=None, near=None):
     if pick is None:
         return -1, -1
     return pick[0], pick[1]
+
+
+def get_character_color(np_img=None, near=None):
+    """Character (x,y) via COLOR (bright yellow blob) on the full minimap. Far more
+    robust than template matching, which returns a phantom (122,188) at some spots.
+    If `near`=(x,y) is given and several yellow blobs exist, pick the closest one
+    (temporal continuity); else pick the largest plausible blob. (-1,-1) if none.
+    With np_img=None this grabs the minimap ROI only (not the whole window)."""
+    mm = _mm_for(np_img)
+    if mm is None:
+        return -1, -1
+    return _color_on_mm(mm, near)
 
 
 def _pick_char_blob(blobs, near=None):
@@ -528,16 +569,16 @@ def _pick_char_blob(blobs, near=None):
 
 
 def get_character_full(np_img=None, near=None):
-    """Character (x, y) on the FULL minimap, same frame as the band. Color first
-    (robust), template as a fallback. (-1,-1) if neither finds it."""
-    if np_img is None:
-        np_img = capture()
-    if np_img is None:
+    """Character (x, y) on the FULL minimap. Color first (robust), template as a
+    fallback. (-1,-1) if neither finds it. With np_img=None this grabs the minimap ROI
+    only, and does ONE grab shared by the color and template passes."""
+    mm = _mm_for(np_img)
+    if mm is None:
         return -1, -1
-    x, y = get_character_color(np_img, near=near)
+    x, y = _color_on_mm(mm, near)
     if x >= 0:
         return x, y
-    centers = detect_character_on_minimap(_minimap(np_img), templates_folder=CHAR_TPL, threshold=0.7)
+    centers = detect_character_on_minimap(mm, templates_folder=CHAR_TPL, threshold=0.7)
     if centers:
         return centers[0][0], centers[0][1]
     return -1, -1
@@ -1705,6 +1746,8 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
         f = capture()
         c = None if f is None else len(monsters.detect_dragons_yolo(f, model, roi))
         STATUS["count"] = c
+        if f is not None:
+            lie_check_fast_tick(frame=f)   # reuse the count's full grab for the safety scan
         return c
 
     def heal_skill():
@@ -1918,6 +1961,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 f = capture()
                 c = None if f is None else len(monsters.detect_dragons_yolo(f, model, roi))
                 STATUS["count"] = c
+                if f is not None:
+                    lie_check_fast_tick(frame=f)   # reuse the count's full grab for the safety scan
                 return c
         print(f"[water] detector: {'dragon-YOLO' if one_count else 'none -> time'}")
 
@@ -1926,6 +1971,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             f = capture()
             c = None if f is None else len(detect_fn(f, _count_roi))
             STATUS["count"] = c
+            if f is not None:
+                lie_check_fast_tick(frame=f)   # reuse the count's full grab for the safety scan
             return c
 
     # Farming mode: 'walk_shoot' = minimap-only end-to-end sweep firing (no screen anchor,
