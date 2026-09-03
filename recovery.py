@@ -19,6 +19,7 @@ import mss, pygetwindow as gw
 from screeninfo import get_monitors
 from detection import detect_character_on_minimap, detect_red_dots, detect_lie_check
 from alarm import Alarm, AlertController
+import notify
 import os
 from glob import glob as _glob
 from exp_processor import ExpProcessor
@@ -150,6 +151,8 @@ _last_fast_tick = [0.0]
 _last_full_tick = [0.0]
 if not _lie_enabled:
     print(f"[lie-check] '{_LIE_DIR}' 沒有模板，警報停用。")
+if notify.notifier().enabled:
+    print("[notify] Discord webhook 已啟用 (lie-check / another-player -> Discord)")
 
 def lie_check_fast_tick(interval=0.8):
     """Fast SAFETY scan (~40ms) on ONE capture at `interval` cadence, run in the hot loops:
@@ -168,11 +171,13 @@ def lie_check_fast_tick(interval=0.8):
                                 template_filter=_FAST_TEMPLATES, work_width=520)
         if _fast_alert.update(bool(hits)) and hits:
             print(f"[lie-check] ⚠️ 透明圖形驗證 {[(n, round(s, 2)) for n, s in hits]} -- ALARM (F8 暫停)")
+            notify.send("lie_check", f"⚠️ 透明圖形驗證 (captcha) detected {[n for n, _ in hits]} — needs a human (F8 暫停)")
     dots = _enemy_dots(f)                                  # another player -> alarm + pause
     if dbg_on():
         dbg(f"[enemy] scan -> {len(dots)} red dot(s)" + (f" at {dots}" if dots else ""))
     if dots:
         print("[water] another player -> ALARM + PAUSE (F9 silence, F8 resume)")
+        notify.send("another_player", "⚠️ Another player entered the map — bot PAUSED (F9 silence, F8 resume)")
         enemy_alarm_on(); kb.safe_release_all(); kb.pause = True
 
 def lie_check_full_tick(interval=1.5):
@@ -192,6 +197,7 @@ def lie_check_full_tick(interval=1.5):
                             work_width=1000)
     if _full_alert.update(bool(hits)) and hits:
         print(f"[lie-check] ⚠️ 需真人處理畫面 {[(n, round(s, 2)) for n, s in hits]} -- ALARM (F8 暫停)")
+        notify.send("lie_check", f"⚠️ 需真人處理畫面 (curse/monster) {[n for n, _ in hits]} — needs a human (F8 暫停)")
 
 def lie_check_tick():
     """Loop-top check: run both pipelines (fast covers transparent between states too)."""

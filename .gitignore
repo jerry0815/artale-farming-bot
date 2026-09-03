@@ -55,3 +55,6 @@ assets/bg/
 datasets/mobs/
 models/mob_yolo.pt
 logs/
+
+# Discord webhook URL (secret) for notify.py
+notify.json
