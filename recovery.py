@@ -543,6 +543,26 @@ def get_character_full(np_img=None, near=None):
     return -1, -1
 
 
+def swim_read():
+    """FAST position read for swim TRAVEL (direction only): two quick samples ~20ms apart
+    instead of stable_char's four. If they agree (within 12px) return their midpoint; if one
+    is invalid return the other; if they disagree return the LATEST (freshest). ~2 captures
+    vs stable_char's 4 (+0.2s of pacing sleeps), so the swim loop decides direction ~2-3x
+    faster and the on-arrival settle freeze shrinks accordingly. Safe because swim_to re-reads
+    every iteration AND arrival needs `settle` CONSECUTIVE in-band reads -- a lone phantom
+    can't false-land. stable_char (densest-cluster over 4) stays the default everywhere else."""
+    a = get_character_full()
+    time.sleep(0.02)
+    b = get_character_full()
+    if a[0] < 0:
+        return b
+    if b[0] < 0:
+        return a
+    if abs(a[0] - b[0]) <= 12 and abs(a[1] - b[1]) <= 12:
+        return ((a[0] + b[0]) // 2, (a[1] + b[1]) // 2)
+    return b
+
+
 def minimap_scroll(prev_crop, cur_crop, min_resp=0.4):
     """Vertical scroll of the minimap TERRAIN between two full-minimap crops (from
     `_minimap`), via phase correlation with the yellow dot masked out so only terrain
@@ -1217,9 +1237,11 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
     `axis="x"` reaches the target X only (ignores Y, no jump) -- used by the reset to reach
     the rightmost open column without fighting the descent.
 
-    Uses stable_char (densest-cluster median) by default so scattered phantom reads at bad
-    spots (e.g. P6's far-right edge) don't flip the swim direction."""
-    locate = locate or (lambda: stable_char(3))
+    Uses the fast two-sample swim_read by default (travel only needs a direction and the loop
+    re-reads every iteration); landing robustness comes from `settle` CONSECUTIVE in-band reads,
+    not from any single read, so a scattered phantom at a bad spot (e.g. P6's far-right edge)
+    can't false-land -- it just costs one self-correcting iteration."""
+    locate = locate or swim_read
     t0 = time.time()
     settle_hits = 0
     last = (-1, -1)

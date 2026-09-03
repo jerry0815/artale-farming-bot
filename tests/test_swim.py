@@ -86,6 +86,29 @@ def test_swim_to_requires_settle_not_momentary_touch(monkeypatch):
     assert recovery.JUMP in pressed          # sank after the touch -> had to jump to re-rise
 
 
+def _seq_reader(monkeypatch, vals):
+    it = iter(vals)
+    monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: next(it))
+    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
+
+
+def test_swim_read_agreeing_samples_return_midpoint(monkeypatch):
+    _seq_reader(monkeypatch, [(100, 200), (104, 206)])   # within 12px -> average
+    assert recovery.swim_read() == (102, 203)
+
+
+def test_swim_read_disagreeing_samples_return_latest(monkeypatch):
+    _seq_reader(monkeypatch, [(100, 200), (400, 500)])   # phantom jump -> trust freshest
+    assert recovery.swim_read() == (400, 500)
+
+
+def test_swim_read_skips_invalid_sample(monkeypatch):
+    _seq_reader(monkeypatch, [(-1, -1), (150, 160)])     # first invalid -> return the valid one
+    assert recovery.swim_read() == (150, 160)
+    _seq_reader(monkeypatch, [(150, 160), (-1, -1)])     # second invalid -> return the first
+    assert recovery.swim_read() == (150, 160)
+
+
 def test_sink_to_bottom_stops_at_bottom_y(monkeypatch):
     # y rises 150 -> 220; bottom_y=210 -> returns True once y crosses it, releasing keys.
     ys = iter([150, 170, 190, 210, 230])
