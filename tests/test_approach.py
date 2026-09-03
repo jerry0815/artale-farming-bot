@@ -48,6 +48,37 @@ def test_off_platform_mob_ignored_then_depleted(monkeypatch):
                                    deplete_reads=2) is recovery.DEPLETED
 
 
+class _DetectSeq:                                    # detector returning a scripted per-frame list
+    def __init__(self, seq):
+        self.seq, self.i = list(seq), 0
+
+    def __call__(self, f, roi):
+        v = self.seq[self.i] if self.i < len(self.seq) else self.seq[-1]
+        self.i += 1
+        return v
+
+
+def test_lone_flaky_detection_does_not_reset_deplete(monkeypatch):
+    # A single flaky same-platform detection between empty frames must NOT reset the deplete
+    # counter (needs >=2 consecutive) -- so a near-empty platform still depletes on schedule.
+    mob = (0.7, 1200, 480, 60, 40)                   # same-platform but far (out of range)
+    df, _, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0] * 12)
+    df = _DetectSeq([[], [mob], [], []])             # empty, ONE mob, empty, empty
+    # empty(1) -> mob(streak=1, no reset) -> empty(2) -> empty(3) -> DEPLETED at reads=3
+    assert recovery.approach_shoot(10, df, anc, deplete_reads=3, attack_range=110,
+                                   verbose=False) is recovery.DEPLETED
+
+
+def test_sustained_detection_resets_deplete(monkeypatch):
+    # Two consecutive detections DO clear deplete progress -> she keeps farming, not leaves.
+    mob = (0.7, 1200, 480, 60, 40)
+    df, _, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0, 0, 0, 0, 999])
+    df = _DetectSeq([[], [mob], [mob], []])          # empty(1) -> mob -> mob(streak=2 -> reset)
+    # after reset only one trailing empty (reads=1 < 3) then time runs out -> True, not DEPLETED
+    assert recovery.approach_shoot(10, df, anc, deplete_reads=3, attack_range=110,
+                                   verbose=False) is not recovery.DEPLETED
+
+
 def test_walks_right_toward_far_mob(monkeypatch):
     mob = [(0.7, 1200, 480, 60, 40)]                 # cx=1230, bottom=520 ~ feet 500 -> same
     df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0])

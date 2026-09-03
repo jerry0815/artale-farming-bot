@@ -1411,6 +1411,7 @@ def approach_shoot(seconds, detect_fn, anchor,
     import player as _player
     t0 = time.time()
     empty_reads = 0
+    nonempty_streak = 0     # consecutive frames WITH a same-platform mob (debounces deplete reset)
     best_absdx = None       # closest we've gotten to the current target (net-progress stall)
     no_improve = 0
     last_player = None      # sticky anchor: lock onto the bar nearest last frame's player
@@ -1461,6 +1462,8 @@ def approach_shoot(seconds, detect_fn, anchor,
                 p = last_player
                 log(f"player NOT found (rooted) -> assume last position {p}")
             last_player = p
+            if getattr(anchor, "which", None):            # composite fell past the primary anchor
+                log(f"anchor fallback #{anchor.which} (nametag) located player at {p}")
             px, pfeet = p
             # Scan the FULL platform-width strip at the player's y-band (YOLO is cheap on the
             # whole frame). Catches far mobs (P6's rightmost fishhouse) without any patrol.
@@ -1481,6 +1484,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                     f"dets(score,cx,feet)={_md} same_platform={[m[0] for m in same]}")
             if not same:
                 stop_walk(); rooted = False                # idle scan (not firing) -> she may drift
+                nonempty_streak = 0
                 empty_reads += 1                          # DEBOUNCED: several empty frames -> clear
                 feet = [my + mh for (_s, _mx, my, _mw, mh) in dets]
                 log(f"no same-platform mob ({empty_reads}/{deplete_reads}); "
@@ -1488,7 +1492,11 @@ def approach_shoot(seconds, detect_fn, anchor,
                 if empty_reads >= deplete_reads:          # debounced empty -> platform done
                     return DEPLETED
                 time.sleep(0.12); continue
-            empty_reads = 0
+            # Only a SUSTAINED detection (>=2 consecutive frames) clears deplete progress -- a lone
+            # flaky frame no longer resets the tail, so a near-empty platform depletes sooner.
+            nonempty_streak += 1
+            if nonempty_streak >= 2:
+                empty_reads = 0
             tx, _tfy = min(same, key=lambda m: abs(m[0] - px))
             dx = tx - px
             key = Key.right if dx >= 0 else Key.left
@@ -1940,6 +1948,27 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             def _make_anchor():
                 return _p.HPBarAnchor(cfg=map_cfg.get("player"))
             print("[water] anchor: hpbar (sticky)")
+        # Nametag FALLBACK: wrap the primary anchor so a lost primary lock (e.g. the attack
+        # VFX covering the HP bar that yolo_player keys on) falls back to the name tag/title,
+        # which sit BELOW the character and stay visible through the skill burst.
+        _fb = map_cfg.get("nametag_fallback")
+        if _fb and _fb.get("nametag_template"):
+            _primary_make = _make_anchor
+            _fb_tagw = _p.load_nametag(_fb["nametag_template"])
+            _fb_titlew = _p.load_nametag(_fb["title_template"]) if _fb.get("title_template") else None
+
+            def _make_anchor():
+                anchors = [_primary_make(),
+                           _p.NametagAnchor(_fb_tagw,
+                                            feet_offset=int(_fb.get("nametag_feet_offset", 6)),
+                                            accept_thres=float(_fb.get("nametag_accept", 0.55)))]
+                if _fb_titlew is not None:
+                    anchors.append(_p.NametagAnchor(_fb_titlew,
+                                                    feet_offset=int(_fb.get("title_feet_offset", 40)),
+                                                    accept_thres=float(_fb.get("title_accept", 0.55))))
+                return _p.CompositeAnchor(anchors)          # primary first, nametag(+title) fallback
+            print(f"[water] anchor fallback: nametag ({_fb['nametag_template']})"
+                  + (f" + title ({_fb['title_template']})" if _fb_titlew is not None else ""))
         print(f"[water] approach ON: detector={detector} range={_arange} band={_aband}")
 
     buff_keys = map_cfg.get("buff_keys", [])          # per-character buffs; empty = none
