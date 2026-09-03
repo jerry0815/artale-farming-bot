@@ -1471,6 +1471,9 @@ def approach_shoot(seconds, detect_fn, anchor,
             if kb.pause:
                 return False
             lie_check_fast_tick()          # unified safety scan: lie-check + another-player
+            lie_check_full_tick()          # curse/rune + monster screens (self-throttled 1.5s) --
+            # sample DURING farming, not just between nodes: a node can farm 10-90s, so the curse
+            # would otherwise go unseen for that whole dwell.
             f = capture()
             if f is None:
                 time.sleep(0.1); continue
