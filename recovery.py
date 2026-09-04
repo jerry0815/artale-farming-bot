@@ -271,6 +271,53 @@ def lie_check_tick():
     lie_check_fast_tick()
     lie_check_full_tick()
 
+
+# --- background safety monitor: the FULL check (curse/monster) is ~0.5s of template matching,
+# so running it inline froze the action loop for that long every 1.5s. Run it in its OWN thread
+# instead -- curse/monster screens persist for many seconds, so a steady side-thread cadence
+# loses no recall while the action loop stays responsive. The cheap FAST tick (transparent
+# captcha + another-player, ~55ms, 3s window) stays INLINE in the action loops, where it's
+# guaranteed to run every iteration. Enabled by the thread-local mss handle (each thread grabs
+# with its own). Skips while paused (a human is present -> lie_check_silence handles it) so it
+# can't re-arm an alarm the action loop just silenced. ---
+_safety_stop = threading.Event()
+_safety_thread = [None]
+
+
+def _safety_monitor_loop():
+    while not _safety_stop.is_set() and not STOP.is_set():
+        if not kb.pause:
+            try:
+                lie_check_full_tick()                  # self-throttled to 1.5s internally
+                STATUS["lie"] = is_lie_check_active()
+            except Exception as e:
+                print(f"[safety] monitor error: {e}")
+        _safety_stop.wait(0.3)                          # poll ~3x/s; full_tick paces the real work
+
+
+def start_safety_monitor():
+    """Start the background FULL lie-check monitor (idempotent). Call at farm start."""
+    if not _lie_enabled:
+        return
+    t = _safety_thread[0]
+    if t is not None and t.is_alive():
+        return
+    _safety_stop.clear()
+    t = threading.Thread(target=_safety_monitor_loop, name="safety-monitor", daemon=True)
+    _safety_thread[0] = t
+    t.start()
+    print("[safety] background curse/monster monitor started (off the action loop)")
+
+
+def stop_safety_monitor():
+    """Stop the background monitor (idempotent). Call at every farm-loop exit."""
+    _safety_stop.set()
+    t = _safety_thread[0]
+    if t is not None and t.is_alive() and t is not threading.current_thread():
+        t.join(timeout=1.0)
+    _safety_thread[0] = None
+
+
 def lie_check_silence():
     """Stop both alarms (e.g. when the bot pauses -- a human is present)."""
     _fast_alert.update(False)
@@ -1544,9 +1591,6 @@ def approach_shoot(seconds, detect_fn, anchor,
             if kb.pause:
                 return False
             lie_check_fast_tick()          # unified safety scan: lie-check + another-player
-            lie_check_full_tick()          # curse/rune + monster screens (self-throttled 1.5s) --
-            # sample DURING farming, not just between nodes: a node can farm 10-90s, so the curse
-            # would otherwise go unseen for that whole dwell.
             f = capture()
             if f is None:
                 time.sleep(0.1); continue
@@ -1797,20 +1841,21 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
     def go(dst):
         return navmap.travel(dst, locate_fn=_nav_locate, execute_fn=execute_edge)
 
+    start_safety_monitor()                            # curse/monster runs off the action loop
     while True:
         now = time.time()
         if STOP.is_set():
             kb.safe_release_all(); active_freeze(now); STATUS["state"] = "idle"
-            print("[nav] STOP -> stop"); return
+            stop_safety_monitor(); print("[nav] STOP -> stop"); return
         if max_seconds is not None and now - t_start > max_seconds:
             kb.safe_release_all(); active_freeze(now); STATUS["state"] = "idle"
-            print("[nav] max_seconds -> stop"); return
+            stop_safety_monitor(); print("[nav] max_seconds -> stop"); return
         if kb.pause:
             kb.safe_release_all(); lie_check_silence(); active_freeze(now)
             STATUS["state"] = "paused"; STATUS["lie"] = False; time.sleep(0.1); continue
         STATUS["state"] = "farming"
         active_tick(now)                              # advance ACTIVE farm time
-        lie_check_tick()
+        lie_check_fast_tick()                         # FULL curse/monster now runs in the monitor thread
         STATUS["lie"] = is_lie_check_active()
         exp_tick()                                    # per-10-min EXP logging (no-op between samples)
 
@@ -2131,7 +2176,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             STATUS["state"] = "paused"; STATUS["lie"] = False; time.sleep(0.1); return "pause"
         STATUS["state"] = "farming"
         active_tick(now)                                   # advance ACTIVE farm time
-        lie_check_tick(); STATUS["lie"] = is_lie_check_active()
+        lie_check_fast_tick(); STATUS["lie"] = is_lie_check_active()   # FULL runs in the monitor thread
         exp_tick()
         if enemy_check and enemy_check():
             print("[water] another player -> ALARM + panic (F9 to silence)")
@@ -2242,6 +2287,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 break                                    # time mode: one beat then advance
         return True
 
+    start_safety_monitor()                            # curse/monster runs off the action loop
     if rotation == "sweep":
         print(f"[water] sweep {farm_nodes} then reset via {reset_node or '(bottom)'}")
         if map_cfg.get("start_sink"):                     # farm_nodes[0] is the bottom -> drop
@@ -2251,7 +2297,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         while True:
             g = guard()
             if g == "stop":
-                return
+                stop_safety_monitor(); return
             if g != "ok":
                 continue
             broke = False
@@ -2283,7 +2329,7 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         while True:
             g = guard()
             if g == "stop":
-                return
+                stop_safety_monitor(); return
             if g != "ok":
                 continue
             take_break_if_due()
