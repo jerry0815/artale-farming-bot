@@ -2287,6 +2287,20 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     # Nodes reached AFTER a sink (start_sink / reset): she's already at the right y, so align
     # x-only (no jump) instead of a full swim_to that fights vertically off the floor.
     _x_align = set(map_cfg.get("x_align_nodes", []))
+    _arrive_retries = int(map_cfg.get("arrive_retries", 1))   # extra swim attempts if she didn't seat
+
+    def _seat(node, make_swim):
+        """Run a swim and RETRY if it didn't seat (swim_to returns False only when she never
+        confirmed arrival -- in tol AND resting). First try seeds the departure anchor; retries
+        re-anchor from her actual position. True once seated, False if still not after the retries
+        (caller re-locates instead of farming the WRONG platform she happened to land on)."""
+        for i in range(_arrive_retries + 1):
+            if make_swim(i == 0):
+                return True
+            if kb.pause or STOP.is_set():
+                return False
+            print(f"[water] {node}: did not seat (try {i + 1}/{_arrive_retries + 1})")
+        return False
 
     def farm_node(node, prev=None):
         cx, cy = centers[node]
@@ -2312,13 +2326,19 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             kb.safe_release_all(); time.sleep(0.4)     # let her fall onto the upper platform (seat) before farming
         elif node in _x_align:                         # already at the bottom y (just sank) -> x-only
             print(f"[water] --> farm {node}: align x to {cx} (no jump)")
-            swim_to(cx, cy, tol=tol, cap=6.0, jump=False, axis="x", verbose=_log_swim, label=node,
-                    start_near=dep)
+            if not _seat(node, lambda first: swim_to(cx, cy, tol=tol, cap=6.0, jump=False, axis="x",
+                                                     verbose=_log_swim, label=node,
+                                                     start_near=dep if first else None)):
+                print(f"[water] {node}: could not seat (x-align) -> re-locate")
+                return False                               # don't farm the wrong spot she landed on
         else:
             lift = _lift_override.get(node, _ylift)        # pin nodes (P4) use 0 -- target below
             print(f"[water] --> farm {node} (center {cx},{cy}) lift={lift}")  # the pin is unreachable
-            swim_to(cx, cy - lift, tol=tol, cap=12.0, jump_burst=_jb, jump_gap=_jg,
-                    verbose=_log_swim, label=node, start_near=dep)   # aim ABOVE so she lands on it
+            if not _seat(node, lambda first: swim_to(cx, cy - lift, tol=tol, cap=12.0, jump_burst=_jb,
+                                                     jump_gap=_jg, verbose=_log_swim, label=node,
+                                                     start_near=dep if first else None)):  # aim ABOVE
+                print(f"[water] {node}: could not seat -> re-locate")
+                return False                               # don't farm the wrong platform
             extra = _arrive_jumps.get(node, 0)             # seat on a pin platform (P4): a few more hops
             for _ in range(extra):
                 if kb.pause:
