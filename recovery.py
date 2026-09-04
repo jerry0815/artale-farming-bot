@@ -1495,26 +1495,33 @@ def hold_to_bottom(bottom_y, key, cap=15.0, near=35, settle=3):
     """Reset descent by WALKING: HOLD `key` continuously (toward the rightmost drop) the whole
     way -- she walks off the edge and falls, and holding never lets her stop short of the drop
     column the way a tol'd align could. No release on minor y wobble (that made her stutter:
-    walk-stop-walk-stop), and NO sink/settle heuristic to conclude arrival. She has ARRIVED purely
-    by TARGET Y: within `near` of `bottom_y` for `settle` consecutive reads. The `near` BAND
-    (|y-bottom_y|<=near) also rejects a far minimap phantom (e.g. y~347, well below the bottom
-    platform) that would otherwise read as 'past the bottom'. Releases `key` on exit. F8 aborts."""
+    walk-stop-walk-stop). ARRIVED requires BOTH: she's at the target y (within `near` of
+    `bottom_y`) AND she is NOT still sinking (y didn't rise since the last read) -- so a fast fall
+    passing THROUGH the band can't conclude arrival; she must have come to REST on the bottom
+    platform, for `settle` consecutive reads. The `near` band also rejects a far minimap phantom
+    (e.g. y~347, well below the bottom platform). Releases `key` on exit. F8 aborts."""
     kb.safe_release_all()
     kb.safe_press(key)
     t0 = time.time()
     hits = 0
+    prev_y = None
     try:
         while time.time() - t0 < cap:
             if kb.pause:
                 return False
             lie_check_fast_tick()
             x, y = get_character_full()
-            in_band = y is not None and y >= 0 and abs(y - bottom_y) <= near
-            hits = hits + 1 if in_band else 0
+            valid = y is not None and y >= 0
+            in_band = valid and abs(y - bottom_y) <= near
+            resting = valid and prev_y is not None and y <= prev_y + 0.5   # not sinking (y not rising)
+            hits = hits + 1 if (in_band and resting) else 0
+            if valid:
+                prev_y = y
             if dbg_on():
-                dbg(f"[reset-hold] at ({x},{y}) tgt_bottom={bottom_y} in_band={in_band} hits={hits}")
+                dbg(f"[reset-hold] at ({x},{y}) tgt_bottom={bottom_y} in_band={in_band} "
+                    f"resting={resting} hits={hits}")
             if hits >= settle:
-                return True                               # settled at the bottom platform's y
+                return True                               # at the bottom platform's y AND resting
             time.sleep(0.1)
         if dbg_on():
             dbg(f"[reset-hold] CAP {cap:.0f}s -- never settled at bottom (last y read above)")

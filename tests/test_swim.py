@@ -243,6 +243,31 @@ def test_hold_to_bottom_holds_continuously_and_arrives_by_y(monkeypatch):
     assert Key.right in released                         # released on exit
 
 
+def test_hold_to_bottom_not_arrive_while_still_sinking(monkeypatch):
+    # She falls THROUGH the bottom band (y still rising each read) -> must NOT conclude arrival;
+    # only once she comes to REST (y stops rising) for `settle` reads. Without the "not sinking"
+    # gate she'd wrongly arrive at read 5 (213/214/215 all in band); with it, only at read 8.
+    ys = iter([180, 200, 213, 214, 215, 215, 215, 215])
+    calls = {"n": 0}
+
+    def loc():
+        calls["n"] += 1
+        return (150, next(ys, 215))
+
+    monkeypatch.setattr(recovery, "get_character_full", loc)
+    monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
+    t = {"v": 0.0}
+    monkeypatch.setattr(recovery.time, "time", lambda: t.__setitem__("v", t["v"] + 0.3) or t["v"])
+    monkeypatch.setattr(recovery.kb, "safe_press", lambda k: None)
+    monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
+    monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
+    ok = recovery.hold_to_bottom(213, Key.right, cap=5.0, near=35, settle=3)
+    assert ok is True
+    assert calls["n"] == 8                               # arrived only after she came to rest
+
+
 def test_hold_to_bottom_ignores_far_phantom(monkeypatch):
     # A far phantom (y=347) is well below the bottom platform (213) -> outside the near band ->
     # must NOT be read as 'arrived'. Only the real bottom reads (213) count.
