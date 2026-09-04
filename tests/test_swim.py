@@ -223,39 +223,48 @@ def test_sink_to_bottom_stops_at_bottom_y(monkeypatch):
     assert "all" in released                     # released keys before sinking
 
 
-def test_sink_to_bottom_nudges_when_stuck_on_platform(monkeypatch):
-    # Return-to-P6: she stopped short of the rightmost drop column, on solid platform, so y never
-    # increases (not sinking). With nudge_key set, sink taps it toward the drop to slide her off.
-    monkeypatch.setattr(recovery, "get_character_full", lambda: (100, 150))   # y constant -> stuck
+def test_hold_to_bottom_holds_continuously_and_arrives_by_y(monkeypatch):
+    # Reset: HOLD right (pressed ONCE, no stutter) and conclude arrival purely by reaching the
+    # bottom platform's y (settle consecutive in-band reads), not a sink heuristic.
+    ys = iter([104, 150, 200, 213, 213, 213])            # walk/fall, then land at bottom y=213
+    monkeypatch.setattr(recovery, "get_character_full", lambda: (150, next(ys, 213)))
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
     monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
     t = {"v": 0.0}
     monkeypatch.setattr(recovery.time, "time", lambda: t.__setitem__("v", t["v"] + 0.3) or t["v"])
-    pressed = []
+    pressed, released = [], []
     monkeypatch.setattr(recovery.kb, "safe_press", lambda k: pressed.append(k))
-    monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(recovery.kb, "safe_release", lambda k: released.append(k))
     monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
     monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
-    recovery.sink_to_bottom(210, cap=3.0, nudge_key=Key.right, nudge_after=0.5)
-    assert Key.right in pressed                          # nudged toward the drop when stuck
+    ok = recovery.hold_to_bottom(213, Key.right, cap=5.0, near=35, settle=3)
+    assert ok is True
+    assert pressed.count(Key.right) == 1                 # held CONTINUOUSLY (no stutter re-press)
+    assert Key.right in released                         # released on exit
 
 
-def test_sink_to_bottom_nudges_despite_spurious_descend(monkeypatch):
-    # A lone jittered "descend" read (y +1 once) must NOT disable the nudge: she's still stuck on
-    # the platform, so the stall-based nudge must still fire. (The sank-gated version rode the cap.)
-    ys = iter([150, 151, 150, 150, 150, 150, 150, 150, 150, 150])
-    monkeypatch.setattr(recovery, "get_character_full", lambda: (100, next(ys, 150)))
+def test_hold_to_bottom_ignores_far_phantom(monkeypatch):
+    # A far phantom (y=347) is well below the bottom platform (213) -> outside the near band ->
+    # must NOT be read as 'arrived'. Only the real bottom reads (213) count.
+    ys = iter([347, 347, 347, 213, 213, 213])            # 3 phantoms then 3 real bottom reads
+    calls = {"n": 0}
+
+    def loc():
+        calls["n"] += 1
+        return (54, next(ys, 213))
+
+    monkeypatch.setattr(recovery, "get_character_full", loc)
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
     monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
     t = {"v": 0.0}
     monkeypatch.setattr(recovery.time, "time", lambda: t.__setitem__("v", t["v"] + 0.3) or t["v"])
-    pressed = []
-    monkeypatch.setattr(recovery.kb, "safe_press", lambda k: pressed.append(k))
+    monkeypatch.setattr(recovery.kb, "safe_press", lambda k: None)
     monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
     monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
     monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
-    recovery.sink_to_bottom(210, cap=3.0, nudge_key=Key.right, nudge_after=0.5)
-    assert Key.right in pressed                          # nudged despite the spurious descend read
+    ok = recovery.hold_to_bottom(213, Key.right, cap=5.0, near=35, settle=3)
+    assert ok is True
+    assert calls["n"] == 6                               # phantoms NOT counted -> arrived only at read 6
 
 
 def test_sink_to_bottom_settles_when_not_sinking(monkeypatch):

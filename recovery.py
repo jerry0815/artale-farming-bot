@@ -1461,61 +1461,66 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
         kb.safe_release(JUMP)
 
 
-def sink_to_bottom(bottom_y, cap=15.0, locate=None, settle=4, near=35,
-                   nudge_key=None, nudge_after=1.2):
-    """Reset descent: release ALL keys and let her SINK straight down. Returns True once she
-    has LANDED after sinking: she was sinking, then stopped for `settle` reads AND is within
-    `near` px of `bottom_y` (generous, so landing a bit high still counts as arrived). Avoids
-    starting the next loop mid-fall. F8 aborts.
-
-    `nudge_key`: if she never STARTS descending within `nudge_after` seconds she's stuck
-    STANDING on a platform (she stopped short of the open drop column -- the arrival tol lets
-    the reset land a few px shy of the gap), so tap `nudge_key` toward the drop to slide her off
-    the platform edge into the column. Retried each `nudge_after` until she falls; once she is
-    descending we stop nudging and let her sink straight. Without it, a stuck sink just rode the
-    cap and returned as if landed -> she was still at the top -> next loop mislocated (status)."""
+def sink_to_bottom(bottom_y, cap=15.0, locate=None, settle=4, near=35):
+    """Straight descent (no direction held): release ALL keys and let her SINK. Returns True once
+    she LANDED after sinking -- was sinking, then stopped for `settle` reads AND is within `near`
+    px of `bottom_y`. Used for start_sink (she's already over the drop). The RESET uses
+    hold_to_bottom instead (it must WALK to the rightmost drop first). F8 aborts."""
     locate = locate or get_character_full
     kb.safe_release_all()
     t0 = time.time()
     prev_y = None
     still = 0
     sank = False
-    last_desc = t0                          # last time she was actually DESCENDING (y increased)
-    nudging = False                         # currently holding nudge_key to walk off the edge
+    while time.time() - t0 < cap:
+        if kb.pause:
+            return False
+        lie_check_fast_tick()              # unified safety scan: lie-check + another-player
+        x, y = locate()
+        if y is not None and y >= 0:
+            if prev_y is not None:
+                if y > prev_y + 0.5:                      # still descending
+                    sank = True
+                    still = 0
+                else:
+                    still += 1
+                    if sank and still >= settle and y >= bottom_y - near:
+                        return True                       # sank, then landed near the bottom
+            prev_y = y
+        time.sleep(0.1)
+    return True
+
+
+def hold_to_bottom(bottom_y, key, cap=15.0, near=35, settle=3):
+    """Reset descent by WALKING: HOLD `key` continuously (toward the rightmost drop) the whole
+    way -- she walks off the edge and falls, and holding never lets her stop short of the drop
+    column the way a tol'd align could. No release on minor y wobble (that made her stutter:
+    walk-stop-walk-stop), and NO sink/settle heuristic to conclude arrival. She has ARRIVED purely
+    by TARGET Y: within `near` of `bottom_y` for `settle` consecutive reads. The `near` BAND
+    (|y-bottom_y|<=near) also rejects a far minimap phantom (e.g. y~347, well below the bottom
+    platform) that would otherwise read as 'past the bottom'. Releases `key` on exit. F8 aborts."""
+    kb.safe_release_all()
+    kb.safe_press(key)
+    t0 = time.time()
+    hits = 0
     try:
         while time.time() - t0 < cap:
             if kb.pause:
                 return False
-            lie_check_fast_tick()          # unified safety scan: lie-check + another-player
-            x, y = locate()
-            if y is not None and y >= 0:
-                if prev_y is not None and y > prev_y + 0.5:   # descending
-                    sank = True
-                    still = 0
-                    last_desc = time.time()
-                    if nudging:                          # she's falling now -> stop walking, sink straight
-                        kb.safe_release(nudge_key); nudging = False
-                elif prev_y is not None:
-                    still += 1
-                    if sank and still >= settle and y >= bottom_y - near:
-                        return True                      # sank, then landed near the bottom
-                prev_y = y
-            # STALL-based nudge: if she hasn't descended for `nudge_after` (stuck standing on a
-            # platform / a ledge short of the drop column), HOLD toward the drop to walk her off
-            # the edge -- released the moment she starts falling. Not gated on `sank`, so a lone
-            # spurious "descend" read can't disable it (that bug rode the whole cap and failed).
-            if nudge_key is not None and not nudging and time.time() - last_desc >= nudge_after:
-                kb.safe_press(nudge_key); nudging = True
+            lie_check_fast_tick()
+            x, y = get_character_full()
+            in_band = y is not None and y >= 0 and abs(y - bottom_y) <= near
+            hits = hits + 1 if in_band else 0
             if dbg_on():
-                dbg(f"[sink] at ({x},{y}) tgt_bottom={bottom_y} sank={sank} still={still} "
-                    f"nudging={nudging}")
+                dbg(f"[reset-hold] at ({x},{y}) tgt_bottom={bottom_y} in_band={in_band} hits={hits}")
+            if hits >= settle:
+                return True                               # settled at the bottom platform's y
             time.sleep(0.1)
         if dbg_on():
-            dbg(f"[sink] CAP {cap:.0f}s -- did not land (last y={prev_y}, bottom={bottom_y})")
+            dbg(f"[reset-hold] CAP {cap:.0f}s -- never settled at bottom (last y read above)")
         return True
     finally:
-        if nudging:
-            kb.safe_release(nudge_key)
+        kb.safe_release(key)
 
 
 def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
@@ -2389,13 +2394,13 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 STATUS["node"] = reset_node
             bottom_y = centers[farm_nodes[0]][1]                   # P6 y (land here before looping)
             _near = int(map_cfg.get("sink_near", 35))              # buffer: landing a bit high = arrived
-            _nudge = {"right": Key.right, "left": Key.left, "none": None,
-                      None: None}.get(map_cfg.get("reset_nudge", "right"), Key.right)
-            _nudge_after = float(map_cfg.get("reset_nudge_after", 0.6))   # hold quickly, but leave
-            #                                     room to confirm a bottom landing before re-holding
-            print(f"[water] reset -> hold {map_cfg.get('reset_nudge', 'right')} to the drop, "
-                  f"then sink (land within {_near} of y={bottom_y})")
-            sink_to_bottom(bottom_y, cap=15.0, near=_near, nudge_key=_nudge, nudge_after=_nudge_after)
+            _dir = map_cfg.get("reset_nudge", "right")
+            _key = {"right": Key.right, "left": Key.left}.get(_dir)
+            print(f"[water] reset -> hold {_dir} to bottom (y within {_near} of {bottom_y})")
+            if _key is not None:
+                hold_to_bottom(bottom_y, _key, cap=15.0, near=_near)   # WALK to the drop, arrive by y
+            else:                                                       # reset_nudge:none -> straight sink
+                sink_to_bottom(bottom_y, cap=15.0, near=_near)
             # next sweep's farm_node(farm_nodes[0]) swims to it -> no separate re-center needed
     else:
         current = farm_nodes[0]
