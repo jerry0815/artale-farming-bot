@@ -1411,26 +1411,29 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
             x, y = swim_read(near=last) if locate is swim_read else locate()
             if x is None or x < 0:
                 time.sleep(0.04); continue
+            # Arrival needs her AT the target AND RESTING: if y is still rising she is falling
+            # THROUGH the band (mid jump-arc / sinking), not seated -- that must not conclude arrival.
+            sinking = last[1] >= 0 and y > last[1] + 0.5
             last = (x, y)
             want = watermap.swim_keys((x, y), (target_x, target_y), tol)
             if verbose:
-                dbg(f"{_pfx} at ({x},{y}) tgt ({target_x},{target_y}) "
-                    f"dx={x - target_x} dy={y - target_y} want={sorted(want)} hits={settle_hits}")
-            if axis == "x":                               # horizontal only; arrived when x holds
+                dbg(f"{_pfx} at ({x},{y}) tgt ({target_x},{target_y}) dx={x - target_x} "
+                    f"dy={y - target_y} want={sorted(want)} sinking={sinking} hits={settle_hits}")
+            if axis == "x":                               # horizontal only; arrived when x holds AND resting
                 horiz = want & {"left", "right"}
-                if not horiz:                             # x within tol -> CONFIRM it holds. A single
-                    settle_hits += 1                     # in-tol read (overshoot bounce / transient)
-                    if settle_hits >= settle:            # used to stop her SHORT of the rightmost column
-                        _arrived(x, y); return True      # on reset -> she sank on the wrong platform ->
-                    _apply_swim_keys(set())              # status flip. Release arrows and re-read to
+                if not horiz:                             # x within tol -> confirm it HOLDS and she's not
+                    settle_hits = settle_hits + 1 if not sinking else 0   # sinking through -> not landed;
+                    if settle_hits >= settle:            # a single in-tol read (overshoot bounce) or a
+                        _arrived(x, y); return True      # fall through the band must not stop her short
+                    _apply_swim_keys(set())              # of the column. Release arrows, re-read to
                     time.sleep(0.05); continue           # double-confirm before declaring arrival.
                 settle_hits = 0                           # drifted off target x -> reset the confirm streak
                 _apply_swim_keys(horiz)
                 time.sleep(0.05); continue
-            if not want:                                  # in the target band -> confirm she's SEATED
-                settle_hits += 1
-                if settle_hits >= settle:
-                    _arrived(x, y); return True           # rested here `settle` reads -> landed
+            if not want:                                  # in the target band -> confirm SEATED (resting)
+                settle_hits = settle_hits + 1 if not sinking else 0   # in tol but still falling through
+                if settle_hits >= settle:                             # -> not landed; needs to come to rest
+                    _arrived(x, y); return True           # in tol AND not sinking `settle` reads -> landed
                 _apply_swim_keys(set())                   # release arrows; DON'T jump -> let her settle
                 time.sleep(0.08); continue
             settle_hits = 0                               # drifted out of band -> not landed yet

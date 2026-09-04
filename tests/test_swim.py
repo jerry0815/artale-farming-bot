@@ -80,6 +80,27 @@ def test_swim_to_start_near_rejects_first_read_phantom(monkeypatch):
     assert recovery.JUMP not in pressed                # did NOT chase the phantom (no jumps toward it)
 
 
+def test_swim_to_arrival_requires_not_sinking(monkeypatch):
+    # EVERY platform arrival (not just the reset): she's within tol of the target but still SINKING
+    # (y rising each read) -> must NOT conclude arrival; only once y comes to REST does the settle
+    # streak complete. Without the gate she'd arrive at read 2; with it, only at read 6.
+    seq = iter([(100, 98), (100, 100), (100, 101), (100, 102), (100, 102), (100, 102)])
+    calls = {"n": 0}
+
+    def loc():
+        calls["n"] += 1
+        return next(seq, (100, 102))
+
+    monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
+    monkeypatch.setattr(recovery.kb, "safe_press", lambda k: None)
+    monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
+    ok = recovery.swim_to(100, 100, tol=(3, 3), cap=5.0, settle=2, locate=loc)
+    assert ok is True
+    assert calls["n"] == 6                              # did not arrive while sinking; only once rested
+
+
 def test_swim_to_times_out_when_never_arrives(monkeypatch):
     monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: (0, 0))   # never reaches (100,100)
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
