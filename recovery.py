@@ -2381,22 +2381,21 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                 prev = node
             if broke:
                 continue
-            # reached the top -> reset: swim to the rightmost drop point, then down to bottom
-            # reset: move to the rightmost open column (no jump), then release keys and
-            # SINK straight down, watching y until she reaches the bottom -> next loop.
-            if reset_node and reset_node in centers:
+            # reached the top -> reset to the bottom. NO tol-based alignment: she HOLDS toward the
+            # drop (right) until she reaches the rightmost edge and falls, then sinks straight to the
+            # bottom (re-holding off any ledge). Going all the way right can't stop her short of the
+            # open drop column the way a tol'd swim_to could. The hold IS the alignment + the drop.
+            if reset_node:
                 STATUS["node"] = reset_node
-                print(f"[water] reset -> swim to {reset_node} (x-only)")
-                swim_to(*centers[reset_node], tol=tol, cap=12.0, jump=False, axis="x",
-                        verbose=_log_swim, label=reset_node)
             bottom_y = centers[farm_nodes[0]][1]                   # P6 y (land here before looping)
             _near = int(map_cfg.get("sink_near", 35))              # buffer: landing a bit high = arrived
-            # The drop is the rightmost OPEN column; the x-align can land a few px shy of it, on
-            # solid platform -> she won't sink. Nudge toward the drop until she falls (cfg overridable).
             _nudge = {"right": Key.right, "left": Key.left, "none": None,
                       None: None}.get(map_cfg.get("reset_nudge", "right"), Key.right)
-            print(f"[water] reset -> sink to bottom (land within {_near} of y={bottom_y})")
-            sink_to_bottom(bottom_y, cap=15.0, near=_near, nudge_key=_nudge)
+            _nudge_after = float(map_cfg.get("reset_nudge_after", 0.6))   # hold quickly, but leave
+            #                                     room to confirm a bottom landing before re-holding
+            print(f"[water] reset -> hold {map_cfg.get('reset_nudge', 'right')} to the drop, "
+                  f"then sink (land within {_near} of y={bottom_y})")
+            sink_to_bottom(bottom_y, cap=15.0, near=_near, nudge_key=_nudge, nudge_after=_nudge_after)
             # next sweep's farm_node(farm_nodes[0]) swims to it -> no separate re-center needed
     else:
         current = farm_nodes[0]
