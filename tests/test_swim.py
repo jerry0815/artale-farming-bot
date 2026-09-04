@@ -240,6 +240,24 @@ def test_sink_to_bottom_nudges_when_stuck_on_platform(monkeypatch):
     assert Key.right in pressed                          # nudged toward the drop when stuck
 
 
+def test_sink_to_bottom_nudges_despite_spurious_descend(monkeypatch):
+    # A lone jittered "descend" read (y +1 once) must NOT disable the nudge: she's still stuck on
+    # the platform, so the stall-based nudge must still fire. (The sank-gated version rode the cap.)
+    ys = iter([150, 151, 150, 150, 150, 150, 150, 150, 150, 150])
+    monkeypatch.setattr(recovery, "get_character_full", lambda: (100, next(ys, 150)))
+    monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
+    t = {"v": 0.0}
+    monkeypatch.setattr(recovery.time, "time", lambda: t.__setitem__("v", t["v"] + 0.3) or t["v"])
+    pressed = []
+    monkeypatch.setattr(recovery.kb, "safe_press", lambda k: pressed.append(k))
+    monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
+    monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
+    recovery.sink_to_bottom(210, cap=3.0, nudge_key=Key.right, nudge_after=0.5)
+    assert Key.right in pressed                          # nudged despite the spurious descend read
+
+
 def test_sink_to_bottom_settles_when_not_sinking(monkeypatch):
     # y stuck at 180 (< bottom 210) for several reads -> landed -> True
     monkeypatch.setattr(recovery, "get_character_full", lambda: (176, 180))

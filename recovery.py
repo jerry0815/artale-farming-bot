@@ -1480,27 +1480,37 @@ def sink_to_bottom(bottom_y, cap=15.0, locate=None, settle=4, near=35,
     prev_y = None
     still = 0
     sank = False
-    last_nudge = t0
-    while time.time() - t0 < cap:
-        if kb.pause:
-            return False
-        lie_check_fast_tick()              # unified safety scan: lie-check + another-player
-        x, y = locate()
-        if y is not None and y >= 0:
-            if prev_y is not None:
-                if y > prev_y + 0.5:                      # still descending
+    last_desc = t0                          # last time she was actually DESCENDING (y increased)
+    nudging = False                         # currently holding nudge_key to walk off the edge
+    try:
+        while time.time() - t0 < cap:
+            if kb.pause:
+                return False
+            lie_check_fast_tick()          # unified safety scan: lie-check + another-player
+            x, y = locate()
+            if y is not None and y >= 0:
+                if prev_y is not None and y > prev_y + 0.5:   # descending
                     sank = True
                     still = 0
-                else:
+                    last_desc = time.time()
+                    if nudging:                          # she's falling now -> stop walking, sink straight
+                        kb.safe_release(nudge_key); nudging = False
+                elif prev_y is not None:
                     still += 1
                     if sank and still >= settle and y >= bottom_y - near:
-                        return True                       # sank, then landed near the bottom
-            prev_y = y
-        if nudge_key is not None and not sank and time.time() - last_nudge >= nudge_after:
-            last_nudge = time.time()                      # stuck on a platform -> slide toward the drop
-            kb.safe_press(nudge_key); time.sleep(0.18); kb.safe_release(nudge_key)
-        time.sleep(0.1)
-    return True
+                        return True                      # sank, then landed near the bottom
+                prev_y = y
+            # STALL-based nudge: if she hasn't descended for `nudge_after` (stuck standing on a
+            # platform / a ledge short of the drop column), HOLD toward the drop to walk her off
+            # the edge -- released the moment she starts falling. Not gated on `sank`, so a lone
+            # spurious "descend" read can't disable it (that bug rode the whole cap and failed).
+            if nudge_key is not None and not nudging and time.time() - last_desc >= nudge_after:
+                kb.safe_press(nudge_key); nudging = True
+            time.sleep(0.1)
+        return True
+    finally:
+        if nudging:
+            kb.safe_release(nudge_key)
 
 
 def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
