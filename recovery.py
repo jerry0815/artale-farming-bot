@@ -112,13 +112,27 @@ def _window_box():
     return box
 
 
+_sct_tls = threading.local()
+
+
+def _sct():
+    """One reusable mss handle PER THREAD. mss.mss() allocates (and its context-exit frees)
+    a Windows device context every call, so doing it per grab dominated capture cost; a
+    persistent handle skips that. Thread-local because mss is not thread-safe and the farming
+    loop and panel can grab concurrently -- each thread gets its own handle, lazily created."""
+    s = getattr(_sct_tls, "sct", None)
+    if s is None:
+        s = mss.mss()
+        _sct_tls.sct = s
+    return s
+
+
 def capture():
     box = _window_box()
     if box is None:
         return None
-    with mss.mss() as sct:
-        shot = sct.grab(box)
-        return cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
+    shot = _sct().grab(box)
+    return cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
 
 
 def capture_pil_np():
@@ -126,10 +140,27 @@ def capture_pil_np():
     box = _window_box()
     if box is None:
         return None, None
-    with mss.mss() as sct:
-        shot = sct.grab(box)
-        pil = Image.frombytes("RGB", shot.size, shot.rgb)
-        return pil, cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
+    shot = _sct().grab(box)
+    pil = Image.frombytes("RGB", shot.size, shot.rgb)
+    return pil, cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
+
+
+def capture_minimap():
+    """Grab ONLY the minimap ROI (MM_X/Y/W/H) as BGR -- ~37x fewer pixels than capture() plus
+    it skips the full-frame cvtColor, so the hot position reads (stable_char does >=4 per read)
+    get much cheaper. Equivalent to _minimap(capture()) but grabs just the sub-box. Clamped to
+    the window rect so a smaller live window can't pull in neighbouring screen pixels (mirrors
+    _minimap's clamp). Returns None if the window is gone / the ROI falls outside it."""
+    box = _window_box()
+    if box is None:
+        return None
+    if MM_X >= box["width"] or MM_Y >= box["height"]:
+        return None
+    w = min(MM_W, box["width"] - MM_X)
+    h = min(MM_H, box["height"] - MM_Y)
+    region = {"left": box["left"] + MM_X, "top": box["top"] + MM_Y, "width": w, "height": h}
+    shot = _sct().grab(region)
+    return cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
 
 
 # --- lie-check alarm: beep when a "needs a human" screen appears (captcha / curse) ---
@@ -489,16 +520,9 @@ def _minimap(np_img):
     return np_img[MM_Y:ey, MM_X:ex]
 
 
-def get_character_color(np_img=None, near=None):
-    """Character (x,y) via COLOR (bright yellow blob) on the full minimap. Far more
-    robust than template matching, which returns a phantom (122,188) at some spots.
-    If `near`=(x,y) is given and several yellow blobs exist, pick the closest one
-    (temporal continuity); else pick the largest plausible blob. (-1,-1) if none."""
-    if np_img is None:
-        np_img = capture()
-    if np_img is None:
-        return -1, -1
-    mm = _minimap(np_img)
+def _char_color_from_mm(mm, near=None):
+    """Character (x,y) via COLOR (bright yellow blob) from a MINIMAP crop `mm`. Shared by
+    get_character_color / get_character_full so each does exactly one grab. (-1,-1) if none."""
     hsv = cv2.cvtColor(mm, cv2.COLOR_BGR2HSV)
     # tight to the real dot's signature (hue~29, sat~245, val~242). A translucent buff/
     # heat-aura glow reads as lower saturation/value -> excluded. Size ~54px; keep 15-120.
@@ -510,6 +534,18 @@ def get_character_color(np_img=None, near=None):
     if pick is None:
         return -1, -1
     return pick[0], pick[1]
+
+
+def get_character_color(np_img=None, near=None):
+    """Character (x,y) via COLOR (bright yellow blob) on the minimap. Far more robust than
+    template matching (which returns a phantom (122,188) at some spots). If `near`=(x,y) is
+    given and several yellow blobs exist, pick the closest (temporal continuity); else the
+    largest plausible blob. With no `np_img` grabs ONLY the minimap ROI (capture_minimap);
+    pass a full BGR frame to crop it instead (shared-frame callers). (-1,-1) if none."""
+    mm = _minimap(np_img) if np_img is not None else capture_minimap()
+    if mm is None:
+        return -1, -1
+    return _char_color_from_mm(mm, near=near)
 
 
 def _pick_char_blob(blobs, near=None):
@@ -528,16 +564,16 @@ def _pick_char_blob(blobs, near=None):
 
 
 def get_character_full(np_img=None, near=None):
-    """Character (x, y) on the FULL minimap, same frame as the band. Color first
-    (robust), template as a fallback. (-1,-1) if neither finds it."""
-    if np_img is None:
-        np_img = capture()
-    if np_img is None:
+    """Character (x, y) on the FULL minimap. Color first (robust), template as a fallback --
+    both read the SAME crop (one grab): the minimap ROI when no frame is passed, else the
+    supplied full frame cropped. (-1,-1) if neither finds it."""
+    mm = _minimap(np_img) if np_img is not None else capture_minimap()
+    if mm is None:
         return -1, -1
-    x, y = get_character_color(np_img, near=near)
+    x, y = _char_color_from_mm(mm, near=near)
     if x >= 0:
         return x, y
-    centers = detect_character_on_minimap(_minimap(np_img), templates_folder=CHAR_TPL, threshold=0.7)
+    centers = detect_character_on_minimap(mm, templates_folder=CHAR_TPL, threshold=0.7)
     if centers:
         return centers[0][0], centers[0][1]
     return -1, -1
