@@ -1506,7 +1506,12 @@ def sink_to_bottom(bottom_y, cap=15.0, locate=None, settle=4, near=35,
             # spurious "descend" read can't disable it (that bug rode the whole cap and failed).
             if nudge_key is not None and not nudging and time.time() - last_desc >= nudge_after:
                 kb.safe_press(nudge_key); nudging = True
+            if dbg_on():
+                dbg(f"[sink] at ({x},{y}) tgt_bottom={bottom_y} sank={sank} still={still} "
+                    f"nudging={nudging}")
             time.sleep(0.1)
+        if dbg_on():
+            dbg(f"[sink] CAP {cap:.0f}s -- did not land (last y={prev_y}, bottom={bottom_y})")
         return True
     finally:
         if nudging:
