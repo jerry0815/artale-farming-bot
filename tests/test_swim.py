@@ -61,6 +61,25 @@ def test_swim_to_x_axis_confirm_resets_when_drifting(monkeypatch):
     assert Key.right in pressed                             # re-aligned right after drifting to x=90
 
 
+def test_swim_to_start_near_rejects_first_read_phantom(monkeypatch):
+    # P5->P4: her real dot is briefly absent (mid fall/transition) so the only blob is a fixed
+    # phantom (54,347) ~180px away. Seeding start_near to her departure pos makes swim_read reject
+    # it (> max-jump) -> no valid read -> she WAITS and times out, instead of locking onto it and
+    # flying off-map. Uses the default swim_read (not an injected locate) to exercise the reject.
+    monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: (54, 347))
+    monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
+    t = {"v": 0.0}
+    monkeypatch.setattr(recovery.time, "time", lambda: t.__setitem__("v", t["v"] + 0.3) or t["v"])
+    pressed = []
+    monkeypatch.setattr(recovery.kb, "safe_press", lambda k: pressed.append(k))
+    monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
+    ok = recovery.swim_to(74, 128, tol=(3, 3), cap=2.0, start_near=(92, 166))
+    assert ok is False                                 # never a plausible read -> timed out
+    assert recovery.JUMP not in pressed                # did NOT chase the phantom (no jumps toward it)
+
+
 def test_swim_to_times_out_when_never_arrives(monkeypatch):
     monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: (0, 0))   # never reaches (100,100)
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
@@ -202,6 +221,23 @@ def test_sink_to_bottom_stops_at_bottom_y(monkeypatch):
     monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
     assert recovery.sink_to_bottom(210, cap=5.0) is True
     assert "all" in released                     # released keys before sinking
+
+
+def test_sink_to_bottom_nudges_when_stuck_on_platform(monkeypatch):
+    # Return-to-P6: she stopped short of the rightmost drop column, on solid platform, so y never
+    # increases (not sinking). With nudge_key set, sink taps it toward the drop to slide her off.
+    monkeypatch.setattr(recovery, "get_character_full", lambda: (100, 150))   # y constant -> stuck
+    monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
+    t = {"v": 0.0}
+    monkeypatch.setattr(recovery.time, "time", lambda: t.__setitem__("v", t["v"] + 0.3) or t["v"])
+    pressed = []
+    monkeypatch.setattr(recovery.kb, "safe_press", lambda k: pressed.append(k))
+    monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
+    monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
+    recovery.sink_to_bottom(210, cap=3.0, nudge_key=Key.right, nudge_after=0.5)
+    assert Key.right in pressed                          # nudged toward the drop when stuck
 
 
 def test_sink_to_bottom_settles_when_not_sinking(monkeypatch):

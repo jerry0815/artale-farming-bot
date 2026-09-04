@@ -1360,7 +1360,8 @@ def _apply_swim_keys(want):
 
 
 def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
-            jump_burst=4, jump_gap=0.04, axis="xy", settle=2, verbose=False, label=""):
+            jump_burst=4, jump_gap=0.04, axis="xy", settle=2, verbose=False, label="",
+            start_near=None):
     """Swim toward (target_x, target_y) until within `tol` on both axes or `cap` seconds.
     Returns True on arrival. F8 (kb.pause) aborts. `locate` (default get_character_full)
     is injectable for tests.
@@ -1388,7 +1389,12 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
     locate = locate or swim_read
     t0 = time.time()
     settle_hits = 0
-    last = (-1, -1)
+    # Seed the phantom anchor with her DEPARTURE position: the very first read otherwise has no
+    # `near`, so if her real dot is momentarily absent (mid fall/transition) the read falls back to
+    # the largest blob -- which can be a fixed minimap phantom -- and then near LOCKS onto it. With
+    # the departure seed, that first phantom is rejected as an implausible jump and she waits for a
+    # real read instead of chasing it off-map.
+    last = start_near if (start_near is not None and start_near[0] >= 0) else (-1, -1)
     _pfx = f"[swim {label}]" if label else "[swim]"
 
     def _arrived(x, y):
@@ -1455,17 +1461,26 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
         kb.safe_release(JUMP)
 
 
-def sink_to_bottom(bottom_y, cap=15.0, locate=None, settle=4, near=35):
+def sink_to_bottom(bottom_y, cap=15.0, locate=None, settle=4, near=35,
+                   nudge_key=None, nudge_after=1.2):
     """Reset descent: release ALL keys and let her SINK straight down. Returns True once she
     has LANDED after sinking: she was sinking, then stopped for `settle` reads AND is within
     `near` px of `bottom_y` (generous, so landing a bit high still counts as arrived). Avoids
-    starting the next loop mid-fall. F8 aborts."""
+    starting the next loop mid-fall. F8 aborts.
+
+    `nudge_key`: if she never STARTS descending within `nudge_after` seconds she's stuck
+    STANDING on a platform (she stopped short of the open drop column -- the arrival tol lets
+    the reset land a few px shy of the gap), so tap `nudge_key` toward the drop to slide her off
+    the platform edge into the column. Retried each `nudge_after` until she falls; once she is
+    descending we stop nudging and let her sink straight. Without it, a stuck sink just rode the
+    cap and returned as if landed -> she was still at the top -> next loop mislocated (status)."""
     locate = locate or get_character_full
     kb.safe_release_all()
     t0 = time.time()
     prev_y = None
     still = 0
     sank = False
+    last_nudge = t0
     while time.time() - t0 < cap:
         if kb.pause:
             return False
@@ -1481,6 +1496,9 @@ def sink_to_bottom(bottom_y, cap=15.0, locate=None, settle=4, near=35):
                     if sank and still >= settle and y >= bottom_y - near:
                         return True                       # sank, then landed near the bottom
             prev_y = y
+        if nudge_key is not None and not sank and time.time() - last_nudge >= nudge_after:
+            last_nudge = time.time()                      # stuck on a platform -> slide toward the drop
+            kb.safe_press(nudge_key); time.sleep(0.18); kb.safe_release(nudge_key)
         time.sleep(0.1)
     return True
 
@@ -2243,6 +2261,8 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
     def farm_node(node, prev=None):
         cx, cy = centers[node]
         STATUS["node"] = node
+        dep = centers.get(prev) if prev in centers else None   # departure anchor -> rejects the
+        #                                          first-read phantom when her dot is briefly absent
         if node in stacked_up and prev == stacked_up[node]:
             # The upper node isn't always DIRECTLY above -- P3 sits 18px right of P4 -- so a
             # straight-up jump falls back onto the lower platform. Drift toward the upper node's
@@ -2262,12 +2282,13 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
             kb.safe_release_all(); time.sleep(0.4)     # let her fall onto the upper platform (seat) before farming
         elif node in _x_align:                         # already at the bottom y (just sank) -> x-only
             print(f"[water] --> farm {node}: align x to {cx} (no jump)")
-            swim_to(cx, cy, tol=tol, cap=6.0, jump=False, axis="x", verbose=_log_swim, label=node)
+            swim_to(cx, cy, tol=tol, cap=6.0, jump=False, axis="x", verbose=_log_swim, label=node,
+                    start_near=dep)
         else:
             lift = _lift_override.get(node, _ylift)        # pin nodes (P4) use 0 -- target below
             print(f"[water] --> farm {node} (center {cx},{cy}) lift={lift}")  # the pin is unreachable
             swim_to(cx, cy - lift, tol=tol, cap=12.0, jump_burst=_jb, jump_gap=_jg,
-                    verbose=_log_swim, label=node)          # aim ABOVE so she lands on it
+                    verbose=_log_swim, label=node, start_near=dep)   # aim ABOVE so she lands on it
             extra = _arrive_jumps.get(node, 0)             # seat on a pin platform (P4): a few more hops
             for _ in range(extra):
                 if kb.pause:
@@ -2355,8 +2376,12 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                         verbose=_log_swim, label=reset_node)
             bottom_y = centers[farm_nodes[0]][1]                   # P6 y (land here before looping)
             _near = int(map_cfg.get("sink_near", 35))              # buffer: landing a bit high = arrived
+            # The drop is the rightmost OPEN column; the x-align can land a few px shy of it, on
+            # solid platform -> she won't sink. Nudge toward the drop until she falls (cfg overridable).
+            _nudge = {"right": Key.right, "left": Key.left, "none": None,
+                      None: None}.get(map_cfg.get("reset_nudge", "right"), Key.right)
             print(f"[water] reset -> sink to bottom (land within {_near} of y={bottom_y})")
-            sink_to_bottom(bottom_y, cap=15.0, near=_near)
+            sink_to_bottom(bottom_y, cap=15.0, near=_near, nudge_key=_nudge)
             # next sweep's farm_node(farm_nodes[0]) swims to it -> no separate re-center needed
     else:
         current = farm_nodes[0]
