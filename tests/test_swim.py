@@ -26,7 +26,7 @@ def test_swim_to_presses_toward_target_and_stops(monkeypatch):
 
 
 def test_swim_to_times_out_when_never_arrives(monkeypatch):
-    monkeypatch.setattr(recovery, "get_character_full", lambda: (0, 0))   # never reaches (100,100)
+    monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: (0, 0))   # never reaches (100,100)
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
     monkeypatch.setattr(recovery.kb, "safe_press", lambda k: None)
     monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
@@ -39,7 +39,7 @@ def test_swim_to_times_out_when_never_arrives(monkeypatch):
 
 def test_swim_to_jumps_when_ascent_stalls(monkeypatch):
     # Wants to go UP (y 130 > target 100) but never rises -> must JUMP to climb.
-    monkeypatch.setattr(recovery, "get_character_full", lambda: (100, 130))
+    monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: (100, 130))
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
     monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
     t = {"v": 0.0}
@@ -55,7 +55,7 @@ def test_swim_to_jumps_when_ascent_stalls(monkeypatch):
 
 def test_swim_to_no_jump_when_descending(monkeypatch):
     # Going DOWN (y 80 < target 130) must NOT jump.
-    monkeypatch.setattr(recovery, "get_character_full", lambda: (100, 80))
+    monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: (100, 80))
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
     monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
     t = {"v": 0.0}
@@ -107,6 +107,19 @@ def test_swim_read_skips_invalid_sample(monkeypatch):
     assert recovery.swim_read() == (150, 160)
     _seq_reader(monkeypatch, [(150, 160), (-1, -1)])     # second invalid -> return the first
     assert recovery.swim_read() == (150, 160)
+
+
+def test_swim_read_rejects_far_phantom_when_near_given(monkeypatch):
+    # The P2->P1 runaway: a spurious bottom-of-minimap blob (~300px from her real dot). With
+    # `near` set, both far samples are dropped -> invalid -> swim_to waits instead of chasing it.
+    _seq_reader(monkeypatch, [(54, 347), (42, 377)])
+    assert recovery.swim_read(near=(100, 55)) == (-1, -1)
+
+
+def test_swim_read_keeps_real_read_when_near_given(monkeypatch):
+    # A genuine read close to the last position is kept (phantom reject must not block real motion).
+    _seq_reader(monkeypatch, [(102, 58), (104, 60)])
+    assert recovery.swim_read(near=(100, 55)) == (103, 59)
 
 
 def test_sink_to_bottom_stops_at_bottom_y(monkeypatch):

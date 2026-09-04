@@ -663,17 +663,41 @@ def get_character_full(np_img=None, near=None):
     return -1, -1
 
 
-def swim_read():
+_SWIM_MAX_JUMP = 70   # px: a read leaping more than this from the last known pos is a phantom
+                      # (a spurious yellow minimap blob), not real motion -- she can't cross that
+                      # much of the ~200px-wide minimap between two ~40ms reads.
+
+
+def swim_read(near=None):
     """FAST position read for swim TRAVEL (direction only): two quick samples ~20ms apart
     instead of stable_char's four. If they agree (within 12px) return their midpoint; if one
     is invalid return the other; if they disagree return the LATEST (freshest). ~2 captures
     vs stable_char's 4 (+0.2s of pacing sleeps), so the swim loop decides direction ~2-3x
-    faster and the on-arrival settle freeze shrinks accordingly. Safe because swim_to re-reads
-    every iteration AND arrival needs `settle` CONSECUTIVE in-band reads -- a lone phantom
-    can't false-land. stable_char (densest-cluster over 4) stays the default everywhere else."""
-    a = get_character_full()
-    time.sleep(0.02)
-    b = get_character_full()
+    faster and the on-arrival settle freeze shrinks accordingly.
+
+    `near` = the last known position, threaded in by swim_to for temporal continuity: the reads
+    prefer the blob NEAREST it, and any sample leaping more than _SWIM_MAX_JUMP from it is dropped
+    as a phantom. Without this a lone spurious blob (e.g. a speck at the bottom of the water
+    minimap) could be returned as her position and FLIP the swim direction -- sending her off to a
+    map edge in a positive-feedback runaway (real dot lost -> only the phantom left). Landing was
+    already phantom-safe (settle needs CONSECUTIVE in-band reads); this makes DIRECTION safe too.
+    Without `near` it behaves exactly as before (largest plausible blob). stable_char stays the
+    default everywhere else."""
+    n = near if (near is not None and near[0] >= 0) else None
+    if n is None:
+        a = get_character_full()
+        time.sleep(0.02)
+        b = get_character_full()
+    else:
+        a = get_character_full(near=n)
+        time.sleep(0.02)
+        b = get_character_full(near=n)
+        def _far(p):
+            return p[0] >= 0 and (abs(p[0] - n[0]) > _SWIM_MAX_JUMP or abs(p[1] - n[1]) > _SWIM_MAX_JUMP)
+        if _far(a):
+            a = (-1, -1)
+        if _far(b):
+            b = (-1, -1)
     if a[0] < 0:
         return b
     if b[0] < 0:
@@ -1376,7 +1400,9 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
             if kb.pause:
                 return False
             lie_check_fast_tick()
-            x, y = locate()
+            # Anchor the read to her last known position so a phantom blob can't hijack direction.
+            # Only the default swim_read takes `near`; injected locates (tests) stay zero-arg.
+            x, y = swim_read(near=last) if locate is swim_read else locate()
             if x is None or x < 0:
                 time.sleep(0.04); continue
             last = (x, y)
