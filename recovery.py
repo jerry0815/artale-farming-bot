@@ -1501,8 +1501,11 @@ def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
             if kb.pause:
                 return False
             lie_check_fast_tick()
-            x, y = get_character_full()
-            if x >= 0 and (abs(x - cx) > tol[0] + 8 or abs(y - cy) > tol[1] + 8):
+            # Phantom-safe: anchor the read to the parked center and reject a blob that leaps far
+            # from it (buff-glow speck). A bare read let one phantom fire a false "drifted off" ->
+            # release attack + swim back, interrupting the beat. None -> keep firing (no false move).
+            r = _plausible_read((cx, cy), max_jump=_SWIM_MAX_JUMP)
+            if r is not None and (abs(r[0] - cx) > tol[0] + 8 or abs(r[1] - cy) > tol[1] + 8):
                 kb.safe_release(attack_key)               # drifted off -> swim back, resume
                 swim_to(cx, cy, tol=tol, cap=4.0)
                 _face_right(0.04); kb.safe_press(attack_key)

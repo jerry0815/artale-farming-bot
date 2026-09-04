@@ -158,6 +158,37 @@ def test_swim_read_keeps_real_read_when_near_given(monkeypatch):
     assert recovery.swim_read(near=(100, 55)) == (103, 59)
 
 
+def _water_shoot_env(monkeypatch, read):
+    calls = {"swim": 0}
+    monkeypatch.setattr(recovery, "swim_to",
+                        lambda *a, **k: (calls.__setitem__("swim", calls["swim"] + 1), True)[1])
+    monkeypatch.setattr(recovery, "_face_right", lambda *a, **k: None)
+    monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(recovery, "get_character_color", lambda *a, **k: read)
+    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
+    monkeypatch.setattr(recovery.kb, "safe_press", lambda k: None)
+    monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
+    t = {"v": 0.0}
+    monkeypatch.setattr(recovery.time, "time", lambda: t.__setitem__("v", t["v"] + 0.3) or t["v"])
+    return calls
+
+
+def test_water_shoot_ignores_phantom_no_false_swimback(monkeypatch):
+    # A phantom blob ~300px from the parked center must NOT fire a "drifted off -> swim back":
+    # only the initial swim_to happens, none from the beat loop.
+    calls = _water_shoot_env(monkeypatch, (400, 400))     # center (100,100) -> jump 300 > max
+    recovery.water_shoot((100, 100), seconds=2.0, tol=(3, 3))
+    assert calls["swim"] == 1                              # initial only; phantom triggered no swim-back
+
+
+def test_water_shoot_swims_back_on_real_drift(monkeypatch):
+    # A plausible read genuinely off center (30px, within max-jump) DOES swim her back.
+    calls = _water_shoot_env(monkeypatch, (130, 100))     # 30px drift: plausible AND > tol+8
+    recovery.water_shoot((100, 100), seconds=2.0, tol=(3, 3))
+    assert calls["swim"] > 1                               # re-centered at least once during the beat
+
+
 def test_sink_to_bottom_stops_at_bottom_y(monkeypatch):
     # y rises 150 -> 220; bottom_y=210 -> returns True once y crosses it, releasing keys.
     ys = iter([150, 170, 190, 210, 230])
