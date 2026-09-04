@@ -25,6 +25,42 @@ def test_swim_to_presses_toward_target_and_stops(monkeypatch):
         assert k in released
 
 
+def test_swim_to_x_axis_double_confirms_arrival(monkeypatch):
+    # x-only reset (P1 -> rightmost column): a SINGLE in-tol read must not count as arrival --
+    # that stopped her short of the rightmost column and she sank on the wrong platform (status
+    # flip). settle=2 requires two consecutive in-tol reads before returning.
+    monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
+    monkeypatch.setattr(recovery.kb, "safe_press", lambda k: None)
+    monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
+    calls = {"n": 0}
+
+    def loc():
+        calls["n"] += 1
+        return (100, 50)                                   # always in tol of target x=100
+
+    ok = recovery.swim_to(100, 50, tol=(3, 3), cap=5.0, axis="x", settle=2, locate=loc)
+    assert ok is True
+    assert calls["n"] >= 2                                  # double-confirmed, not single-read arrival
+
+
+def test_swim_to_x_axis_confirm_resets_when_drifting(monkeypatch):
+    # If she drifts back off target x between confirms, the streak resets -> she must re-align and
+    # only arrives once genuinely settled in tol for `settle` consecutive reads.
+    seq = iter([(100, 50), (90, 50), (100, 50), (100, 50)])   # in, drift off, in, in -> arrive
+    monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
+    pressed = []
+    monkeypatch.setattr(recovery.kb, "safe_press", lambda k: pressed.append(k))
+    monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
+    ok = recovery.swim_to(100, 50, tol=(3, 3), cap=5.0, axis="x", settle=2,
+                          locate=lambda: next(seq, (100, 50)))
+    assert ok is True
+    assert Key.right in pressed                             # re-aligned right after drifting to x=90
+
+
 def test_swim_to_times_out_when_never_arrives(monkeypatch):
     monkeypatch.setattr(recovery, "get_character_full", lambda *a, **k: (0, 0))   # never reaches (100,100)
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)

@@ -1410,10 +1410,15 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
             if verbose:
                 dbg(f"{_pfx} at ({x},{y}) tgt ({target_x},{target_y}) "
                     f"dx={x - target_x} dy={y - target_y} want={sorted(want)} hits={settle_hits}")
-            if axis == "x":                               # horizontal only; arrived when x is close
+            if axis == "x":                               # horizontal only; arrived when x holds
                 horiz = want & {"left", "right"}
-                if not horiz:
-                    _arrived(x, y); return True
+                if not horiz:                             # x within tol -> CONFIRM it holds. A single
+                    settle_hits += 1                     # in-tol read (overshoot bounce / transient)
+                    if settle_hits >= settle:            # used to stop her SHORT of the rightmost column
+                        _arrived(x, y); return True      # on reset -> she sank on the wrong platform ->
+                    _apply_swim_keys(set())              # status flip. Release arrows and re-read to
+                    time.sleep(0.05); continue           # double-confirm before declaring arrival.
+                settle_hits = 0                           # drifted off target x -> reset the confirm streak
                 _apply_swim_keys(horiz)
                 time.sleep(0.05); continue
             if not want:                                  # in the target band -> confirm she's SEATED
