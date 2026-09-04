@@ -185,6 +185,40 @@ if not _lie_enabled:
 if notify.notifier().enabled:
     print("[notify] Discord webhook 已啟用 (lie-check / another-player -> Discord)")
 
+# Full frames dumped here for OFFLINE recall tuning (kept out of assets/, which holds templates).
+_LIE_CAP_DIR = "datasets/lie_check/captures"
+
+
+def dump_frame(reason="manual", frame=None, tag=""):
+    """Save a FULL capture() frame to datasets/lie_check/captures/ for offline recall tuning.
+    F10 dumps the current frame on demand -- use it to grab a lie-check screen the detector
+    MISSED (the one case auto-dump can't see, since it only fires on a hit). The fast/full
+    ticks also call this when they fire, so real live-res positives accumulate for threshold
+    tuning. Reuses the passed `frame` when given (no extra grab). Never raises -- this rides
+    the safety path and must not crash the loop."""
+    try:
+        f = frame if frame is not None else capture()
+        if f is None or not hasattr(f, "shape"):
+            print("[dump] no frame (window gone?)")
+            return None
+        os.makedirs(_LIE_CAP_DIR, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S", time.localtime()) + f"_{int((time.time() % 1) * 1000):03d}"
+        safe_tag = "".join(c for c in tag if c.isalnum() or c in "-_.")
+        name = f"{ts}_{reason}" + (f"_{safe_tag}" if safe_tag else "") + ".png"
+        path = os.path.join(_LIE_CAP_DIR, name)
+        cv2.imwrite(path, f)
+        print(f"[dump] saved {path}  ({f.shape[1]}x{f.shape[0]})")
+        return path
+    except Exception as e:
+        print(f"[dump] failed: {e}")
+        return None
+
+
+def _hit_tag(hits):
+    """Compact filename tag from detection hits: names+scores, e.g. 'curse_lock0.85'."""
+    return "_".join(f"{n.replace('.png', '')}{s:.2f}" for n, s in hits)
+
+
 def lie_check_fast_tick(interval=0.8):
     """Fast SAFETY scan (~40ms) on ONE capture at `interval` cadence, run in the hot loops:
     BOTH the transparent-shape lie-check (captcha -> alarm) AND the another-player check
@@ -203,6 +237,7 @@ def lie_check_fast_tick(interval=0.8):
         if _fast_alert.update(bool(hits)) and hits:
             print(f"[lie-check] ⚠️ 透明圖形驗證 {[(n, round(s, 2)) for n, s in hits]} -- ALARM (F8 暫停)")
             notify.send("lie_check", f"⚠️ 透明圖形驗證 (captcha) detected {[n for n, _ in hits]} — needs a human (F8 暫停)")
+            dump_frame("fast_auto", f, tag=_hit_tag(hits))
     dots = _enemy_dots(f)                                  # another player -> alarm + pause
     if dbg_on():
         dbg(f"[enemy] scan -> {len(dots)} red dot(s)" + (f" at {dots}" if dots else ""))
@@ -229,6 +264,7 @@ def lie_check_full_tick(interval=1.5):
     if _full_alert.update(bool(hits)) and hits:
         print(f"[lie-check] ⚠️ 需真人處理畫面 {[(n, round(s, 2)) for n, s in hits]} -- ALARM (F8 暫停)")
         notify.send("lie_check", f"⚠️ 需真人處理畫面 (curse/monster) {[n for n, _ in hits]} — needs a human (F8 暫停)")
+        dump_frame("full_auto", f, tag=_hit_tag(hits))
 
 def lie_check_tick():
     """Loop-top check: run both pipelines (fast covers transparent between states too)."""
@@ -270,6 +306,7 @@ def silence_all_alarms():
 
 
 kb.f9_callback = silence_all_alarms   # F9 silences alarms wherever kb.on_press is the listener
+kb.f10_callback = lambda: dump_frame("manual")   # F10 dumps the current frame for offline recall tuning
 
 
 # --- shared status + cooperative stop, for the control UI (panel.py) --------------
