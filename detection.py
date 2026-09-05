@@ -245,6 +245,8 @@ LIE_CHECK_THRESHOLDS = {
     "monster_instr.png": 0.80,
     "monster_instr_box.png": 0.80,   # name-the-monster, new opaque-box popup art
     "monster_warn_box.png": 0.82,    # red warning line on the same popup (2nd OR signal for recall)
+    "monster_instr_temple.png": 0.80,  # same popup on a dark map (temple) -- text over dark bg
+    "monster_warn_temple.png": 0.82,   # (per-map: semi-transparent text doesn't cross backgrounds)
 }
 
 # 每個模板佔畫面寬度的比例 (模板寬 / 來源截圖寬)。這些介面大小是相對於畫面的，
@@ -259,6 +261,8 @@ LIE_CHECK_FRACTIONS = {
     "monster_instr.png":     0.2115,   # 605 / 2860
     "monster_instr_box.png": 0.1770,   # 339 / 1915  (new opaque-box popup, live windowed)
     "monster_warn_box.png":  0.2063,   # 395 / 1915  (red warning line on the same popup)
+    "monster_instr_temple.png": 0.1994,  # 380 / 1906  (temple map, dark bg)
+    "monster_warn_temple.png":  0.1941,  # 370 / 1906
 }
 
 # 偵測人機驗證 / 詛咒等需要真人處理的畫面 (lie check)
