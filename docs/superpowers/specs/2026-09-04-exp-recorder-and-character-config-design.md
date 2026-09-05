@@ -3,8 +3,10 @@
 Date: 2026-09-04
 Status: Approved (pending spec review)
 
-Two independent features for the farming panel. They share no code; they can be
-built and shipped separately.
+Three features for the farming panel:
+- **F1 — EXP Record tab** and **F2 — per-character config** are fully independent.
+- **F3 — per-mob-class attack skill** builds on F2 (the mob→skill map lives in the
+  character config), so F2 lands first.
 
 ---
 
@@ -99,20 +101,23 @@ code default):
 {
   "name": "archer1",
   "attack_key": "x",
+  "attack_keys": { "fishhouse": "x", "goby": "z" },
   "buff_keys": ["a", "j"],
   "buff_interval_secs": 240,
   "buff_settle_secs": 0.6
 }
 ```
-One example file is scaffolded during implementation.
+`attack_keys` (optional) is the per-mob-class override used by Feature 3; when
+absent, the single `attack_key` is used for every mob. One example file is
+scaffolded during implementation.
 
 ### Merge — `recovery.py`
 
 - **`load_char(path)`** — load a `chars/*.json` (mirrors `watermap.load_map`).
 - **`apply_character(map_cfg, char_cfg)`** — return a shallow copy of `map_cfg` with
   the character's present fields overlaid for exactly this allow-list:
-  `attack_key`, `buff_keys`, `buff_interval_secs`, `buff_settle_secs`. A field
-  absent from `char_cfg` leaves the map's value untouched. Precedence:
+  `attack_key`, `attack_keys`, `buff_keys`, `buff_interval_secs`, `buff_settle_secs`.
+  A field absent from `char_cfg` leaves the map's value untouched. Precedence:
   **character → map → code default**.
 - Applied once at the top of `farming_loop_water` and `farming_loop_nav`, before
   the existing `map_cfg.get(...)` reads, so no downstream code changes. `char_cfg =
@@ -132,6 +137,56 @@ One example file is scaffolded during implementation.
 
 ---
 
+## Feature 3 — Per-mob-class attack skill
+
+### Purpose
+
+Default: one `attack_key` for every mob. Optionally, fire a **different skill per
+mob class** (e.g. `fishhouse → x`, `goby → z`) at whichever mob is being targeted.
+Lives in the character config (skills belong to the character).
+
+### Detector — `mob_detect.py`
+
+- `yolo_boxes(model, frame, roi, conf, imgsz, class_conf, with_class=False)` — new
+  `with_class` flag. When True each detection is `(score, x, y, w, h, cls_name)`
+  where `cls_name = model.names[cls]` (e.g. `"fishhouse"`, `"goby"`); when False it
+  stays the current 5-tuple. Default False → every existing caller is unchanged.
+
+### Detection-tuple contract
+
+A detection is `(score, x, y, w, h)` **or** `(score, x, y, w, h, cls_name)`.
+Consumers that need only geometry read `d[:5]`; the class (if any) is `d[5]`.
+Template detectors (`fish.scan`) keep 5-tuples → their mobs use the fallback
+`attack_key`. The four unpack sites in `approach_shoot`
+([recovery.py:1718/1724/1731](recovery.py:1718)) and the one at
+[recovery.py:2763](recovery.py:2763) are updated to slice `d[:5]` so both arities
+work.
+
+### `approach_shoot` — `recovery.py`
+
+- New optional param `attack_keys=None` (the class→key map).
+- `same_platform(dets)` carries the class through: returns `[(cx, feet, cls)]`.
+- When a target mob is selected, the burst key is
+  `attack_keys.get(cls, attack_key)` — the class's skill if mapped, else the default
+  `attack_key`. `cls` may be `None` (template detector / class absent) → default.
+- The `mm_bounds` "fire in place at edge" burst uses the same resolved key.
+
+### Plumbing — `farming_loop_water`
+
+- After `apply_character`, if `attack_keys` is set **and** the detector is
+  `mob_yolo`, build `detect_fn` with `with_class=True`; otherwise keep the current
+  5-tuple `detect_fn`. Pass `attack_keys=map_cfg.get("attack_keys")` into
+  `approach_shoot`.
+- `walk_shoot` / `water_shoot` are untouched (they use one `attack_key`); per-mob
+  skill applies to the `approach` mode only, where individual mobs are targeted.
+
+### Out of scope (YAGNI)
+
+- Per-mob skill only in `approach` mode (not walk/water shoot).
+- No per-mob attack *timing* / burst-count differences — just the key.
+
+---
+
 ## Testing
 
 - **Feature 1:** unit-test `append_exp_session` / `read_exp_sessions` round-trip
@@ -141,12 +196,19 @@ One example file is scaffolded during implementation.
 - **Feature 2:** unit-test `apply_character` — override present fields, leave absent
   ones as the map value, `None` char → unchanged map, and that only the allow-listed
   keys are touched (an unrelated map field is never overwritten).
+- **Feature 3:** unit-test `approach_shoot` target-key selection with a fake detector
+  returning 6-tuples — the burst key is the class's mapped key, falls back to
+  `attack_key` for an unmapped/`None` class, and a 5-tuple detector still works
+  (default key). The existing approach tests already cover the 5-tuple path.
 
 ## Files touched
 
 - `recovery.py` — `exp_record_loop`, `append_exp_session`, `read_exp_sessions`,
-  `load_char`, `apply_character`; merge calls in both farm loops.
+  `load_char`, `apply_character`; merge calls in both farm loops; `approach_shoot`
+  target-key selection + `attack_keys` plumbing; `detect_fn` build with
+  `with_class`; `d[:5]` slicing at the detection unpack sites.
+- `mob_detect.py` — `yolo_boxes(..., with_class=False)`.
 - `panel.py` — controller actions, EXP tab + history endpoint, character dropdown +
   `char_path` plumbing.
-- `chars/archer1.json` — one scaffolded example.
-- `tests/` — helper + `apply_character` tests.
+- `chars/archer1.json` — one scaffolded example (incl. an `attack_keys` sample).
+- `tests/` — helper, `apply_character`, and per-mob target-key tests.
