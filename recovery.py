@@ -577,6 +577,42 @@ def make_exp_tracker(log_exp=True, sample_secs=30, window_secs=600, label="exp",
     return exp_tick
 
 
+# --- EXP session log: persist human/bot farm sessions (start/duration/gain/rate/label) to a
+# JSON-Lines file so a human-farm reference can be compared against bot runs. ---
+_EXP_SESSIONS_PATH = "logs/exp_sessions.jsonl"
+
+
+def append_exp_session(row, path=_EXP_SESSIONS_PATH):
+    """Append one session row as a JSON line. Best-effort -- never raises (it must not crash
+    the recorder's shutdown path)."""
+    import json
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"[exp] could not append session: {e}")
+
+
+def read_exp_sessions(path=_EXP_SESSIONS_PATH, limit=50):
+    """The last `limit` session rows, NEWEST FIRST, for the panel's history table. Skips
+    malformed lines; returns [] if the file is absent."""
+    import json
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = [ln for ln in f.read().splitlines() if ln.strip()]
+    except FileNotFoundError:
+        return []
+    rows = []
+    for ln in lines[-limit:]:
+        try:
+            rows.append(json.loads(ln))
+        except Exception:
+            continue
+    rows.reverse()                                     # newest first
+    return rows
+
+
 def make_active_timer():
     """ACTIVE farming-time tracker (excludes pauses), shared by the water and nav loops.
     Returns (tick, freeze): call tick(now) each iteration WHILE farming to advance the
