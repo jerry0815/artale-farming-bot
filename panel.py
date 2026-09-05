@@ -107,7 +107,7 @@ class Controller:
 
     _MODE_NAME = {"farm": "farming", "watch": "watching", "recover": "recovering"}
 
-    def start(self, mode, map_path=None):
+    def start(self, mode, map_path=None, char=None):
         if self.mode != "idle":
             return False, f"busy ({self.mode})"
         if mode not in self._MODE_NAME:
@@ -116,7 +116,7 @@ class Controller:
             if not map_path:                          # picks nav vs water (see the farm action)
                 return False, "no map selected"
             self.mode = "farming"
-            self.actions["farm"](map_path)
+            self.actions["farm"](map_path, char)
             return True, "farming"
         self.mode = self._MODE_NAME[mode]
         self.actions[mode]()
@@ -214,7 +214,7 @@ def _build_actions(controller_ref):
         print("[panel] safety -> release keys and PAUSE (F8 to resume).")
         kb.pause = True
 
-    def farm(map_path):
+    def farm(map_path, char=None):
         """One farm entry: the selected map's `loop` field picks the loop -- 'nav' = the
         land dragon-nest loop (map geometry unused), else the water swim loop."""
         import watermap
@@ -224,7 +224,8 @@ def _build_actions(controller_ref):
             if cfg.get("loop") == "nav":
                 recovery.farming_loop_nav(exp_check=None, enemy_check=_enemy_check, panic=_panic)
             else:
-                recovery.farming_loop_water(map_path, enemy_check=_enemy_check, panic=_panic)
+                recovery.farming_loop_water(map_path, char=char or None,
+                                            enemy_check=_enemy_check, panic=_panic)
         _run_bg(_go)
 
     def watch():
@@ -390,6 +391,15 @@ def list_maps(maps_dir="maps"):
     return out
 
 
+def list_chars(chars_dir="chars"):
+    """Character config files (chars/*.json), sorted. Empty if the dir is absent."""
+    import os
+    from glob import glob
+    if not os.path.isdir(chars_dir):
+        return []
+    return sorted(glob(os.path.join(chars_dir, "*.json")))
+
+
 def _status_dict(controller):
     import recovery, time
     st = dict(recovery.STATUS)
@@ -453,6 +463,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    <fieldset><legend>Farm</legend>
      <div class=row>
        <select id=mapsel></select>
+       <select id=charsel></select>
        <button class=go onclick="startFarm()">▶ Start farm</button>
        <button onclick="loadMaps()">↻</button>
      </div>
@@ -595,10 +606,20 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    sel.innerHTML = maps.length ? '' : '<option value="">(no maps/*.json)</option>';
    for(const m of maps){ const o=document.createElement('option'); o.value=m.path; o.textContent=m.name; sel.appendChild(o); }
  }
+ async function loadChars(){
+   const chars = await (await fetch('/chars')).json();
+   const sel = document.getElementById('charsel');
+   sel.innerHTML = '<option value="">(map default)</option>';
+   for(const p of chars){
+     const name = p.split(/[\\/]/).pop().replace(/\.json$/, '');
+     const o=document.createElement('option'); o.value=p; o.textContent=name; sel.appendChild(o);
+   }
+ }
  async function startFarm(){
    const map = document.getElementById('mapsel').value;
    if(!map){ alert('no map selected'); return; }
-   const j = await (await fetch('/cmd?'+new URLSearchParams({action:'start',mode:'farm',map}))).json();
+   const char = document.getElementById('charsel').value;
+   const j = await (await fetch('/cmd?'+new URLSearchParams({action:'start',mode:'farm',map,char}))).json();
    if(!j.ok) alert(j.msg);
  }
  async function poll(){
@@ -639,7 +660,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    }catch(e){}
    setTimeout(pollLog, 1200);
  }
- loadMaps(); poll(); snapLoop(); pollLog();
+ loadMaps(); loadChars(); poll(); snapLoop(); pollLog();
 </script></body></html>"""
 
 
@@ -665,6 +686,8 @@ def make_handler(controller):
                 return self._send(200, json.dumps(_status_dict(controller)))
             if parsed.path == "/maps":
                 return self._send(200, json.dumps(list_maps()))
+            if parsed.path == "/chars":
+                return self._send(200, json.dumps(list_chars()))
             if parsed.path == "/detect":
                 mp = q.get("map", [None])[0] or None
                 scale = float(q["scale"][0]) if q.get("scale", [""])[0] else None
@@ -688,7 +711,8 @@ def make_handler(controller):
         def _dispatch(self, action, q):
             if action == "start":
                 return controller.start(q.get("mode", [""])[0],
-                                        map_path=q.get("map", [None])[0])
+                                        map_path=q.get("map", [None])[0],
+                                        char=q.get("char", [None])[0])
             if action == "pause":
                 return controller.pause()
             if action == "stop":

@@ -20,7 +20,7 @@ class _Rec:
 def _make():
     log = []
     c = panel.Controller({
-        "farm": lambda mp: log.append(("farm", mp)),   # map-driven; config's loop picks nav/water
+        "farm": lambda mp, char=None: log.append(("farm", mp, char)),  # map-driven; loop picks nav/water
         "watch": lambda: log.append("watch"),
         "recover": lambda: log.append("recover"),
         "make_recorder": lambda mp: log.append(("rec", mp)) or _Rec(log),
@@ -36,7 +36,7 @@ def test_single_worker_enforced():
     assert c.start("watch")[0] is False        # busy
     assert c.stop()[0] is True
     assert c.start("watch")[0] is True
-    assert ("farm", "maps/deep_sea_2.json") in log and "watch" in log and "stop" in log
+    assert ("farm", "maps/deep_sea_2.json", None) in log and "watch" in log and "stop" in log
 
 
 def test_unknown_mode_rejected():
@@ -82,8 +82,14 @@ def test_farm_requires_map_and_dispatches():
     assert c.start("farm")[0] is False           # no map selected
     ok, mode = c.start("farm", map_path="maps/deep_sea_2.json")
     assert ok is True and mode == "farming"
-    assert ("farm", "maps/deep_sea_2.json") in log
+    assert ("farm", "maps/deep_sea_2.json", None) in log
     assert c.start("farm", map_path="maps/deep_sea_2.json")[0] is False   # busy
+
+
+def test_farm_forwards_char():
+    log, c = _make()
+    c.start("farm", map_path="maps/deep_sea_2.json", char="chars/archer1.json")
+    assert ("farm", "maps/deep_sea_2.json", "chars/archer1.json") in log
 
 
 def test_list_maps_finds_starter(tmp_path):
