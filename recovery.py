@@ -2146,11 +2146,14 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
         if map_cfg.get("goby_conf") is not None:
             _cconf[1] = float(map_cfg["goby_conf"])
         _cconf = _cconf or None
+        _wc = bool(map_cfg.get("attack_keys"))             # return the class name for per-mob skill
 
         def detect_fn(frame, roi):
-            return mob_detect.yolo_boxes(_mm, frame, roi, _mconf, _mimg, class_conf=_cconf)
+            return mob_detect.yolo_boxes(_mm, frame, roi, _mconf, _mimg,
+                                         class_conf=_cconf, with_class=_wc)
         print(f"[water] detector: mob_yolo conf={_mconf} imgsz={_mimg}"
-              + (f" class_conf={_cconf}" if _cconf else ""))
+              + (f" class_conf={_cconf}" if _cconf else "")
+              + (f" attack_keys={map_cfg.get('attack_keys')}" if _wc else ""))
     elif detector == "fish":
         import fish as _fish
         _templates, _mode = _fish.templates_for(map_cfg)
@@ -2431,7 +2434,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     attack_range=_arange, band=_aband, step=_astep,
                                     attack_key=attack_key, deplete_reads=_adeplete,
                                     stall_limit=_astall, label=node,
-                                    mm_bounds=(_ncx - _phalf, _ncx + _phalf), mm_y=cy)
+                                    mm_bounds=(_ncx - _phalf, _ncx + _phalf), mm_y=cy,
+                                    attack_keys=map_cfg.get("attack_keys"))
                 heal_skill()
                 if ok is False:
                     return False
