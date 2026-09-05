@@ -277,16 +277,49 @@ def _build_actions(controller_ref):
             "exp_record": exp_record}
 
 
-def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, roi=None, max_w=900):
+def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, roi=None, max_w=900,
+                 kind=None):
     """Capture one game frame, run mob detection (live crops if the map config has
     mob_template_dir, else green sprites), and return {ok, count, best, mode, img}
-    for the panel's detection preview. No focus steal."""
+    for the panel's detection preview. `kind="dragon"` instead previews the dragon-nest
+    YOLO count with the per-node count ROIs drawn. No focus steal."""
     import base64
     import cv2
     import numpy as np
     import fish
     import recovery
     import watermap
+    if kind == "dragon":                                      # dragon-nest count ROI preview
+        import monsters
+        f = recovery.capture()
+        if f is None:
+            return {"ok": False, "msg": "no frame (is the game window visible / not minimized?)"}
+        try:
+            model = monsters.load_dragon_model()
+        except Exception as e:
+            return {"ok": False, "msg": f"dragon model load failed: {e}"}
+        conf = thr if thr is not None else 0.35
+        boxes = monsters.run_yolo(model, f, conf)
+        rois = monsters.MOTION_ROI_BY_NODE
+        dbg = f.copy()
+        for node, r in rois.items():                          # each node's count band (cyan)
+            cv2.rectangle(dbg, (r[0], r[1]), (r[2], r[3]), (0, 255, 255), 2)
+            cv2.putText(dbg, node, (r[0] + 4, r[1] + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        counted = 0
+        for (x1, y1, x2, y2, s) in boxes:                     # green = counted, red = ignored (out of ROI)
+            inside = any(monsters.box_center_in_roi((x1, y1, x2, y2), r) for r in rois.values())
+            counted += 1 if inside else 0
+            color = (0, 200, 0) if inside else (0, 0, 255)
+            cv2.rectangle(dbg, (x1, y1), (x2, y2), color, 2)
+            cv2.circle(dbg, ((x1 + x2) // 2, (y1 + y2) // 2), 4, color, -1)   # the counted center
+            cv2.putText(dbg, f"{s:.2f}", (x1, max(y1 - 3, 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        sc = min(1.0, max_w / dbg.shape[1])
+        small = cv2.resize(dbg, None, fx=sc, fy=sc) if sc < 1.0 else dbg
+        _ok, buf = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        return {"ok": True, "count": counted, "best": {}, "mode": "dragon_yolo",
+                "thr": round(conf, 3), "player": None,
+                "anchor": f"{len(boxes)} dragons, {counted} inside ROI  (green=counted, red=ignored)",
+                "img": "data:image/jpeg;base64," + base64.b64encode(buf).decode()}
     cfg = watermap.load_map(map_path) if map_path else {}
     if species:
         cfg = {**cfg, "fish_species": species}
@@ -562,6 +595,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      roi <input id=droi placeholder="x0,y0,x1,y1 (blank=full)" style="width:190px">
      <button class=go onclick="snap()">📸 Snap</button>
      <label><input type=checkbox id=dlive> live (2s)</label>
+     <label title="show the dragon-nest count ROIs + which dragons count (green) vs are ignored (red)"><input type=checkbox id=ddragon> 🐉 dragon ROI</label>
    </div>
    <div id=dstat style="font-family:ui-monospace,monospace;font-size:12px;margin:6px 0;white-space:nowrap;overflow-x:auto"></div>
    <img id=detimg style="max-width:100%;border-radius:6px;display:none">
@@ -626,6 +660,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    if(dspecies.value.trim()) q.set('species', dspecies.value.trim());
    if(droi.value.trim()) q.set('roi', droi.value.trim());
    const mapsel=document.getElementById('mapsel'); if(mapsel && mapsel.value) q.set('map', mapsel.value);
+   if(document.getElementById('ddragon').checked) q.set('kind','dragon');   // dragon count-ROI preview
    document.getElementById('dstat').textContent='snapping…';
    try{
      const j = await (await fetch('/detect?'+q)).json();
@@ -773,9 +808,11 @@ def make_handler(controller):
                 species = sp.split(",") if sp else None
                 roi_s = q.get("roi", [None])[0]
                 roi = tuple(int(v) for v in roi_s.split(",")) if roi_s else None
+                kind = q.get("kind", [None])[0] or None
                 try:
                     return self._send(200, json.dumps(detect_frame(
-                        map_path=mp, scale=scale, thr=thr, per=per, species=species, roi=roi)))
+                        map_path=mp, scale=scale, thr=thr, per=per, species=species, roi=roi,
+                        kind=kind)))
                 except Exception as e:
                     return self._send(200, json.dumps({"ok": False, "msg": str(e)}))
             if parsed.path == "/cmd":
