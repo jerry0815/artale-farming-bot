@@ -243,6 +243,8 @@ LIE_CHECK_THRESHOLDS = {
     "curse_lock.png": 0.80,
     "curse_banner.png": 0.78,
     "monster_instr.png": 0.80,
+    "monster_instr_box.png": 0.80,   # name-the-monster, new opaque-box popup art
+    "monster_warn_box.png": 0.82,    # red warning line on the same popup (2nd OR signal for recall)
 }
 
 # 每個模板佔畫面寬度的比例 (模板寬 / 來源截圖寬)。這些介面大小是相對於畫面的，
@@ -255,6 +257,8 @@ LIE_CHECK_FRACTIONS = {
     "curse_banner.png":      0.4361,   # 1170 / 2683
     "curse_lock.png":        0.0596,   # 160 / 2683
     "monster_instr.png":     0.2115,   # 605 / 2860
+    "monster_instr_box.png": 0.1770,   # 339 / 1915  (new opaque-box popup, live windowed)
+    "monster_warn_box.png":  0.2063,   # 395 / 1915  (red warning line on the same popup)
 }
 
 # 偵測人機驗證 / 詛咒等需要真人處理的畫面 (lie check)

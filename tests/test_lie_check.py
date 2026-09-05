@@ -14,7 +14,8 @@ PRODUCTION_POSITIVES = [
     "datasets/lie_check/Screenshot 2026-08-20 013627.png",  # find-transparent-shape
     "datasets/lie_check/rune_check_test.png",               # curse (fullscreen ~2683w)
     "datasets/lie_check/rune_check_live_test.png",          # curse (live windowed ~1914w)
-    "datasets/lie_check/monster_intr_test.png",             # name-the-monster
+    "datasets/lie_check/monster_intr_test.png",             # name-the-monster (old overlay art)
+    "datasets/lie_check/monster_box_test.png",              # name-the-monster (new opaque-box art, live windowed)
 ]
 
 
@@ -28,6 +29,16 @@ def test_each_production_capture_triggers():
     for src in PRODUCTION_POSITIVES:
         hits = detection.detect_lie_check(_load(src))
         assert hits, f"expected a lie-check hit on {src}, got none"
+
+
+def test_new_monster_popup_has_two_independent_signals():
+    # Recall guard: the new opaque-box monster popup must be caught by EACH of its two
+    # OR'd templates on its own (instruction text + red warning line), so a single
+    # degraded template can't silently cause a miss (the other would mask it in the OR).
+    frame = _load("datasets/lie_check/monster_box_test.png")
+    for tpl in ("monster_instr_box.png", "monster_warn_box.png"):
+        hits = detection.detect_lie_check(frame, template_filter=[tpl], work_width=1000)
+        assert hits and hits[0][0] == tpl, f"{tpl} alone failed to fire on the new popup: {hits}"
 
 
 def test_blank_screen_does_not_trigger():

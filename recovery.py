@@ -173,7 +173,10 @@ _LIE_DIR = "assets/lie_check/"
 _FAST_TEMPLATES = ["transparent_title.png"]     # 3s window -> checked in-state, immediate
 # monster_instr.png = old transparent-overlay popup; monster_instr_box.png = new opaque-box
 # popup art (the two renderings don't cross-match, so keep both to cover either style).
-_FULL_TEMPLATES = ["curse_banner.png", "curse_lock.png", "monster_instr.png", "monster_instr_box.png"]
+# monster_warn_box.png = the red warning line on the new popup -- a 2nd independent OR signal,
+# so a single degraded template can't cause a miss (detect_lie_check fires if ANY hits).
+_FULL_TEMPLATES = ["curse_banner.png", "curse_lock.png", "monster_instr.png",
+                   "monster_instr_box.png", "monster_warn_box.png"]
 _lie_enabled = bool(_glob(os.path.join(_LIE_DIR, "*.png")))
 
 _fast_alarm = Alarm(freq=1000, beep_ms=350, gap_ms=150)
