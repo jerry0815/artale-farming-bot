@@ -142,6 +142,20 @@ class Controller:
         self.mode = "idle"
         return True, out
 
+    def exp_record_start(self, label):
+        if self.mode != "idle":
+            return False, f"busy ({self.mode})"
+        self.mode = "exp_record"
+        self.actions["exp_record"](label or "human")
+        return True, "exp_record"
+
+    def exp_record_stop(self):
+        if self.mode != "exp_record":
+            return False, "not recording exp"
+        self.actions["stop"]()                        # STOP -> the loop's finally writes the row
+        self.mode = "idle"
+        return True, "stopped"
+
     def pause(self):
         self.actions["pause_toggle"]()
         return True, "toggled"
@@ -231,6 +245,9 @@ def _build_actions(controller_ref):
     def watch():
         _run_bg(recovery.watch_loop)
 
+    def exp_record(label):
+        _run_bg(lambda: recovery.exp_record_loop(label))
+
     def recover():
         def _go():
             try:
@@ -256,7 +273,8 @@ def _build_actions(controller_ref):
         kb.safe_release_all()
 
     return {"farm": farm, "watch": watch, "recover": recover, "train": train,
-            "make_recorder": make_recorder, "pause_toggle": pause_toggle, "stop": stop}
+            "make_recorder": make_recorder, "pause_toggle": pause_toggle, "stop": stop,
+            "exp_record": exp_record}
 
 
 def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, roi=None, max_w=900):
@@ -457,6 +475,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
  <div id=tabs>
    <button id=tab-b-control class="tab active" onclick="showTab('control')">Control</button>
    <button id=tab-b-setup class=tab onclick="showTab('setup')">Setup</button>
+   <button id=tab-b-exp class=tab onclick="showTab('exp')">EXP</button>
  </div>
 
  <div id=tab-control class=pane>
@@ -510,6 +529,23 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    </fieldset>
  </div>
 
+ <div id=tab-exp class="pane hidden">
+   <fieldset><legend>Record EXP session (manual — you farm by hand, this only records)</legend>
+     <div class=row>
+       label <input id=explabel value="human" style="width:120px">
+       <button class=go onclick="startExp()">● Start recording</button>
+       <button class=stop onclick="stopExp()">■ Stop</button>
+       <button onclick="loadExpSessions()">↻</button>
+     </div>
+     <div class=sub><span id=exppm2>–</span> EXP/min (run avg) &middot; total <span id=exptot2>–</span></div>
+   </fieldset>
+   <table id=exptable style="width:100%;border-collapse:collapse;font-size:12px">
+     <thead><tr style="color:#9ad;text-align:left">
+       <th>start<th>dur<th>EXP gained<th>EXP/min<th>label</tr></thead>
+     <tbody></tbody>
+   </table>
+ </div>
+
  <fieldset><legend>Detection preview</legend>
    <div class=row>
      scale <input id=dscale placeholder="auto" style="width:56px">
@@ -540,7 +576,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    if(!j.ok) alert(j.msg);
  }
  function showTab(name){
-   for(const t of ['control','setup']){
+   for(const t of ['control','setup','exp']){
      document.getElementById('tab-'+t).classList.toggle('hidden', t!==name);
      document.getElementById('tab-b-'+t).classList.toggle('active', t===name);
    }
@@ -639,6 +675,8 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      document.getElementById('exppm').textContent = fmt(s.exp_per_min);
      document.getElementById('exptot').textContent = fmt(s.exp_total);
      document.getElementById('exp10').textContent = fmt(s.exp_10min);
+     document.getElementById('exppm2').textContent = fmt(s.exp_per_min);
+     document.getElementById('exptot2').textContent = fmt(s.exp_total);
    }catch(e){}
    setTimeout(poll, 500);
  }
@@ -660,7 +698,30 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    }catch(e){}
    setTimeout(pollLog, 1200);
  }
- loadMaps(); loadChars(); poll(); snapLoop(); pollLog();
+ async function startExp(){
+   const label = document.getElementById('explabel').value || 'human';
+   const j = await (await fetch('/cmd?'+new URLSearchParams({action:'exp_record_start', label}))).json();
+   if(!j.ok) alert(j.msg);
+ }
+ async function stopExp(){
+   const j = await (await fetch('/cmd?'+new URLSearchParams({action:'exp_record_stop'}))).json();
+   if(!j.ok) alert(j.msg);
+   setTimeout(loadExpSessions, 500);        // let the recorder's finally write the row first
+ }
+ async function loadExpSessions(){
+   try{
+     const rows = await (await fetch('/exp_sessions')).json();
+     const tb = document.querySelector('#exptable tbody'); tb.innerHTML='';
+     for(const r of rows){
+       const dur = (r.duration_s!=null)? Math.round(r.duration_s/60)+'m' : '';
+       const cells = [r.ts_start||'', dur, fmt(r.exp_gained), fmt(r.exp_per_min), r.label||''];
+       const tr = document.createElement('tr');
+       for(const c of cells){ const td=document.createElement('td'); td.style.padding='3px 8px 3px 0'; td.textContent=c; tr.appendChild(td); }
+       tb.appendChild(tr);
+     }
+   }catch(e){}
+ }
+ loadMaps(); loadChars(); poll(); snapLoop(); pollLog(); loadExpSessions();
 </script></body></html>"""
 
 
@@ -688,6 +749,9 @@ def make_handler(controller):
                 return self._send(200, json.dumps(list_maps()))
             if parsed.path == "/chars":
                 return self._send(200, json.dumps(list_chars()))
+            if parsed.path == "/exp_sessions":
+                import recovery
+                return self._send(200, json.dumps(recovery.read_exp_sessions()))
             if parsed.path == "/detect":
                 mp = q.get("map", [None])[0] or None
                 scale = float(q["scale"][0]) if q.get("scale", [""])[0] else None
@@ -723,6 +787,10 @@ def make_handler(controller):
                 return controller.record_mark(q.get("name", [""])[0])
             if action == "record_stop":
                 return controller.record_stop()
+            if action == "exp_record_start":
+                return controller.exp_record_start(q.get("label", ["human"])[0])
+            if action == "exp_record_stop":
+                return controller.exp_record_stop()
             if action == "train":
                 fn = controller.actions.get("train")
                 if not fn:

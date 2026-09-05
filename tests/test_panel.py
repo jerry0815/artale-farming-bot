@@ -26,8 +26,19 @@ def _make():
         "make_recorder": lambda mp: log.append(("rec", mp)) or _Rec(log),
         "pause_toggle": lambda: log.append("pause"),
         "stop": lambda: log.append("stop"),
+        "exp_record": lambda label: log.append(("exp_record", label)),
     })
     return log, c
+
+
+def test_exp_record_start_stop():
+    log, c = _make()
+    assert c.exp_record_start("human")[0] is True
+    assert ("exp_record", "human") in log
+    assert c.start("watch")[0] is False          # busy while recording EXP
+    assert c.exp_record_stop()[0] is True
+    assert "stop" in log
+    assert c.start("watch")[0] is True           # idle again after stop
 
 
 def test_single_worker_enforced():
