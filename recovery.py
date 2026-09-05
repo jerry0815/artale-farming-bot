@@ -2046,6 +2046,34 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
             farm_state = navmap.WALK_SHOOT if farm_state == navmap.STAND_SHOOT else navmap.STAND_SHOOT
 
 
+CHAR_FIELDS = ("attack_key", "attack_keys", "buff_keys",
+               "buff_interval_secs", "buff_settle_secs")
+
+
+def load_char(path):
+    """Load a chars/<name>.json character config. `path` may be a path string (read as
+    UTF-8 JSON) or an already-loaded dict (returned unchanged)."""
+    if isinstance(path, dict):
+        return path
+    import json
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def apply_character(map_cfg, char_cfg):
+    """Overlay a character's key settings onto a map config. Returns a SHALLOW COPY of
+    `map_cfg` with each present CHAR_FIELDS value from `char_cfg` overriding the map's
+    (precedence character -> map -> code default). A field absent or None in `char_cfg`
+    leaves the map's value untouched. `char_cfg` falsy -> `map_cfg` returned unchanged."""
+    if not char_cfg:
+        return map_cfg
+    merged = dict(map_cfg)
+    for k in CHAR_FIELDS:
+        if char_cfg.get(k) is not None:
+            merged[k] = char_cfg[k]
+    return merged
+
+
 def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                        stand_secs=(6, 8), break_every=(8 * 60, 15 * 60),
                        rest_range=(30, 120), skill_interval=(240, 300),
