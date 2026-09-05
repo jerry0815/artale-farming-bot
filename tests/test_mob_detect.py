@@ -108,3 +108,18 @@ def test_yolo_boxes_per_class_conf():
                                  class_conf={0: 0.3, 1: 0.5})
     scores = sorted(d[0] for d in dets)
     assert scores == [0.35, 0.9]          # both fishhouse kept, weak goby filtered out
+
+
+def test_yolo_boxes_with_class_appends_name():
+    boxes = [_B(0, 0.9, [10, 10, 30, 40]), _B(1, 0.8, [50, 50, 70, 90])]
+    m = _FakeModel(boxes); m.names = {0: "fishhouse", 1: "goby", 2: "player"}
+    dets = mob_detect.yolo_boxes(m, _frame(), with_class=True)
+    assert len(dets) == 2
+    assert dets[0] == (0.9, 10, 10, 20, 30, "fishhouse")   # 6-tuple: (score,x,y,w,h,cls_name)
+    assert dets[1][5] == "goby"
+
+
+def test_yolo_boxes_without_class_stays_5tuple():
+    boxes = [_B(0, 0.9, [10, 10, 30, 40])]
+    dets = mob_detect.yolo_boxes(_FakeModel(boxes), _frame())   # default with_class=False
+    assert len(dets[0]) == 5                                     # unchanged 5-tuple

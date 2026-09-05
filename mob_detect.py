@@ -40,14 +40,19 @@ def _box_tuple(b, ox, oy):
             int(x1f - x0f), int(y1f - y0f))
 
 
-def yolo_boxes(model, frame_bgr, roi=None, conf=0.3, imgsz=640, class_conf=None):
+def yolo_boxes(model, frame_bgr, roi=None, conf=0.3, imgsz=640, class_conf=None,
+               with_class=False):
     """Detected MOB boxes [(score, x, y, w, h)] in full-frame coords (classes 0,1 only).
     `roi`=(x0,y0,x1,y1) restricts + speeds up inference (offset added back).
 
     `class_conf` = optional {class_id: threshold} for a PER-CLASS confidence floor -- e.g.
     {0: 0.3} keeps a weak fishhouse detected through attack VFX so she doesn't skip the mob
     she's hitting. Inference runs at the LOWEST of (conf, class thresholds) so weak boxes are
-    returned by the model, then each class is filtered by its own threshold."""
+    returned by the model, then each class is filtered by its own threshold.
+
+    `with_class=True` appends the class NAME as a 6th element: (score, x, y, w, h, cls_name)
+    where cls_name = model.names[cls] (e.g. 'fishhouse', 'goby') -- used for per-mob attack
+    skill selection. Default False keeps the 5-tuple, so every existing caller is unchanged."""
     run_conf = min([conf, *(class_conf or {}).values()]) if class_conf else conf
     boxes, ox, oy = _predict(model, frame_bgr, roi, run_conf, imgsz)
     if boxes is None:
@@ -56,7 +61,8 @@ def yolo_boxes(model, frame_bgr, roi=None, conf=0.3, imgsz=640, class_conf=None)
     for b in boxes:
         c = int(b.cls[0])
         if c in MOB_CLASSES and float(b.conf[0]) >= (class_conf or {}).get(c, conf):
-            out.append(_box_tuple(b, ox, oy))
+            t = _box_tuple(b, ox, oy)
+            out.append(t + (model.names[c],) if with_class else t)
     return out
 
 
