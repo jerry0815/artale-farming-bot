@@ -120,7 +120,7 @@ def apply_character(map_cfg, char_cfg):
     (precedence character -> map -> code default). A field absent or None in `char_cfg`
     leaves the map's value untouched. `char_cfg` falsy -> `map_cfg` returned unchanged."""
     if not char_cfg:
-        return map_cfg
+        return dict(map_cfg)                # always a copy, per the docstring's guarantee
     merged = dict(map_cfg)
     for k in CHAR_FIELDS:
         if char_cfg.get(k) is not None:
