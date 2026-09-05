@@ -183,3 +183,29 @@ def test_no_fall_when_on_platform(monkeypatch):
     out = recovery.approach_shoot(10, df, anc, mm_y=104, fall_margin=22,
                                   fall_check_every=0.0, deplete_reads=4, verbose=False)
     assert out is not recovery.FELL
+
+
+def test_attack_key_selected_by_mob_class(monkeypatch):
+    # A goby in range -> the burst uses the class-mapped key 'z', not the default 'c'.
+    mob = [(0.9, 810, 490, 40, 30, "goby")]          # 6-tuple with class; feet=520 near feet 500
+    df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 999])
+    recovery.approach_shoot(10, df, anc, attack_range=90, attack_key="c",
+                            attack_keys={"goby": "z"}, verbose=False)
+    assert "z" in pressed and "c" not in pressed
+
+
+def test_attack_key_falls_back_to_default_for_unmapped_class(monkeypatch):
+    # A fishhouse (not in attack_keys) in range -> uses the default 'c'.
+    mob = [(0.9, 810, 490, 40, 30, "fishhouse")]
+    df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 999])
+    recovery.approach_shoot(10, df, anc, attack_range=90, attack_key="c",
+                            attack_keys={"goby": "z"}, verbose=False)
+    assert "c" in pressed and "z" not in pressed
+
+
+def test_5tuple_detector_uses_default_key(monkeypatch):
+    # A plain 5-tuple detection (template detector, no class) still works -> default key.
+    mob = [(0.9, 810, 490, 40, 30)]
+    df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 999])
+    recovery.approach_shoot(10, df, anc, attack_range=90, attack_key="c", verbose=False)
+    assert "c" in pressed

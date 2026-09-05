@@ -171,7 +171,9 @@ def capture_minimap():
 #         screens persist far longer so a slower, debounced check is fine.
 _LIE_DIR = "assets/lie_check/"
 _FAST_TEMPLATES = ["transparent_title.png"]     # 3s window -> checked in-state, immediate
-_FULL_TEMPLATES = ["curse_banner.png", "curse_lock.png", "monster_instr.png"]
+# monster_instr.png = old transparent-overlay popup; monster_instr_box.png = new opaque-box
+# popup art (the two renderings don't cross-match, so keep both to cover either style).
+_FULL_TEMPLATES = ["curse_banner.png", "curse_lock.png", "monster_instr.png", "monster_instr_box.png"]
 _lie_enabled = bool(_glob(os.path.join(_LIE_DIR, "*.png")))
 
 _fast_alarm = Alarm(freq=1000, beep_ms=350, gap_ms=150)
@@ -1629,7 +1631,8 @@ def walk_shoot(node_mm_x, seconds, detect_fn, attack_key='c', half=60, tol=(3, 3
 def approach_shoot(seconds, detect_fn, anchor,
                    attack_range=110, band=70, step=0.14, attack_key='c',
                    deplete_reads=4, stall_limit=8, verbose=True, label="",
-                   mm_bounds=None, mm_y=None, fall_margin=22, fall_check_every=0.9):
+                   mm_bounds=None, mm_y=None, fall_margin=22, fall_check_every=0.9,
+                   attack_keys=None):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1716,20 +1719,26 @@ def approach_shoot(seconds, detect_fn, anchor,
             strip = (0, max(0, pfeet - band - 40), W, min(H, pfeet + band // 2 + 40))
 
             def same_platform(dets):
-                return [(mx + mw // 2, my + mh) for (_s, mx, my, mw, mh) in dets
-                        if abs((my + mh) - pfeet) <= band]
+                # A detection is (score,x,y,w,h) or (score,x,y,w,h,cls_name) -> carry the class
+                # (or None) through so the attack key can be chosen per mob. `d[:5]` handles both.
+                out = []
+                for d in dets:
+                    _s, mx, my, mw, mh = d[:5]
+                    if abs((my + mh) - pfeet) <= band:
+                        out.append((mx + mw // 2, my + mh, d[5] if len(d) > 5 else None))
+                return out
 
             dets = detect_fn(f, strip)
             same = same_platform(dets)
             if dbg_on():                                   # full per-frame trace (file only)
-                _md = [(round(s, 2), mx + mw // 2, my + mh) for (s, mx, my, mw, mh) in dets]
+                _md = [(round(d[0], 2), d[1] + d[3] // 2, d[2] + d[4]) for d in dets]
                 dbg(f"[app {label}] player=({px},{pfeet}) band={band} "
-                    f"dets(score,cx,feet)={_md} same_platform={[m[0] for m in same]}")
+                    f"dets(score,cx,feet)={_md} same_platform={[(m[0], m[2]) for m in same]}")
             if not same:
                 stop_walk(); rooted = False                # idle scan (not firing) -> she may drift
                 nonempty_streak = 0
                 empty_reads += 1                          # DEBOUNCED: several empty frames -> clear
-                feet = [my + mh for (_s, _mx, my, _mw, mh) in dets]
+                feet = [d[2] + d[4] for d in dets]
                 log(f"no same-platform mob ({empty_reads}/{deplete_reads}); "
                     f"pfeet={pfeet} band={band} detected feet={feet}")
                 if empty_reads >= deplete_reads:          # debounced empty -> platform done
@@ -1740,17 +1749,18 @@ def approach_shoot(seconds, detect_fn, anchor,
             nonempty_streak += 1
             if nonempty_streak >= 2:
                 empty_reads = 0
-            tx, _tfy = min(same, key=lambda m: abs(m[0] - px))
+            tx, _tfy, tcls = min(same, key=lambda m: abs(m[0] - px))
             dx = tx - px
             key = Key.right if dx >= 0 else Key.left
+            akey = (attack_keys or {}).get(tcls, attack_key)   # per-mob skill; falls back to default
             if abs(dx) <= attack_range:                   # in range: face + fire a burst
                 best_absdx = None; no_improve = 0
                 rooted = True                             # firing in place -> assume-last-pos is valid
-                log(f"IN RANGE dx={dx} px={px} -> attack '{attack_key}' burst (same={len(same)})")
+                log(f"IN RANGE dx={dx} px={px} -> attack '{akey}' burst ({tcls}, same={len(same)})")
                 stop_walk()
                 kb.safe_press(key); time.sleep(0.03); kb.safe_release(key)
                 for _ in range(3):                        # commit: several hits before re-evaluating
-                    kb.safe_press(attack_key); time.sleep(0.35); kb.safe_release(attack_key)
+                    kb.safe_press(akey); time.sleep(0.35); kb.safe_release(akey)
                     time.sleep(0.05)
             else:                                         # nearest visible mob is OUT of range
                 # NET-progress stall: give up (advance) only if we stop getting CLOSER (best
@@ -1774,7 +1784,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                                      (key == Key.left and mmx <= mm_bounds[0])):
                         log(f"platform edge (mmx={mmx} bounds={mm_bounds}) -> fire in place")
                         stop_walk(); rooted = True         # firing in place at the edge
-                        kb.safe_press(attack_key); time.sleep(0.3); kb.safe_release(attack_key)
+                        kb.safe_press(akey); time.sleep(0.3); kb.safe_release(akey)
                         continue
                 # CONTINUOUS walk: hold the key across frames (only re-press on a turn), so
                 # motion is smooth instead of stutter-stepping between detections.
