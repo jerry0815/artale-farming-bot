@@ -2510,6 +2510,9 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
     # Nodes reached AFTER a sink (start_sink / reset): she's already at the right y, so align
     # x-only (no jump) instead of a full swim_to that fights vertically off the floor.
     _x_align = set(map_cfg.get("x_align_nodes", []))
+    _no_fall = set(map_cfg.get("no_fall_nodes", []))   # skip the minimap fall check on these nodes
+    #                                                    (e.g. P3, where a bottom-edge phantom keeps
+    #                                                    false-triggering re-seats)
     _arrive_retries = int(map_cfg.get("arrive_retries", 1))   # extra swim attempts if she didn't seat
 
     def _seat(node, make_swim):
@@ -2597,7 +2600,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     attack_range=_arange, band=_aband, step=_astep,
                                     attack_key=attack_key, deplete_reads=_adeplete,
                                     stall_limit=_astall, label=node,
-                                    mm_bounds=(_ncx - _phalf, _ncx + _phalf), mm_y=cy,
+                                    mm_bounds=(_ncx - _phalf, _ncx + _phalf),
+                                    mm_y=(None if node in _no_fall else cy),
                                     attack_keys=map_cfg.get("attack_keys"),
                                     priority_class=map_cfg.get("priority_class"),
                                     priority_range=map_cfg.get("priority_range"),

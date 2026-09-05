@@ -186,6 +186,17 @@ def test_single_fall_read_debounced(monkeypatch):
     assert out is not recovery.FELL                            # single read debounced -> no re-seat
 
 
+def test_fall_check_disabled_when_mm_y_none(monkeypatch):
+    # mm_y=None disables the fall check entirely (how a no_fall_nodes platform like P3 is farmed):
+    # even a wildly out-of-band read never returns FELL.
+    df, _, anc = _setup(monkeypatch, mobs=[(0.9, 810, 500, 40, 30)], ptuple=(800, 500),
+                        clock_vals=[0, 0, 999])
+    monkeypatch.setattr(recovery, "stable_char", lambda *a, **k: (100, 368))   # bottom-edge phantom
+    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
+    out = recovery.approach_shoot(10, df, anc, mm_y=None, fall_check_every=0.0, verbose=False)
+    assert out is not recovery.FELL                            # no fall check -> never bails
+
+
 def test_no_fall_when_on_platform(monkeypatch):
     # Still on the platform (y within the band): no FELL -- the fall check must not false-trigger.
     df, _, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0, 0, 999])
