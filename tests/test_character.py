@@ -22,6 +22,12 @@ def test_apply_character_none_char_returns_map_unchanged():
     assert recovery.apply_character(m, None) == m
 
 
+def test_apply_character_none_char_returns_a_copy():
+    m = {"attack_key": "c"}
+    out = recovery.apply_character(m, None)
+    assert out == m and out is not m       # equal contents, distinct object
+
+
 def test_apply_character_ignores_none_valued_char_fields():
     m = {"attack_key": "c"}
     c = {"attack_key": None}                       # explicit null -> not an override
