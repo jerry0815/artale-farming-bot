@@ -31,6 +31,25 @@ def test_exp_record_loop_appends_session_on_stop(monkeypatch):
     assert recovery.STATUS["state"] == "idle"
 
 
+def test_exp_record_loop_publishes_and_clears_started_at(monkeypatch):
+    monkeypatch.setattr(recovery, "make_exp_tracker", lambda *a, **k: (lambda: None))
+    monkeypatch.setattr(recovery, "lie_check_tick", lambda: None)
+    monkeypatch.setattr(recovery, "is_lie_check_active", lambda: False)
+    monkeypatch.setattr(recovery, "lie_check_silence", lambda: None)
+    monkeypatch.setattr(recovery, "append_exp_session", lambda row, **k: None)
+    t = {"v": 1000.0}
+    monkeypatch.setattr(recovery.time, "time", lambda: t["v"])
+    seen = []
+
+    def fake_sleep(s):
+        seen.append(recovery.STATUS.get("exp_started_at"))   # captured mid-run
+        recovery.STOP.set()
+    recovery.exp_record_loop(label="human", sleep=fake_sleep)
+
+    assert seen == [1000.0]                                   # set to t0 while recording
+    assert recovery.STATUS.get("exp_started_at") is None      # cleared on stop
+
+
 def test_exp_record_loop_null_gain_when_no_exp(monkeypatch):
     monkeypatch.setattr(recovery, "make_exp_tracker", lambda *a, **k: (lambda: None))
     monkeypatch.setattr(recovery, "lie_check_tick", lambda: None)

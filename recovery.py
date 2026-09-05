@@ -366,7 +366,8 @@ kb.f10_callback = lambda: dump_frame("manual")   # F10 dumps the current frame f
 # cooperative stop the UI sets to end a background-thread run (F8 pause still works).
 STATUS = {"state": "idle", "node": None, "count": None, "lie": False,
           "exp_per_min": None, "exp_10min": None, "exp_total": 0,
-          "run_secs": 0, "run_active_base": None, "run_active_since": None, "buff_at": None}
+          "run_secs": 0, "run_active_base": None, "run_active_since": None, "buff_at": None,
+          "exp_started_at": None}   # wall-clock start of an exp_record run (None = not recording)
 STOP = threading.Event()
 _LAST_WATER_ATTACK_KEY = [None]   # test/inspection hook: attack_key after character merge
 
@@ -446,6 +447,8 @@ def exp_record_loop(label="human", sleep=time.sleep):
     STATUS["state"] = "exp_record"
     exp_tick = make_exp_tracker(label="record", sample_secs=15, min_run_secs=30)
     t0 = time.time()
+    STATUS["exp_started_at"] = t0                       # UI reads this to show a live timer
+    print(f"[exp] recording started (label={label}) -- farm by hand; press Stop when done.")
     try:
         while not STOP.is_set():
             lie_check_tick()
@@ -455,6 +458,7 @@ def exp_record_loop(label="human", sleep=time.sleep):
     finally:
         dur = int(time.time() - t0)
         gained = STATUS.get("exp_total") or None       # 0/None (OCR failed) -> null, not a fake 0
+        print(f"[exp] recording stopped -- {dur}s, gained {gained if gained is not None else 'n/a (no OCR)'}")
         row = {
             "ts_start": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t0)),
             "ts_end": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
@@ -468,6 +472,7 @@ def exp_record_loop(label="human", sleep=time.sleep):
         lie_check_silence()
         STATUS["lie"] = False
         STATUS["state"] = "idle"
+        STATUS["exp_started_at"] = None
 
 
 # --- game-logic safety, ported faithfully from the notebook (screen reads, no keys) ---

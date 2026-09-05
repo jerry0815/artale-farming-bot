@@ -433,6 +433,11 @@ def _status_dict(controller):
         st["run_secs"] = int(active)
         # Derive avg from the SAME active time so total / time / avg agree (>=1 min in).
         st["exp_per_min"] = round(st.get("exp_total", 0) / (active / 60.0)) if active >= 60 else None
+    # exp_record has no farming active-time; expose elapsed from its own start so the UI can
+    # show a live timer and prove recording is running.
+    started = st.get("exp_started_at")
+    if st.get("state") == "exp_record" and started:
+        st["run_secs"] = int(time.time() - started)
     return st
 
 
@@ -537,6 +542,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
        <button class=stop onclick="stopExp()">■ Stop</button>
        <button onclick="loadExpSessions()">↻</button>
      </div>
+     <div id=expstat class=sub style="font-family:ui-monospace,monospace">not recording</div>
      <div class=sub><span id=exppm2>–</span> EXP/min (run avg) &middot; total <span id=exptot2>–</span></div>
    </fieldset>
    <table id=exptable style="width:100%;border-collapse:collapse;font-size:12px">
@@ -546,7 +552,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    </table>
  </div>
 
- <fieldset><legend>Detection preview</legend>
+ <fieldset id=detprev><legend>Detection preview</legend>
    <div class=row>
      scale <input id=dscale placeholder="auto" style="width:56px">
      thr <input id=dthr placeholder="auto" style="width:56px">
@@ -580,6 +586,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      document.getElementById('tab-'+t).classList.toggle('hidden', t!==name);
      document.getElementById('tab-b-'+t).classList.toggle('active', t===name);
    }
+   document.getElementById('detprev').classList.toggle('hidden', name==='exp');  // preview irrelevant while recording EXP
  }
  async function train(step){
    const q = new URLSearchParams({action:'train', step});
@@ -677,6 +684,9 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      document.getElementById('exp10').textContent = fmt(s.exp_10min);
      document.getElementById('exppm2').textContent = fmt(s.exp_per_min);
      document.getElementById('exptot2').textContent = fmt(s.exp_total);
+     const rec = s.state==='exp_record', es = document.getElementById('expstat');
+     es.textContent = rec ? ('● recording — '+hms(s.run_secs)) : 'not recording';
+     es.style.color = rec ? '#7fdd7f' : '#9a9';
    }catch(e){}
    setTimeout(poll, 500);
  }
@@ -701,11 +711,13 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
  async function startExp(){
    const label = document.getElementById('explabel').value || 'human';
    const j = await (await fetch('/cmd?'+new URLSearchParams({action:'exp_record_start', label}))).json();
-   if(!j.ok) alert(j.msg);
+   if(!j.ok){ alert(j.msg); return; }
+   document.getElementById('expstat').textContent = '● recording — 0:00';   // instant feedback; poll takes over
  }
  async function stopExp(){
    const j = await (await fetch('/cmd?'+new URLSearchParams({action:'exp_record_stop'}))).json();
-   if(!j.ok) alert(j.msg);
+   if(!j.ok){ alert(j.msg); return; }
+   document.getElementById('expstat').textContent = 'not recording';
    setTimeout(loadExpSessions, 500);        // let the recorder's finally write the row first
  }
  async function loadExpSessions(){
