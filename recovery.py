@@ -363,6 +363,7 @@ STATUS = {"state": "idle", "node": None, "count": None, "lie": False,
           "exp_per_min": None, "exp_10min": None, "exp_total": 0,
           "run_secs": 0, "run_active_base": None, "run_active_since": None, "buff_at": None}
 STOP = threading.Event()
+_LAST_WATER_ATTACK_KEY = [None]   # test/inspection hook: attack_key after character merge
 
 
 # --- DEBUG log: fine-grained per-frame traces written to a FILE only (never console/panel),
@@ -2074,17 +2075,22 @@ def apply_character(map_cfg, char_cfg):
     return merged
 
 
-def farming_loop_water(map_cfg, enemy_check=None, panic=None,
+def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                        stand_secs=(6, 8), break_every=(8 * 60, 15 * 60),
                        rest_range=(30, 120), skill_interval=(240, 300),
                        deplete_threshold=1, max_seconds=None):
     """Water-map farming: swim between platform centers, fire in place, rotate when a
     platform runs dry. Reuses lie-check, YOLO dragon counting, breaks, skills, panic,
-    STATUS/STOP. `map_cfg` is a maps/<name>.json path or a loaded config dict."""
+    STATUS/STOP. `map_cfg` is a maps/<name>.json path or a loaded config dict. `char` is an
+    optional chars/<name>.json path, dict, or None; when set, its key overrides are merged
+    onto map_cfg (character -> map -> code default precedence) before anything is read."""
     import random as _r
     import monsters
     if isinstance(map_cfg, str):
         map_cfg = watermap.load_map(map_cfg)
+    if char is not None:                              # overlay this character's keys
+        map_cfg = apply_character(map_cfg, load_char(char))
+    _LAST_WATER_ATTACK_KEY[0] = map_cfg.get("attack_key", "c")
     set_minimap(*watermap.minimap_crop(map_cfg))
     set_enemy_threshold(map_cfg.get("enemy_threshold", 0.75))   # red-dot sensitivity (per map)
     if map_cfg.get("map_box"):                          # per-map valid dot box (reject phantoms)

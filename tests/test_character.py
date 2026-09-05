@@ -57,3 +57,28 @@ def test_load_char_reads_file(tmp_path):
 def test_load_char_passthrough_dict():
     d = {"attack_key": "x"}
     assert recovery.load_char(d) is d
+
+
+def test_farming_loop_water_merges_char_before_reading(monkeypatch, tmp_path):
+    # Prove the character's attack_key reaches the loop: stub focus() to bail right after the
+    # merge, and capture the attack_key the loop resolved.
+    import recovery
+    seen = {}
+    m = {"detector": "time", "farm_nodes": ["P1"], "nodes": [{"name": "P1", "band": [0, 4, 0, 4]}],
+         "attack_key": "c"}
+    monkeypatch.setattr(recovery.watermap, "load_map", lambda p: dict(m))
+    monkeypatch.setattr(recovery.watermap, "minimap_crop", lambda cfg: (20, 171, 229, 259))
+    monkeypatch.setattr(recovery.watermap, "node_centers", lambda cfg: {"P1": (2, 2)})
+    monkeypatch.setattr(recovery.watermap, "swim_tol", lambda cfg: (10, 8, 16))
+    monkeypatch.setattr(recovery, "set_minimap", lambda *a, **k: None)
+    monkeypatch.setattr(recovery, "set_enemy_threshold", lambda *a, **k: None)
+
+    def fake_focus():
+        seen["attack_key"] = recovery._LAST_WATER_ATTACK_KEY[0]
+        return False                                  # bail out of the loop immediately
+
+    monkeypatch.setattr(recovery, "focus", fake_focus)
+    ch = tmp_path / "c.json"
+    ch.write_text('{"attack_key": "x"}', encoding="utf-8")
+    recovery.farming_loop_water("m.json", char=str(ch))
+    assert seen["attack_key"] == "x"
