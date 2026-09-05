@@ -1740,7 +1740,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                    deplete_reads=4, stall_limit=8, verbose=True, label="",
                    mm_bounds=None, mm_y=None, fall_margin=22, fall_check_every=0.9,
                    attack_keys=None, priority_class=None, priority_range=None,
-                   priority_hold_hits=0, priority_lock_grace=0):
+                   priority_hold_hits=0, priority_lock_grace=0, fall_confirm=2):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1765,6 +1765,7 @@ def approach_shoot(seconds, detect_fn, anchor,
     held = [None]           # currently-held walk key -> HELD across frames for smooth motion
     last_log = [0.0]
     last_fall = [t0]        # throttle the minimap fall check (stable_char is not free)
+    fall_streak = 0         # consecutive out-of-band fall reads (debounce: bottom-edge phantoms)
 
     def log(msg):
         if verbose and time.time() - last_log[0] > 0.6:
@@ -1796,9 +1797,17 @@ def approach_shoot(seconds, detect_fn, anchor,
                 last_fall[0] = time.time()
                 _mx, _my = stable_char(2)
                 if _my >= 0 and _my > mm_y + fall_margin:
-                    log(f"FELL off platform (y={_my} > {mm_y}+{fall_margin}) -> re-seat")
-                    kb.safe_release_all()
-                    return FELL
+                    # DEBOUNCE: a lone out-of-band read is usually a bottom-edge minimap phantom
+                    # (or a jump/knock arc), not a real fall -- re-seating on it wrecks stacked
+                    # platforms like P3. Only bail after `fall_confirm` consecutive confirmations.
+                    fall_streak += 1
+                    if fall_streak >= fall_confirm:
+                        log(f"FELL off platform (y={_my} > {mm_y}+{fall_margin}, x{fall_streak}) -> re-seat")
+                        kb.safe_release_all()
+                        return FELL
+                    log(f"fall read {fall_streak}/{fall_confirm} (y={_my}) -- confirming before re-seat")
+                else:
+                    fall_streak = 0                            # back in band -> reset the streak
             f = capture()
             if f is None:
                 time.sleep(0.1); continue
@@ -2593,7 +2602,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     priority_class=map_cfg.get("priority_class"),
                                     priority_range=map_cfg.get("priority_range"),
                                     priority_hold_hits=int(map_cfg.get("priority_hold_hits", 0)),
-                                    priority_lock_grace=int(map_cfg.get("priority_lock_grace", 0)))
+                                    priority_lock_grace=int(map_cfg.get("priority_lock_grace", 0)),
+                                    fall_confirm=int(map_cfg.get("fall_confirm", 2)))
                 heal_skill()
                 if ok is False:
                     return False

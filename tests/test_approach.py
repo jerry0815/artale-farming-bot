@@ -163,16 +163,27 @@ def test_minimap_bound_fires_in_place_at_platform_edge(monkeypatch):
 
 
 def test_fall_off_platform_returns_FELL(monkeypatch):
-    # She's knocked off P2 (mm_y=104) down to P3 (y~136): the minimap fall check reads y past the
-    # band -> approach_shoot returns FELL so the caller re-seats, instead of farming the platform
-    # below as if she were still on P2.
+    # She's knocked off P2 (mm_y=104) down to P3 (y~136): SUSTAINED out-of-band reads (>= fall_confirm)
+    # make the fall check return FELL so the caller re-seats, instead of farming the platform below.
     df, _, anc = _setup(monkeypatch, mobs=[(0.9, 810, 500, 40, 30)], ptuple=(800, 500),
-                        clock_vals=[0, 0, 999])
+                        clock_vals=[0] * 8)
     monkeypatch.setattr(recovery, "stable_char", lambda *a, **k: (100, 136))   # fell to y=136
     monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
-    out = recovery.approach_shoot(10, df, anc, mm_y=104, fall_margin=22,
+    out = recovery.approach_shoot(10, df, anc, mm_y=104, fall_margin=22, fall_confirm=2,
                                   fall_check_every=0.0, verbose=False)
     assert out is recovery.FELL
+
+
+def test_single_fall_read_debounced(monkeypatch):
+    # A LONE out-of-band read (a bottom-edge minimap phantom / jump arc) must NOT trigger FELL --
+    # otherwise one bad read costs a full re-seat (the P3 churn). Needs fall_confirm consecutive reads.
+    df, _, anc = _setup(monkeypatch, mobs=[(0.9, 810, 500, 40, 30)], ptuple=(800, 500),
+                        clock_vals=[0, 0, 999])                 # one fall check, then time out
+    monkeypatch.setattr(recovery, "stable_char", lambda *a, **k: (100, 368))   # phantom at map bottom
+    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
+    out = recovery.approach_shoot(10, df, anc, mm_y=136, fall_margin=22, fall_confirm=2,
+                                  fall_check_every=0.0, verbose=False)
+    assert out is not recovery.FELL                            # single read debounced -> no re-seat
 
 
 def test_no_fall_when_on_platform(monkeypatch):
