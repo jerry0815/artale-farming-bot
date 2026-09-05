@@ -2035,7 +2035,7 @@ def _walk_shoot_sweep(node):
 def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
                      stand_secs=(6, 8), break_every=(8 * 60, 15 * 60),
                      rest_range=(30, 120), skill_interval=(240, 300),
-                     deplete_threshold=1, max_seconds=None):
+                     deplete_threshold=1, max_seconds=None, breaks=True, cfg=None):
     """Node-graph farming loop with a STAND/WALK state machine. Each iteration runs
     ONE state move on the current platform (STAND_SHOOT or WALK_SHOOT), then counts
     dragons at the resulting standstill; a low count (< deplete_threshold) rotates to
@@ -2044,9 +2044,15 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
     jittered breaks, and jittered skill/heal cadence. max_seconds bounds it."""
     import random as _r
     import monsters, navmap
+    if cfg:                                    # per-map overrides (dragon_nest.json): tune rest cadence
+        break_every = tuple(cfg.get("break_every", break_every))
+        rest_range = tuple(cfg.get("rest_range", rest_range))
+        breaks = cfg.get("breaks", breaks)
     if not focus():
         print("[nav] could not focus"); return
-    print("[nav] state machine (stand/walk) + motion-based dragon counting")
+    print(f"[nav] state machine (stand/walk) + motion-based dragon counting"
+          + (f" | breaks {int(rest_range[0])}-{int(rest_range[1])}s every "
+             f"{int(break_every[0] / 60)}-{int(break_every[1] / 60)}min" if breaks else " | breaks OFF"))
     t_start = time.time()
     next_break = time.time() + _r.uniform(*break_every)
     next_skill = [time.time()]                    # cast skills from the first stint (as in split)
@@ -2152,7 +2158,7 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
             time.sleep(1); continue
 
         # scheduled break: drop to REST, rest, climb back
-        if time.time() >= next_break:
+        if breaks and time.time() >= next_break:
             print("[nav] break -> rest on fallen platform")
             if drop_to_fallen():
                 _idle_on_fallen(_r.uniform(*rest_range))
@@ -2891,8 +2897,10 @@ if __name__ == "__main__":
             kb.pause = True
         lis = Listener(on_press=kb.on_press); lis.start(); kb.pause = True
         print("FULL RUN (runnav) ready. Switch to the game and press F8 to start / pause.")
+        import watermap
+        _navcfg = watermap.load_map("maps/dragon_nest.json")   # rest cadence overrides live here
         try:
-            farming_loop_nav(exp_check=None, enemy_check=_enemy_check, panic=_panic)
+            farming_loop_nav(exp_check=None, enemy_check=_enemy_check, panic=_panic, cfg=_navcfg)
         finally:
             kb.safe_release_all(); lis.stop()
     elif cmd == "nav":

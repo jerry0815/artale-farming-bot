@@ -236,7 +236,7 @@ def _build_actions(controller_ref):
             kb.pause = False
             cfg = watermap.load_map(map_path) if map_path else {}
             if cfg.get("loop") == "nav":
-                recovery.farming_loop_nav(exp_check=None, enemy_check=_enemy_check, panic=_panic)
+                recovery.farming_loop_nav(exp_check=None, enemy_check=_enemy_check, panic=_panic, cfg=cfg)
             else:
                 recovery.farming_loop_water(map_path, char=char or None,
                                             enemy_check=_enemy_check, panic=_panic)

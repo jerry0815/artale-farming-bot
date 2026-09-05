@@ -1,5 +1,9 @@
 {
   "name": "dragon_nest",
   "loop": "nav",
-  "note": "Land dragon-nest farm. loop:nav runs farming_loop_nav (navmap geometry, no map JSON needed here); this file just makes it selectable in the panel's Farm dropdown."
+  "note": "Land dragon-nest farm. loop:nav runs farming_loop_nav (navmap geometry, no map JSON needed here); this file just makes it selectable in the panel's Farm dropdown.",
+  "breaks": true,
+  "break_every": [720, 1200],
+  "rest_range": [10, 30],
+  "rest_note": "rest 10-30s every 12-20min (break_every seconds, rest_range seconds). Set breaks:false for none."
 }
