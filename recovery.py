@@ -431,6 +431,42 @@ def watch_loop(sleep=time.sleep):
         STATUS["state"] = "idle"
 
 
+def exp_record_loop(label="human", sleep=time.sleep):
+    """Passive EXP recorder -- presses NO movement keys. Polls the EXP bar via make_exp_tracker
+    (updating STATUS['exp_per_min'/'exp_10min'/'exp_total']) plus the lie-check safety scan,
+    until STOP. On stop it appends ONE session row (start/duration/gain/rate/label) to
+    logs/exp_sessions.jsonl, so a HUMAN farm (started here, farmed by hand) yields a reference
+    efficiency to compare against bot runs. exp_gained comes from the tracker's anomaly-filtered
+    cumulative total; exp_per_min is computed from gained/duration so even a short session
+    summarizes; both are null when the tracker never produced a value (OCR failed)."""
+    STOP.clear()
+    STATUS["state"] = "exp_record"
+    exp_tick = make_exp_tracker(label="record", sample_secs=15, min_run_secs=30)
+    t0 = time.time()
+    try:
+        while not STOP.is_set():
+            lie_check_tick()
+            exp_tick()
+            STATUS["lie"] = is_lie_check_active()
+            sleep(0.5)
+    finally:
+        dur = int(time.time() - t0)
+        gained = STATUS.get("exp_total") or None       # 0/None (OCR failed) -> null, not a fake 0
+        row = {
+            "ts_start": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t0)),
+            "ts_end": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+            "duration_s": dur,
+            "exp_gained": gained,
+            "exp_per_min": round(gained / (dur / 60.0)) if (gained and dur >= 1) else None,
+            "exp_10min": STATUS.get("exp_10min"),
+            "label": label,
+        }
+        append_exp_session(row)
+        lie_check_silence()
+        STATUS["lie"] = False
+        STATUS["state"] = "idle"
+
+
 # --- game-logic safety, ported faithfully from the notebook (screen reads, no keys) ---
 ENEMY_THRESHOLD = 0.75      # red-dot match threshold; per-map via set_enemy_threshold(cfg)
 
