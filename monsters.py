@@ -122,9 +122,13 @@ DEFAULT_MOTION_ROI = (360, 70, 1910, 720)
 # with the character parked at each home (TOP x74,y85 / BOTTOM x63,y143..150).
 # The camera clamps per area, so the OTHER platform is mostly off-screen; these
 # bands exclude the extra ledges that remain in-frame. Still fine to LIVE-TUNE.
+# x1 pulled in from 1910 -> 1450: the far-RIGHT corner (near the right rope) is beyond her
+# arrow reach, so dragons drifting there used to keep the platform "alive" and stall the
+# deplete/rotate. Scoping the count to her reachable band (the red-rectangle area) ignores
+# them. LIVE-TUNE x1 to the rightmost x her arrows actually reach on each platform.
 MOTION_ROI_BY_NODE = {
-    "TOP_FARM":    (380, 500, 1910, 790),
-    "BOTTOM_FARM": (380, 400, 1910, 820),
+    "TOP_FARM":    (380, 500, 1450, 790),
+    "BOTTOM_FARM": (380, 400, 1450, 820),
 }
 DRAGON_AREA = 16000      # typical foreground px per dragon (LIVE-TUNE)
 FG_DIFF_THR = 45         # abs per-pixel diff (gray) counted as motion
