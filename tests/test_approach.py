@@ -209,3 +209,105 @@ def test_5tuple_detector_uses_default_key(monkeypatch):
     df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 999])
     recovery.approach_shoot(10, df, anc, attack_range=90, attack_key="c", verbose=False)
     assert "c" in pressed
+
+
+def test_priority_class_targets_fishhouse_over_nearer_goby(monkeypatch):
+    # A goby sits point-blank (in range) and a fishhouse far right (out of range). WITHOUT
+    # priority she'd fire at the goby; WITH priority_class='fishhouse' she walks toward the
+    # fishhouse instead -- it SPAWNS the goby burst, so being on it when it dies is the win.
+    mobs = [(0.9, 830, 490, 40, 30, "goby"),          # cx=850, dx~50 in range
+            (0.9, 1280, 490, 40, 30, "fishhouse")]    # cx=1300, dx~500 out of range
+    df, pressed, anc = _setup(monkeypatch, mobs=mobs, ptuple=(800, 500), clock_vals=[0, 0])
+    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+                            attack_keys={"goby": "x", "fishhouse": "x"},
+                            priority_class="fishhouse", verbose=False)
+    assert Key.right in pressed and "x" not in pressed   # walked toward fishhouse, didn't fire goby
+
+
+def test_priority_class_falls_back_to_nearest_when_absent(monkeypatch):
+    # No fishhouse present -> priority has nothing to prefer -> nearest goby, fire in place.
+    mobs = [(0.9, 810, 490, 40, 30, "goby")]          # dx~30 in range
+    df, pressed, anc = _setup(monkeypatch, mobs=mobs, ptuple=(800, 500), clock_vals=[0, 0, 999])
+    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+                            attack_keys={"goby": "x", "fishhouse": "x"},
+                            priority_class="fishhouse", verbose=False)
+    assert "x" in pressed                              # fired the goby (no fishhouse to prefer)
+
+
+def test_priority_range_closes_more_on_priority_target(monkeypatch):
+    # A fishhouse within the normal attack_range but beyond the tighter priority_range ->
+    # she WALKS closer instead of firing from afar, so the self-centered AoE lands on the
+    # spot where the 6 goby will spawn.
+    mobs = [(0.9, 880, 490, 40, 30, "fishhouse")]     # cx=900, dx~100: < range 110 but > priority 60
+    df, pressed, anc = _setup(monkeypatch, mobs=mobs, ptuple=(800, 500), clock_vals=[0, 0])
+    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+                            attack_keys={"fishhouse": "x"}, priority_class="fishhouse",
+                            priority_range=60, verbose=False)
+    assert Key.right in pressed and "x" not in pressed   # closed in, did not fire from afar
+
+
+def test_priority_hold_fires_extra_hits_after_fishhouse(monkeypatch):
+    # In-range on the fishhouse: the normal burst is 3 hits; priority_hold_hits=3 adds 3 more
+    # in-place AoE hits (no re-detect) to blanket the goby that spawn where it dies.
+    mob = [(0.9, 810, 490, 40, 30, "fishhouse")]      # dx~30 in range
+    df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0])
+    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+                            attack_keys={"fishhouse": "x"}, priority_class="fishhouse",
+                            priority_hold_hits=3, verbose=False)
+    assert pressed.count("x") >= 6                     # 3 burst + 3 post-kill hold
+
+
+def test_no_priority_hold_for_nonpriority_target(monkeypatch):
+    # A goby (not the priority class) in range -> only the normal 3-hit burst, no hold.
+    mob = [(0.9, 810, 490, 40, 30, "goby")]
+    df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 999])
+    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+                            attack_keys={"goby": "x", "fishhouse": "x"},
+                            priority_class="fishhouse", priority_hold_hits=3, verbose=False)
+    assert pressed.count("x") <= 3                     # no post-kill hold on a goby
+
+
+def test_priority_lock_holds_through_occlusion(monkeypatch):
+    # Frame 1: fishhouse point-blank (engage). Frames 2+: a bone fish swam through -> fishhouse
+    # NOT detected, only a FAR goby (out of range -> would need a WALK to reach). With grace she
+    # HOLDS on the fishhouse's last spot and keeps FIRING in place (each fire beat = 3 'x'), so
+    # across the engage + several occluded frames she racks up many hits instead of walking off.
+    fh = (0.9, 795, 490, 40, 30, "fishhouse")         # cx=815, dx~15 in range
+    goby_far = (0.9, 1285, 490, 40, 30, "goby")       # cx=1305, dx~505 far -> a walk, not a fire
+    df, pressed, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0] * 8)
+    df = _DetectSeq([[fh, goby_far]] + [[goby_far]] * 7)
+    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+                            attack_keys={"fishhouse": "x", "goby": "x"},
+                            priority_class="fishhouse", priority_lock_grace=3, verbose=False)
+    assert pressed.count("x") >= 9                     # kept firing through multiple occluded frames
+
+
+def test_priority_lock_gives_up_after_grace(monkeypatch):
+    # Same setup, grace=1: engage (fire) + ONE occluded hold (fire) = 6 'x', then she concludes
+    # the fishhouse is dead and pursues the far goby (walks, no more firing) so the platform clears.
+    fh = (0.9, 795, 490, 40, 30, "fishhouse")
+    goby_far = (0.9, 1285, 490, 40, 30, "goby")
+    df, pressed, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0] * 8)
+    df = _DetectSeq([[fh, goby_far]] + [[goby_far]] * 7)
+    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+                            attack_keys={"fishhouse": "x", "goby": "x"},
+                            priority_class="fishhouse", priority_lock_grace=1, verbose=False)
+    assert pressed.count("x") == 6                     # engage + 1 hold, then walked (stopped firing)
+    assert Key.right in pressed                        # pursued the goby after giving up
+
+
+def test_priority_lock_not_burned_while_approaching(monkeypatch):
+    # Fishhouse locked but occluded WHILE she's still walking toward it (out of range), with a
+    # goby now point-blank. The grace must NOT tick down while she's merely approaching (she has
+    # not landed a hit yet) -- she keeps walking to the fishhouse spot instead of giving up and
+    # firing the near goby, so a full-HP occluded fishhouse isn't abandoned unhit. grace=1 here
+    # would give up immediately if the counter ran while walking.
+    fh_far = (0.9, 1285, 490, 40, 30, "fishhouse")    # dx~505 -> out of range, she walks
+    goby_near = (0.9, 810, 490, 40, 30, "goby")       # dx~30 in range (the tempting switch)
+    df, pressed, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0] * 6)
+    df = _DetectSeq([[fh_far, goby_near]] + [[goby_near]] * 5)
+    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+                            attack_keys={"fishhouse": "x", "goby": "x"},
+                            priority_class="fishhouse", priority_lock_grace=1,
+                            stall_limit=8, verbose=False)
+    assert Key.right in pressed and "x" not in pressed  # kept approaching the fishhouse, never fired the goby

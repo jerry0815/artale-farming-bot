@@ -175,8 +175,11 @@ _FAST_TEMPLATES = ["transparent_title.png"]     # 3s window -> checked in-state,
 # popup art (the two renderings don't cross-match, so keep both to cover either style).
 # monster_warn_box.png = the red warning line on the new popup -- a 2nd independent OR signal,
 # so a single degraded template can't cause a miss (detect_lie_check fires if ANY hits).
+# The popup text is semi-transparent, so it doesn't match across map backgrounds -- each map
+# needs its own instr+warn pair. *_box = underwater (bright); *_temple = temple (dark).
 _FULL_TEMPLATES = ["curse_banner.png", "curse_lock.png", "monster_instr.png",
-                   "monster_instr_box.png", "monster_warn_box.png"]
+                   "monster_instr_box.png", "monster_warn_box.png",
+                   "monster_instr_temple.png", "monster_warn_temple.png"]
 _lie_enabled = bool(_glob(os.path.join(_LIE_DIR, "*.png")))
 
 _fast_alarm = Alarm(freq=1000, beep_ms=350, gap_ms=150)
@@ -526,7 +529,10 @@ def get_exp_number(exp_processor):
         raw = ocr_processor.run_ocr(ocr_processor.preprocess_exp_image(
             pil_img.crop((left, top, right, bottom))), 'exp')
         num_str, _pct = exp_processor.parse_exp_data(raw)
-        return int(num_str) if num_str else None
+        val = int(num_str) if num_str else None
+        if dbg_on():                                      # detection trace for exp-anomaly debugging
+            dbg(f"[exp] ocr raw={raw!r} parsed={num_str!r} -> {val}")
+        return val
     except Exception:
         return None
 
@@ -557,7 +563,8 @@ def get_exp(exp_processor):
         return None
 
 
-def make_exp_tracker(log_exp=True, sample_secs=30, window_secs=600, label="exp", min_run_secs=60):
+def make_exp_tracker(log_exp=True, sample_secs=30, window_secs=600, label="exp", min_run_secs=60,
+                     max_exp_per_sec=6000):
     """A per-window EXP logger, shared by the water and nav farming loops. Returns an
     `exp_tick()` to call each loop iteration: it samples the ABSOLUTE EXP number every
     `sample_secs` (the FIRST sample is taken immediately so a gain is available within a
@@ -577,12 +584,27 @@ def make_exp_tracker(log_exp=True, sample_secs=30, window_secs=600, label="exp",
     cumulative = [0]                                            # gain since run start (incremental)
     prev = [None]                                              # last (t, num) for the running delta
 
+    def _accept(pn, num, dt):
+        """Is (num - pn) a plausible EXP delta? Rejects negatives / level-ups (digit-count
+        change) AND implausibly large jumps -- a same-digit-count OCR misread (one wrong digit)
+        makes a positive, right-digit-count delta the old filter counted, silently inflating the
+        total. The cap = max_exp_per_sec * dt bounds a single sample's gain. Returns (ok, d, reason)."""
+        d = num - pn
+        if d <= 0:
+            return False, d, "nonpositive"
+        if len(str(pn)) != len(str(num)):
+            return False, d, "digit-change"                     # level-up or gross OCR error
+        cap = max_exp_per_sec * max(dt, 1.0)
+        if d > cap:
+            return False, d, f"over-cap(>{int(cap)})"
+        return True, d, "ok"
+
     def _window_gain(since):
         win = [(t, n) for t, n in samples if t >= since]
         total = 0
-        for (_t0, n0), (_t1, n1) in zip(win, win[1:]):
-            d = n1 - n0
-            if d > 0 and len(str(n0)) == len(str(n1)):          # positive, same digits (not lvl-up/OCR error)
+        for (t0, n0), (t1, n1) in zip(win, win[1:]):
+            ok, d, _reason = _accept(n0, n1, t1 - t0)
+            if ok:
                 total += d
         return total
 
@@ -595,10 +617,15 @@ def make_exp_tracker(log_exp=True, sample_secs=30, window_secs=600, label="exp",
             num = get_exp_number(exp_proc)
             if num:
                 if prev[0] is not None:                         # accumulate the run total incrementally
-                    pn = prev[0][1]
-                    d = num - pn
-                    if d > 0 and len(str(pn)) == len(str(num)):
+                    pt, pn = prev[0]
+                    ok, d, reason = _accept(pn, num, now - pt)
+                    if ok:
                         cumulative[0] += d
+                    if dbg_on():                                # exp-anomaly trace (see [exp] ocr lines)
+                        dbg(f"[exp] sample num={num} prev={pn} dt={now - pt:.0f}s delta={d} "
+                            f"-> {'count' if ok else 'REJECT ' + reason} (total={cumulative[0]})")
+                elif dbg_on():
+                    dbg(f"[exp] sample num={num} (first)")
                 prev[0] = (now, num)
                 samples.append((now, num))
                 if len(samples) > 400:
@@ -1712,7 +1739,8 @@ def approach_shoot(seconds, detect_fn, anchor,
                    attack_range=110, band=70, step=0.14, attack_key='c',
                    deplete_reads=4, stall_limit=8, verbose=True, label="",
                    mm_bounds=None, mm_y=None, fall_margin=22, fall_check_every=0.9,
-                   attack_keys=None):
+                   attack_keys=None, priority_class=None, priority_range=None,
+                   priority_hold_hits=0, priority_lock_grace=0):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1729,6 +1757,8 @@ def approach_shoot(seconds, detect_fn, anchor,
     best_absdx = None       # closest we've gotten to the current target (net-progress stall)
     no_improve = 0
     last_player = None      # sticky anchor: lock onto the bar nearest last frame's player
+    pri_lock_pos = None     # last screen pos of the engaged priority target (fishhouse)
+    pri_miss = 0            # consecutive reads the priority target has been missing (occlusion debounce)
     rooted = False          # True only while firing in place -> the skill roots her, so a lost
                             # HP bar means she hasn't moved (assume last pos). While WALKING she
                             # IS moving, so a stale pos would overshoot + false-stall -> never fake it.
@@ -1829,11 +1859,37 @@ def approach_shoot(seconds, detect_fn, anchor,
             nonempty_streak += 1
             if nonempty_streak >= 2:
                 empty_reads = 0
-            tx, _tfy, tcls = min(same, key=lambda m: abs(m[0] - px))
+            # Target priority: prefer the priority_class (the fishhouse that SPAWNS the goby
+            # burst) so she stands ON it when it dies -- the self-centered AoE then catches the
+            # 6 goby the instant they pop, stacked, instead of chasing them one-by-one as they
+            # scatter. No priority mob present -> nearest same-platform mob.
+            pri = [m for m in same if m[2] == priority_class] if priority_class else []
+            holding = False
+            if pri:                                        # priority target visible -> lock onto nearest
+                tx, _tfy, tcls = min(pri, key=lambda m: abs(m[0] - px))
+                pri_lock_pos = (tx, _tfy); pri_miss = 0
+            elif (priority_class and pri_lock_pos is not None and pri_miss < priority_lock_grace):
+                # Priority target BLINKED OUT (a bone fish swam through / our own AoE VFX) -- not
+                # necessarily dead. Stay committed to its last position instead of switching to a
+                # goby and leaving the fishhouse half-killed. The grace only ticks down while she's
+                # IN RANGE firing the spot (below) -- an occlusion while still WALKING in hasn't
+                # confirmed anything, so it must not burn the grace before she lands a hit. Once she
+                # HAS been firing the spot and it still doesn't reappear, it's dead -> lock clears
+                # and the goby it spawned become the target.
+                tx, _tfy = pri_lock_pos; tcls = priority_class; holding = True
+            else:
+                pri_lock_pos = None                        # no lock (or gave up) -> nearest same-platform
+                tx, _tfy, tcls = min(same, key=lambda m: abs(m[0] - px))
             dx = tx - px
             key = Key.right if dx >= 0 else Key.left
             akey = (attack_keys or {}).get(tcls, attack_key)   # per-mob skill; falls back to default
-            if abs(dx) <= attack_range:                   # in range: face + fire a burst
+            # Tighter close-in on the priority target: get point-blank on the fishhouse so the
+            # goby spawn inside the AoE, not at its (wider) normal firing standoff.
+            _rng = priority_range if (priority_range and tcls == priority_class) else attack_range
+            if abs(dx) <= _rng:                           # in range: face + fire a burst
+                if holding:                                # occluded AND firing the spot -> real evidence
+                    pri_miss += 1                          # it's gone; count only in-range misses
+                    log(f"priority occluded ({pri_miss}/{priority_lock_grace}) -> hold+fire last pos {tx}")
                 best_absdx = None; no_improve = 0
                 rooted = True                             # firing in place -> assume-last-pos is valid
                 log(f"IN RANGE dx={dx} px={px} -> attack '{akey}' burst ({tcls}, same={len(same)})")
@@ -1842,6 +1898,17 @@ def approach_shoot(seconds, detect_fn, anchor,
                 for _ in range(3):                        # commit: several hits before re-evaluating
                     kb.safe_press(akey); time.sleep(0.35); kb.safe_release(akey)
                     time.sleep(0.05)
+                if priority_class and tcls == priority_class and priority_hold_hits:
+                    # Just hit the fishhouse (the goby SPAWNER). Keep the self-centered AoE up in
+                    # place for a few more hits WITHOUT re-detecting, so the 6 goby that pop right
+                    # here are caught while still stacked -- closing the detection gap that would
+                    # otherwise let them scatter before the next read.
+                    log(f"post-kill hold: +{priority_hold_hits} AoE hits (fishhouse burst)")
+                    for _ in range(priority_hold_hits):
+                        if kb.pause:
+                            break
+                        kb.safe_press(akey); time.sleep(0.35); kb.safe_release(akey)
+                        time.sleep(0.05)
             else:                                         # nearest visible mob is OUT of range
                 # NET-progress stall: give up (advance) only if we stop getting CLOSER (best
                 # |dx| not improving) for stall_limit frames -- tolerates jitter + slow approach,
@@ -2383,7 +2450,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
     # EXP tracker: per-10-min gain + running average (see make_exp_tracker).
     exp_tick = make_exp_tracker(log_exp=map_cfg.get("log_exp", True),
                                 sample_secs=float(map_cfg.get("exp_sample_secs", 30)),
-                                window_secs=float(map_cfg.get("exp_window_secs", 600)))
+                                window_secs=float(map_cfg.get("exp_window_secs", 600)),
+                                max_exp_per_sec=float(map_cfg.get("exp_max_per_sec", 6000)))
 
     def guard():
         """Per-tick housekeeping. Returns 'stop' (return now), 'pause'/'skip'
@@ -2515,13 +2583,22 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     attack_key=attack_key, deplete_reads=_adeplete,
                                     stall_limit=_astall, label=node,
                                     mm_bounds=(_ncx - _phalf, _ncx + _phalf), mm_y=cy,
-                                    attack_keys=map_cfg.get("attack_keys"))
+                                    attack_keys=map_cfg.get("attack_keys"),
+                                    priority_class=map_cfg.get("priority_class"),
+                                    priority_range=map_cfg.get("priority_range"),
+                                    priority_hold_hits=int(map_cfg.get("priority_hold_hits", 0)),
+                                    priority_lock_grace=int(map_cfg.get("priority_lock_grace", 0)))
                 heal_skill()
                 if ok is False:
                     return False
                 if ok is FELL:                           # knocked/walked off mid-beat -> re-seat & farm on
                     print(f"[water] {node}: fell off platform -> re-seat")
-                    if not _seat_on_platform(None):
+                    # PHANTOM GUARD: seed the re-seat swim with her ACTUAL fallen position
+                    # (stable_char = densest-cluster read, phantom-safe). Without a seed the first
+                    # swim read has no `near` and can lock onto a fixed minimap phantom -> she swims
+                    # to the top-right map edge (the old phantom-runaway) instead of climbing back.
+                    _fell_at = stable_char()
+                    if not _seat_on_platform(_fell_at if _fell_at[0] >= 0 else None):
                         return False
                     node_anchor = _make_anchor() if _make_anchor else None
                     _node_t0 = time.time()

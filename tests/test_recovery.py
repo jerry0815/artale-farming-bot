@@ -99,6 +99,31 @@ def test_exp_tracker_per_min_gated_until_min_run(monkeypatch):
     assert recovery.STATUS["exp_per_min"] is not None
 
 
+def test_exp_tracker_rejects_implausible_same_digit_jump(monkeypatch):
+    """A same-digit-count OCR misread (e.g. one wrong digit) yields a positive delta with the
+    RIGHT digit count, so the old filter counted it. The magnitude cap (max_exp_per_sec * dt)
+    rejects it as an anomalous gain instead of inflating the total."""
+    clock = [1000.0]
+    monkeypatch.setattr(recovery.time, "time", lambda: clock[0])
+    monkeypatch.setattr(recovery, "ExpProcessor", lambda *a, **k: object())
+    # 100000 -> 100050 (+50 ok) -> 900050 (+800000, same 6 digits but absurd for 1s -> REJECT)
+    #        -> 900100 (+50 ok) -> 900150 (+50 ok)
+    nums = [100000, 100050, 900050, 900100, 900150]
+    calls = [0]
+
+    def fake_num(_p):
+        i = calls[0]; calls[0] += 1
+        return nums[i] if i < len(nums) else None
+    monkeypatch.setattr(recovery, "get_exp_number", fake_num)
+    tick = recovery.make_exp_tracker(sample_secs=1, window_secs=5, label="t", min_run_secs=0,
+                                     max_exp_per_sec=6000)                 # cap = 6000/s * 1s
+    for t in range(1001, 1006):              # window logs at 1005
+        clock[0] = float(t); tick()
+    # three +50s count; the +800000 spike is rejected -> total 150, not 800150
+    assert recovery.STATUS["exp_total"] == 150
+    assert recovery.STATUS["exp_10min"] == 150
+
+
 def test_exp_tracker_noop_when_disabled(monkeypatch):
     monkeypatch.setattr(recovery, "ExpProcessor", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not construct")))
     tick = recovery.make_exp_tracker(log_exp=False)
