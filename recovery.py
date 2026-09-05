@@ -1628,7 +1628,7 @@ def walk_shoot(node_mm_x, seconds, detect_fn, attack_key='c', half=60, tol=(3, 3
 def approach_shoot(seconds, detect_fn, anchor,
                    attack_range=110, band=70, step=0.14, attack_key='c',
                    deplete_reads=4, stall_limit=8, verbose=True, label="",
-                   mm_bounds=None):
+                   mm_bounds=None, mm_y=None, fall_margin=22, fall_check_every=0.9):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1650,6 +1650,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                             # IS moving, so a stale pos would overshoot + false-stall -> never fake it.
     held = [None]           # currently-held walk key -> HELD across frames for smooth motion
     last_log = [0.0]
+    last_fall = [t0]        # throttle the minimap fall check (stable_char is not free)
 
     def log(msg):
         if verbose and time.time() - last_log[0] > 0.6:
@@ -1673,6 +1674,17 @@ def approach_shoot(seconds, detect_fn, anchor,
             if kb.pause:
                 return False
             lie_check_fast_tick()          # unified safety scan: lie-check + another-player
+            # FALL check: she can be knocked (or walk) OFF the platform mid-beat; the screen-space
+            # anchor keeps "farming" the platform below. Read her minimap y (robust, densest-cluster
+            # so a phantom can't trip it) and if she has dropped well past the platform band, bail so
+            # the caller RE-SEATS her instead of farming the wrong platform.
+            if mm_y is not None and time.time() - last_fall[0] >= fall_check_every:
+                last_fall[0] = time.time()
+                _mx, _my = stable_char(2)
+                if _my >= 0 and _my > mm_y + fall_margin:
+                    log(f"FELL off platform (y={_my} > {mm_y}+{fall_margin}) -> re-seat")
+                    kb.safe_release_all()
+                    return FELL
             f = capture()
             if f is None:
                 time.sleep(0.1); continue
@@ -1790,6 +1802,7 @@ FARM_CTX = {
 }
 
 DEPLETED = "DEPLETED"   # _stand_shoot sentinel: platform ran dry mid-shoot -> rotate now
+FELL = "FELL"           # approach_shoot sentinel: her minimap y dropped off the platform -> re-seat
 
 
 def _reactive_deplete(low_streak, count, threshold, debounce):
@@ -2307,43 +2320,48 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
         STATUS["node"] = node
         dep = centers.get(prev) if prev in centers else None   # departure anchor -> rejects the
         #                                          first-read phantom when her dot is briefly absent
-        if node in stacked_up and prev == stacked_up[node]:
-            # The upper node isn't always DIRECTLY above -- P3 sits 18px right of P4 -- so a
-            # straight-up jump falls back onto the lower platform. Drift toward the upper node's
-            # x (for `stacked_drift_secs`) WHILE jumping, then jump straight up to seat on it.
-            lo_x = centers[prev][0]
-            hkey = Key.right if cx > lo_x + 2 else (Key.left if cx < lo_x - 2 else None)
-            drift = float(map_cfg.get("stacked_drift_secs", 0.6))
-            _hd = "R" if hkey == Key.right else ("L" if hkey == Key.left else "-")
-            print(f"[water] --> {node}: jump-up from {prev} (stacked); drift {_hd} {drift}s (x {lo_x}->{cx})")
-            t0j = time.time(); t_end = t0j + stacked_jump_secs
-            while time.time() < t_end and not kb.pause:
-                if hkey and time.time() - t0j < drift:
-                    kb.safe_press(hkey)                # drift toward the upper node's x...
-                elif hkey:
-                    kb.safe_release(hkey)              # ...then straight up to land on it
-                kb.safe_press(JUMP); time.sleep(0.1); kb.safe_release(JUMP)
-            kb.safe_release_all(); time.sleep(0.4)     # let her fall onto the upper platform (seat) before farming
-        elif node in _x_align:                         # already at the bottom y (just sank) -> x-only
-            print(f"[water] --> farm {node}: align x to {cx} (no jump)")
-            if not _seat(node, lambda first: swim_to(cx, cy, tol=tol, cap=6.0, jump=False, axis="x",
-                                                     verbose=_log_swim, label=node,
-                                                     start_near=dep if first else None)):
-                print(f"[water] {node}: could not seat (x-align) -> re-locate")
-                return False                               # don't farm the wrong spot she landed on
-        else:
+        def _seat_on_platform(dep):
+            """(Re)seat her on `node`: True if seated (blindly for a stacked jump), False if a swim
+            couldn't confirm arrival. `dep` seeds the phantom anchor -- the departure on the first
+            seat; None on a re-seat, where she reads fine off the platform she fell to."""
+            if node in stacked_up and prev == stacked_up[node]:
+                # The upper node isn't always DIRECTLY above -- P3 sits 18px right of P4 -- so a
+                # straight-up jump falls back onto the lower platform. Drift toward the upper node's
+                # x (for `stacked_drift_secs`) WHILE jumping, then jump straight up to seat on it.
+                lo_x = centers[prev][0]
+                hkey = Key.right if cx > lo_x + 2 else (Key.left if cx < lo_x - 2 else None)
+                drift = float(map_cfg.get("stacked_drift_secs", 0.6))
+                _hd = "R" if hkey == Key.right else ("L" if hkey == Key.left else "-")
+                print(f"[water] --> {node}: jump-up from {prev} (stacked); drift {_hd} {drift}s (x {lo_x}->{cx})")
+                t0j = time.time(); t_end = t0j + stacked_jump_secs
+                while time.time() < t_end and not kb.pause:
+                    if hkey and time.time() - t0j < drift:
+                        kb.safe_press(hkey)            # drift toward the upper node's x...
+                    elif hkey:
+                        kb.safe_release(hkey)          # ...then straight up to land on it
+                    kb.safe_press(JUMP); time.sleep(0.1); kb.safe_release(JUMP)
+                kb.safe_release_all(); time.sleep(0.4) # let her fall onto the upper platform (seat)
+                return True
+            if node in _x_align:                       # already at the bottom y (just sank) -> x-only
+                print(f"[water] --> farm {node}: align x to {cx} (no jump)")
+                return _seat(node, lambda first: swim_to(cx, cy, tol=tol, cap=6.0, jump=False, axis="x",
+                                                         verbose=_log_swim, label=node,
+                                                         start_near=dep if first else None))
             lift = _lift_override.get(node, _ylift)        # pin nodes (P4) use 0 -- target below
             print(f"[water] --> farm {node} (center {cx},{cy}) lift={lift}")  # the pin is unreachable
             if not _seat(node, lambda first: swim_to(cx, cy - lift, tol=tol, cap=12.0, jump_burst=_jb,
                                                      jump_gap=_jg, verbose=_log_swim, label=node,
                                                      start_near=dep if first else None)):  # aim ABOVE
-                print(f"[water] {node}: could not seat -> re-locate")
-                return False                               # don't farm the wrong platform
-            extra = _arrive_jumps.get(node, 0)             # seat on a pin platform (P4): a few more hops
-            for _ in range(extra):
+                return False
+            for _ in range(_arrive_jumps.get(node, 0)):    # seat on a pin platform (P4): a few more hops
                 if kb.pause:
                     break
                 kb.safe_press(JUMP); time.sleep(0.12); kb.safe_release(JUMP); time.sleep(0.05)
+            return True
+
+        if not _seat_on_platform(dep):
+            print(f"[water] {node}: could not seat -> re-locate")
+            return False                               # don't farm the wrong platform she landed on
         heal_skill()                                   # cast buffs here: just arrived, NOT mid-attack
         node_anchor = _make_anchor() if _make_anchor else None   # fresh lock per platform, tracks across beats
         _node_t0 = time.time()
@@ -2369,10 +2387,17 @@ def farming_loop_water(map_cfg, enemy_check=None, panic=None,
                                     attack_range=_arange, band=_aband, step=_astep,
                                     attack_key=attack_key, deplete_reads=_adeplete,
                                     stall_limit=_astall, label=node,
-                                    mm_bounds=(_ncx - _phalf, _ncx + _phalf))
+                                    mm_bounds=(_ncx - _phalf, _ncx + _phalf), mm_y=cy)
                 heal_skill()
                 if ok is False:
                     return False
+                if ok is FELL:                           # knocked/walked off mid-beat -> re-seat & farm on
+                    print(f"[water] {node}: fell off platform -> re-seat")
+                    if not _seat_on_platform(None):
+                        return False
+                    node_anchor = _make_anchor() if _make_anchor else None
+                    _node_t0 = time.time()
+                    continue
                 if ok is DEPLETED:
                     break                                # platform clear -> advance
                 continue

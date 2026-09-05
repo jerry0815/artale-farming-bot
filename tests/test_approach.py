@@ -160,3 +160,26 @@ def test_minimap_bound_fires_in_place_at_platform_edge(monkeypatch):
                             mm_bounds=(60, 180), verbose=False)
     assert Key.right not in presses      # did NOT walk off the platform
     assert 'c' in presses                # fired in place instead
+
+
+def test_fall_off_platform_returns_FELL(monkeypatch):
+    # She's knocked off P2 (mm_y=104) down to P3 (y~136): the minimap fall check reads y past the
+    # band -> approach_shoot returns FELL so the caller re-seats, instead of farming the platform
+    # below as if she were still on P2.
+    df, _, anc = _setup(monkeypatch, mobs=[(0.9, 810, 500, 40, 30)], ptuple=(800, 500),
+                        clock_vals=[0, 0, 999])
+    monkeypatch.setattr(recovery, "stable_char", lambda *a, **k: (100, 136))   # fell to y=136
+    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
+    out = recovery.approach_shoot(10, df, anc, mm_y=104, fall_margin=22,
+                                  fall_check_every=0.0, verbose=False)
+    assert out is recovery.FELL
+
+
+def test_no_fall_when_on_platform(monkeypatch):
+    # Still on the platform (y within the band): no FELL -- the fall check must not false-trigger.
+    df, _, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0, 0, 999])
+    monkeypatch.setattr(recovery, "stable_char", lambda *a, **k: (100, 108))   # y within band of 104
+    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
+    out = recovery.approach_shoot(10, df, anc, mm_y=104, fall_margin=22,
+                                  fall_check_every=0.0, deplete_reads=4, verbose=False)
+    assert out is not recovery.FELL
