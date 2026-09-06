@@ -2441,25 +2441,38 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                   + (f" + title ({_fb['title_template']})" if _fb_titlew is not None else ""))
         print(f"[water] approach ON: detector={detector} range={_arange} band={_aband}")
 
-    buff_keys = map_cfg.get("buff_keys", [])          # per-character buffs; empty = none
-    _bi = map_cfg.get("buff_interval_secs")           # exact interval (else skill_interval range)
-    if _bi:
-        skill_interval = (float(_bi), float(_bi))
-    next_skill = [time.time() + 5.0]              # cast buffs ~5s in (active early + verifiable)
+    # Buff groups: each key set fires on its OWN interval, so e.g. 'd' every 5min and a slow buff
+    # 'G' every 15min run independently. Config: "buff_groups": [{"keys":["d"],"interval_secs":300},
+    # {"keys":["G"],"interval_secs":900}]. Back-compat: no buff_groups -> one group from buff_keys /
+    # buff_interval_secs (else the skill_interval range's low end).
+    _groups = map_cfg.get("buff_groups")
+    if _groups:
+        buff_groups = [(list(g.get("keys", [])), float(g.get("interval_secs", 300))) for g in _groups]
+    else:
+        _bk = map_cfg.get("buff_keys", [])
+        _bi = map_cfg.get("buff_interval_secs")
+        buff_groups = [(list(_bk), float(_bi) if _bi else float(skill_interval[0]))] if _bk else []
+    buff_groups = [(k, iv) for k, iv in buff_groups if k]      # drop empty key sets
+    # per-group next-cast time; each first fires ~5s in (staggered 1s so they don't collide)
+    _next_buff = [time.time() + 5.0 + i for i in range(len(buff_groups))]
 
     _buff_settle = float(map_cfg.get("buff_settle_secs", 0.6))   # wait out the attack root first
 
     def heal_skill():
-        if not buff_keys or time.time() < next_skill[0]:
+        now = time.time()
+        due = [i for i in range(len(buff_groups)) if now >= _next_buff[i]]
+        if not due:
             return
-        next_skill[0] = time.time() + _r.uniform(*skill_interval)
         # The attack skill ROOTS her (its animation eats a key pressed too soon), so drop all
         # keys and let the root clear BEFORE casting -- otherwise the buff press is swallowed.
         kb.safe_release_all()
         time.sleep(_buff_settle)
-        print(f"[water] buff -> press {buff_keys} (next in {int(skill_interval[0])}s)")
-        for k in buff_keys:
-            kb.safe_press(k); time.sleep(0.3); kb.safe_release(k)
+        for i in due:
+            keys, iv = buff_groups[i]
+            _next_buff[i] = now + iv
+            print(f"[water] buff -> press {keys} (next in {int(iv)}s)")
+            for k in keys:
+                kb.safe_press(k); time.sleep(0.3); kb.safe_release(k)
         STATUS["buff_at"] = time.time()
 
     # rotation: 'sweep' = farm the list in order (bottom->top) then reset via reset_node;

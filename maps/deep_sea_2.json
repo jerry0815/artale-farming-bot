@@ -49,6 +49,10 @@
   "buff_keys": [
     "d"
   ],
+  "buff_groups": [
+    { "keys": ["d"], "interval_secs": 300 },
+    { "keys": ["G"], "interval_secs": 900 }
+  ],
   "player": {
     "foot_offset": 135
   },
