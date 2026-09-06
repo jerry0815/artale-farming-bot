@@ -126,6 +126,48 @@ def grab_misses_from_video(video, count, model, conf=0.3, imgsz=960):
     return saved, scanned
 
 
+def grab_fishhouse_misses_from_video(video, count, model, lo=0.12, hi=0.5, imgsz=960):
+    """ACTIVE LEARNING for OCCLUSION: keep frames where the model sees a fishhouse only WEAKLY
+    (conf in [lo, hi)) -- a bone fish or our own attack VFX is partly covering it, the exact hard
+    case that makes her abandon a fishhouse mid-kill. (This map scrolls, so a stationary fishhouse
+    can't be tracked by screen position across sampled frames; a weak per-frame detection is the
+    scroll-proof signal.) Prelabels everything the model found INCLUDING the weak fishhouse box so
+    you just fix/confirm it. Returns (saved, scanned)."""
+    fh = CLASSES.index("fishhouse")
+    os.makedirs(IMG_DIR, exist_ok=True)
+    v = cv2.VideoCapture(video)
+    n = int(v.get(cv2.CAP_PROP_FRAME_COUNT))
+    step = max(1, n // max(1, count * 6))          # scan ~6x count (most frames are clean hits)
+    saved = scanned = 0
+    for f in range(0, n, step):
+        if saved >= count:
+            break
+        v.set(cv2.CAP_PROP_POS_FRAMES, f)
+        ok, fr = v.read()
+        if not ok:
+            continue
+        stem = f"real_{f:06d}"
+        if os.path.exists(os.path.join(LBL_DIR, stem + ".txt")):
+            continue                               # already labeled -> never clobber hand work
+        scanned += 1
+        H, W = fr.shape[:2]
+        r = model.predict(fr, imgsz=imgsz, conf=lo, verbose=False)[0]
+        boxes, weak_fh = [], False
+        for b in r.boxes:
+            c = int(b.cls[0]); cf = float(b.conf[0])
+            x0, y0, x1, y1 = b.xyxy[0].tolist()
+            boxes.append([c, ((x0 + x1) / 2) / W, ((y0 + y1) / 2) / H, (x1 - x0) / W, (y1 - y0) / H])
+            if c == fh and cf < hi:
+                weak_fh = True                     # a barely-seen (occluded) fishhouse in this frame
+        if not weak_fh:
+            continue                               # only keep frames with a hard/occluded fishhouse
+        cv2.imwrite(os.path.join(IMG_DIR, stem + ".png"), fr)
+        write_boxes(stem, boxes)                   # found mobs + the weak fishhouse box -> you fix it
+        saved += 1
+    v.release()
+    return saved, scanned
+
+
 def grab_from_dir(src, model=None):
     os.makedirs(IMG_DIR, exist_ok=True)
     saved = 0
@@ -273,6 +315,20 @@ if __name__ == "__main__":
         got, scanned = grab_misses_from_video(video, count, model, conf=conf, imgsz=imgsz)
         print(f"[label] scanned {scanned} frames -> kept {got} player-MISS frames -> {IMG_DIR}")
         print("[label] Now run: python label_mobs.py  (press 3, draw the HP bar; skip VFX-hidden ones)")
+    elif "--grab-fh-misses" in sys.argv:
+        from ultralytics import YOLO
+        model = YOLO("models/mob_yolo.pt")
+        i = sys.argv.index("--grab-fh-misses")
+        video = sys.argv[i + 1]
+        count = int(sys.argv[i + 2]) if len(sys.argv) > i + 2 and sys.argv[i + 2].isdigit() else 60
+        lo = float(sys.argv[sys.argv.index("--lo") + 1]) if "--lo" in sys.argv else 0.12
+        hi = float(sys.argv[sys.argv.index("--hi") + 1]) if "--hi" in sys.argv else 0.5
+        imgsz = int(sys.argv[sys.argv.index("--imgsz") + 1]) if "--imgsz" in sys.argv else 960
+        print(f"[label] occlusion mining: keeping frames with a WEAK fishhouse (conf {lo}-{hi}, "
+              f"imgsz {imgsz}) from {video}")
+        got, scanned = grab_fishhouse_misses_from_video(video, count, model, lo=lo, hi=hi, imgsz=imgsz)
+        print(f"[label] scanned {scanned} frames -> kept {got} occluded-fishhouse frames -> {IMG_DIR}")
+        print("[label] Now run: python label_mobs.py  (press 1, fix/confirm the fishhouse box)")
     elif "--grab" in sys.argv or "--grab-dir" in sys.argv:
         model = None
         if "--no-prelabel" not in sys.argv:
