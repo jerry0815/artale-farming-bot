@@ -38,7 +38,6 @@
   "attack_key": "x",
   "attack_keys": { "fishhouse": "x", "goby": "x" },
   "priority_class": "fishhouse",
-  "priority_range": 60,
   "priority_hold_hits": 3,
   "priority_lock_grace": 2,
   "priority_note": "fishhouse SPAWNS 6 goby (the exp payload) -- target it first so she stands on it when it dies and the self-centered AoE catches the fresh stack. attack_keys maps both classes to the same skill 'x' just to switch YOLO into class-aware mode (with_class). priority_hold_hits=3 keeps the AoE firing in place ~1s after the fishhouse burst (no re-detect gap) to blanket the goby the instant they pop. If goby still spawn outside the AoE, set priority_range (e.g. 90) tighter than attack_range so she closes to point-blank first. exp_max_per_sec caps a single 30s exp sample against OCR misreads.",
