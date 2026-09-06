@@ -281,7 +281,10 @@ def lie_check_full_tick(interval=1.5):
     scores = {}
     hits = detect_lie_check(f, templates_folder=_LIE_DIR, template_filter=_FULL_TEMPLATES,
                             work_width=1000, scores=scores)
-    yolo = detect_lie_check_yolo(f)                       # [] when the model file is absent
+    yolo = detect_lie_check_yolo(f, conf=0.80)           # [] when the model file is absent
+    #   conf 0.80: real popups score 0.978-0.991; worst false detection on normal frames was
+    #   0.701 (a minimap-crop debug image) -- 0.80 clears positives with headroom for degraded
+    #   live frames while staying above that floor. Recall-first, measured not guessed.
     hits = hits + [(f"yolo:{cls}", cf) for cls, cf, _ in yolo]
     if _full_alert.update(bool(hits)) and hits:
         print(f"[lie-check] ⚠️ 需真人處理畫面 {[(n, round(s, 2)) for n, s in hits]} -- ALARM (F8 暫停)")
