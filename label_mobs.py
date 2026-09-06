@@ -168,6 +168,38 @@ def grab_fishhouse_misses_from_video(video, count, model, lo=0.12, hi=0.5, imgsz
     return saved, scanned
 
 
+def grab_multi_player_from_video(video, count, model, conf=0.3, imgsz=960):
+    """ACTIVE LEARNING for the PLAYER false-positive bug: keep frames where the model emits MORE
+    THAN ONE player box (class 2). There's only ever one real player, so these are exactly the
+    frames teaching the multi-detection that makes the anchor snap hundreds of px around. Prelabels
+    every box; you keep the box on the real character and DELETE the false ones. Returns (saved, scanned)."""
+    player_cls = CLASSES.index("player")
+    os.makedirs(IMG_DIR, exist_ok=True)
+    v = cv2.VideoCapture(video)
+    n = int(v.get(cv2.CAP_PROP_FRAME_COUNT))
+    step = max(1, n // max(1, count * 6))          # scan ~6x count (most frames have 0-1 player)
+    saved = scanned = 0
+    for f in range(0, n, step):
+        if saved >= count:
+            break
+        v.set(cv2.CAP_PROP_POS_FRAMES, f)
+        ok, fr = v.read()
+        if not ok:
+            continue
+        stem = f"real_{f:06d}"
+        if os.path.exists(os.path.join(LBL_DIR, stem + ".txt")):
+            continue                               # already labeled -> never clobber hand work
+        scanned += 1
+        boxes = _prelabel(fr, model, conf=conf, imgsz=imgsz)
+        if sum(1 for b in boxes if int(b[0]) == player_cls) < 2:
+            continue                               # 0 or 1 player -> not the bug -> skip
+        cv2.imwrite(os.path.join(IMG_DIR, stem + ".png"), fr)
+        write_boxes(stem, boxes)                   # all boxes -> you delete the false player ones
+        saved += 1
+    v.release()
+    return saved, scanned
+
+
 def grab_from_dir(src, model=None):
     os.makedirs(IMG_DIR, exist_ok=True)
     saved = 0
@@ -315,6 +347,19 @@ if __name__ == "__main__":
         got, scanned = grab_misses_from_video(video, count, model, conf=conf, imgsz=imgsz)
         print(f"[label] scanned {scanned} frames -> kept {got} player-MISS frames -> {IMG_DIR}")
         print("[label] Now run: python label_mobs.py  (press 3, draw the HP bar; skip VFX-hidden ones)")
+    elif "--grab-multi-player" in sys.argv:
+        from ultralytics import YOLO
+        model = YOLO("models/mob_yolo.pt")
+        i = sys.argv.index("--grab-multi-player")
+        video = sys.argv[i + 1]
+        count = int(sys.argv[i + 2]) if len(sys.argv) > i + 2 and sys.argv[i + 2].isdigit() else 60
+        conf = float(sys.argv[sys.argv.index("--conf") + 1]) if "--conf" in sys.argv else 0.3
+        imgsz = int(sys.argv[sys.argv.index("--imgsz") + 1]) if "--imgsz" in sys.argv else 960
+        print(f"[label] player-FP mining: keeping frames with >1 player box (conf {conf}, "
+              f"imgsz {imgsz}) from {video}")
+        got, scanned = grab_multi_player_from_video(video, count, model, conf=conf, imgsz=imgsz)
+        print(f"[label] scanned {scanned} frames -> kept {got} multi-player frames -> {IMG_DIR}")
+        print("[label] Now run: python label_mobs.py  (keep the ONE real player box, Del the rest)")
     elif "--grab-fh-misses" in sys.argv:
         from ultralytics import YOLO
         model = YOLO("models/mob_yolo.pt")

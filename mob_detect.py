@@ -66,22 +66,37 @@ def yolo_boxes(model, frame_bgr, roi=None, conf=0.3, imgsz=640, class_conf=None,
     return out
 
 
-def yolo_detect(model, frame_bgr, roi=None, conf=0.3, imgsz=640):
-    """ONE inference -> (mobs, player). mobs=[(score,x,y,w,h)] (classes 0,1); player=the
-    highest-confidence class-2 box as (score,x,y,w,h) or None. Use when you want both the
-    mobs and the player from a single predict() call per frame."""
+def _pick_player(players, near=None):
+    """Choose ONE player box from candidates [(score,x,y,w,h)]. When `near`=(x,y) is given
+    (the last known player position), pick the box whose center-x is nearest it -- there is
+    only ever one real player, so this keeps a flickering FALSE HP-bar box (on the attack VFX,
+    a nametag, a buff icon) from hijacking the anchor and snapping it hundreds of px away.
+    Falls back to highest-confidence when there's no prior position."""
+    if not players:
+        return None
+    if near is not None:
+        nx = near[0]
+        return min(players, key=lambda t: abs((t[1] + t[3] // 2) - nx))
+    return max(players, key=lambda t: t[0])
+
+
+def yolo_detect(model, frame_bgr, roi=None, conf=0.3, imgsz=640, near=None):
+    """ONE inference -> (mobs, player). mobs=[(score,x,y,w,h)] (classes 0,1); player = the
+    class-2 box nearest `near`=(x,y) when given (temporal stability against multiple/false
+    player detections), else the highest-confidence one. Use when you want both the mobs and
+    the player from a single predict() call per frame."""
     boxes, ox, oy = _predict(model, frame_bgr, roi, conf, imgsz)
     if boxes is None:
         return [], None
-    mobs, player = [], None
+    mobs, players = [], []
     for b in boxes:
         cls = int(b.cls[0])
         t = _box_tuple(b, ox, oy)
         if cls in MOB_CLASSES:
             mobs.append(t)
-        elif cls == PLAYER_CLASS and (player is None or t[0] > player[0]):
-            player = t
-    return mobs, player
+        elif cls == PLAYER_CLASS:
+            players.append(t)
+    return mobs, _pick_player(players, near)
 
 
 class YoloPlayerAnchor:
@@ -124,7 +139,8 @@ class YoloPlayerAnchor:
             box = self._box
             self._pushed = False
         else:
-            _mobs, box = yolo_detect(self.model, frame_bgr, self.roi, self.conf, self.imgsz)
+            _mobs, box = yolo_detect(self.model, frame_bgr, self.roi, self.conf, self.imgsz,
+                                     near=self.last)   # prefer the box nearest last -> no anchor snap
         if box is None:
             if self.last is not None and self._miss < self.stale_grace:  # ride a brief miss
                 self._miss += 1
