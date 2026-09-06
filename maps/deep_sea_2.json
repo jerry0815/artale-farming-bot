@@ -38,7 +38,7 @@
   "attack_key": "x",
   "attack_keys": { "fishhouse": "x", "goby": "x" },
   "priority_class": "fishhouse",
-  "priority_hold_hits": 0,
+  "priority_hold_hits": 1,
   "priority_lock_grace": 2,
   "priority_note": "fishhouse SPAWNS 6 goby (the exp payload) -- target it first so she stands on it when it dies and the self-centered AoE catches the fresh stack. attack_keys maps both classes to the same skill 'x' just to switch YOLO into class-aware mode (with_class). priority_hold_hits=3 keeps the AoE firing in place ~1s after the fishhouse burst (no re-detect gap) to blanket the goby the instant they pop. If goby still spawn outside the AoE, set priority_range (e.g. 90) tighter than attack_range so she closes to point-blank first. exp_max_per_sec caps a single 30s exp sample against OCR misreads.",
   "attack_range": 190,
@@ -181,10 +181,10 @@
       "P3"
     ]
   ],
-  "stacked_jump_secs": 1.8,
+  "stacked_jump_secs": 1.7,
   "node_y_lift": 5,
   "node_lift_override": {
-    "P4": 3,
+    "P4": 4,
     "P6": 0
   },
   "node_lift_note": "P4=3: P4 and P3 read the same minimap y (~136, stacked). lift 8 (y128) over-rose her onto P3 and skipped P4; lift 0 didn't seat firmly. A small lift (y133) seats on P4 without reaching P3, then the stacked jump handles P4->P3.",
