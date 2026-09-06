@@ -120,6 +120,18 @@ def test_continuous_attack_holds_key_across_beats(monkeypatch):
     assert pressed.count("x") == 1                    # held across 2 beats, not 6 burst presses
 
 
+def test_continuous_attack_reface_when_mob_switches_sides(monkeypatch):
+    # continuous_attack: mob on the right (dx>0) then on the LEFT (dx<0) -> a side change is a new
+    # decision: she must press LEFT to re-face (not keep hammering right at the wrong side).
+    right = (0.9, 900, 490, 40, 30)                   # cx=920, dx~+120 (right, in range)
+    left = (0.9, 660, 490, 40, 30)                    # cx=680, dx~-120 (left)
+    df, pressed, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0] * 8)
+    df = _DetectSeq([[right], [left]])
+    recovery.approach_shoot(10, df, anc, attack_range=190, attack_key="x",
+                            continuous_attack=True, face_deadzone=15, verbose=False)
+    assert Key.right in pressed and Key.left in pressed   # faced right, then re-faced left
+
+
 def test_burst_attack_presses_each_hit(monkeypatch):
     # Default (burst) still presses per hit -> more than one 'x' in a beat.
     mob = [(0.9, 810, 490, 40, 30)]

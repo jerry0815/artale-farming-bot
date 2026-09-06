@@ -1741,7 +1741,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                    mm_bounds=None, mm_y=None, fall_margin=22, fall_check_every=0.9,
                    attack_keys=None, priority_class=None, priority_range=None,
                    priority_hold_hits=0, priority_lock_grace=0, fall_confirm=2, ease_margin=45,
-                   continuous_attack=False, attack_dwell=0.25):
+                   continuous_attack=False, attack_dwell=0.25, face_deadzone=15):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1767,6 +1767,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                             # IS moving, so a stale pos would overshoot + false-stall -> never fake it.
     held = [None]           # currently-held walk key -> HELD across frames for smooth motion
     _ha = [None]            # currently-held ATTACK key (continuous_attack) -> released on a move
+    _faced = [None]         # direction she's currently facing -> a side change is a new decision
     last_log = [0.0]
     last_fall = [t0]        # throttle the minimap fall check (stable_char is not free)
     fall_streak = 0         # consecutive out-of-band fall reads (debounce: bottom-edge phantoms)
@@ -1800,6 +1801,7 @@ def approach_shoot(seconds, detect_fn, anchor,
             if held[0] is not None:
                 kb.safe_release(held[0])
             kb.safe_press(key); held[0] = key
+        _faced[0] = key                       # walking that way faces her that way
 
     try:
         while time.time() - t0 < seconds:
@@ -1954,11 +1956,20 @@ def approach_shoot(seconds, detect_fn, anchor,
                 rooted = True                             # firing in place -> assume-last-pos is valid
                 log(f"IN RANGE dx={dx} px={px} -> attack '{akey}' ({tcls}, same={len(same)})")
                 stop_walk()
-                kb.safe_press(key); time.sleep(0.03); kb.safe_release(key)   # face the target
                 if continuous_attack:
+                    # A SIDE change is a different decision: if the mob is now on the opposite side
+                    # of where she faces, drop the held attack (so the turn registers -- a facing tap
+                    # is swallowed while the attack key is down), face the new side, then resume
+                    # holding. Otherwise keep the attack held. A deadzone ignores dx jitter near 0.
+                    if _faced[0] != key and abs(dx) > face_deadzone:
+                        release_attack()
+                        kb.safe_press(key); time.sleep(0.06); kb.safe_release(key); _faced[0] = key
+                    elif _faced[0] is None:
+                        kb.safe_press(key); time.sleep(0.03); kb.safe_release(key); _faced[0] = key
                     hold_attack(akey)                     # HOLD -> keeps attacking through re-detect
                     time.sleep(attack_dwell)              # short dwell, then re-decide (still held)
                 else:
+                    kb.safe_press(key); time.sleep(0.03); kb.safe_release(key)   # face the target
                     for _ in range(3):                    # burst: several hits before re-evaluating
                         kb.safe_press(akey); time.sleep(0.35); kb.safe_release(akey)
                         time.sleep(0.05)
@@ -1999,7 +2010,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                 # and she COASTS PAST a tight target (then has to turn back -- the overshoot). A
                 # short nudge can't overshoot far, and she re-reads from near a standstill.
                 if abs(dx) <= _rng + ease_margin:
-                    kb.safe_press(key); time.sleep(0.05); kb.safe_release(key); held[0] = None
+                    kb.safe_press(key); time.sleep(0.05); kb.safe_release(key); held[0] = None; _faced[0] = key
                 else:
                     walk(key)                             # far -> hold continuously for smooth travel
                     if step > 0:                          # 0 = no pacing, run at compute speed
@@ -2682,7 +2693,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     priority_lock_grace=int(map_cfg.get("priority_lock_grace", 0)),
                                     fall_confirm=int(map_cfg.get("fall_confirm", 2)),
                                     continuous_attack=bool(map_cfg.get("continuous_attack", False)),
-                                    attack_dwell=float(map_cfg.get("attack_dwell_secs", 0.25)))
+                                    attack_dwell=float(map_cfg.get("attack_dwell_secs", 0.25)),
+                                    face_deadzone=int(map_cfg.get("face_deadzone", 15)))
                 heal_skill()
                 if ok is False:
                     return False
