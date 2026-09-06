@@ -188,8 +188,9 @@
     30,
     200,
     50,
-    385
+    250
   ],
+  "map_box_note": "valid dot box [x_min,x_max,y_min,y_max]. y_max=250: platforms live at y<=213 and reads cluster there or at a FIXED bottom phantom (y 301-385) with an empty gap between -- so y_max=250 rejects that phantom, which used to pin fall-recovery at (54,347) and stop her rising. Widen only if a real position ever reads y>250.",
   "anchor": "yolo_player",
   "yolo_foot_offset": 123,
   "yolo_player_conf": 0.3,
