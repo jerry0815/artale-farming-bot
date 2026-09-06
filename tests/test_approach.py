@@ -94,6 +94,15 @@ def test_walks_left_toward_far_mob(monkeypatch):
     assert Key.left in pressed and 'c' not in pressed    # walk only, no attack mid-approach
 
 
+def test_ease_in_nudges_toward_near_target(monkeypatch):
+    # A mob just OUTSIDE range but within the ease-in margin -> she nudges toward it (correct
+    # direction, no fire) via the tap-release ease-in path instead of coasting past.
+    mob = [(0.9, 910, 490, 40, 30)]                  # cx=930, dx=130: out of range 110, within +45
+    df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0])
+    recovery.approach_shoot(10, df, anc, attack_range=110, ease_margin=45, verbose=False)
+    assert Key.right in pressed and 'c' not in pressed   # eased toward it, did not fire
+
+
 def test_attacks_in_place_when_in_range(monkeypatch):
     mob = [(0.7, 800, 480, 60, 40)]                  # cx=830, dx=30 <= range 110
     df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0])

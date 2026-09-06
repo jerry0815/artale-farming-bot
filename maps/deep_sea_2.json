@@ -11,9 +11,11 @@
   "swim": {
     "tol_x": 10,
     "tol_y": 10,
-    "tol_y_down": 8,
+    "tol_y_down": 6,
     "tol_y_up": 16
   },
+  "fall_margin": 12,
+  "fall_note": "farming re-seats if >12px below the node (< the 17px P1-P2 gap, so she can't drift onto the platform below and keep 'farming' the node above). tol_y_down=6 keeps arrival from seating low. debounced by fall_confirm=2.",
   "swim_jump_burst": 8,
   "rotation": "sweep",
   "reset_node": "RIGHT",

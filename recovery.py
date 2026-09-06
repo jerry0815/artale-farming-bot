@@ -1740,7 +1740,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                    deplete_reads=4, stall_limit=8, verbose=True, label="",
                    mm_bounds=None, mm_y=None, fall_margin=22, fall_check_every=0.9,
                    attack_keys=None, priority_class=None, priority_range=None,
-                   priority_hold_hits=0, priority_lock_grace=0, fall_confirm=2):
+                   priority_hold_hits=0, priority_lock_grace=0, fall_confirm=2, ease_margin=45):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1957,9 +1957,16 @@ def approach_shoot(seconds, detect_fn, anchor,
                 log(f"dx={dx} px={px} -> walk {'right' if dx > 0 else 'left'} "
                     f"(same={len(same)}, best={best_absdx}, noimp={no_improve})")
                 rooted = False                            # moving now -> a lost bar must NOT be faked
-                walk(key)
-                if step > 0:                              # 0 = no pacing, run at compute speed
-                    time.sleep(step)
+                # EASE-IN: once she's about to arrive, TAP-and-release instead of holding. The
+                # detection read is ~0.7s, so a held key keeps her swimming through that whole read
+                # and she COASTS PAST a tight target (then has to turn back -- the overshoot). A
+                # short nudge can't overshoot far, and she re-reads from near a standstill.
+                if abs(dx) <= _rng + ease_margin:
+                    kb.safe_press(key); time.sleep(0.05); kb.safe_release(key); held[0] = None
+                else:
+                    walk(key)                             # far -> hold continuously for smooth travel
+                    if step > 0:                          # 0 = no pacing, run at compute speed
+                        time.sleep(step)
         return True
     finally:
         kb.safe_release(attack_key)
@@ -2612,6 +2619,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     stall_limit=_astall, label=node,
                                     mm_bounds=(_ncx - _phalf, _ncx + _phalf),
                                     mm_y=(None if node in _no_fall else cy),
+                                    fall_margin=int(map_cfg.get("fall_margin", 22)),
+                                    ease_margin=int(map_cfg.get("approach_ease_margin", 45)),
                                     attack_keys=map_cfg.get("attack_keys"),
                                     priority_class=map_cfg.get("priority_class"),
                                     priority_range=map_cfg.get("priority_range"),
