@@ -564,7 +564,7 @@ def get_exp(exp_processor):
 
 
 def make_exp_tracker(log_exp=True, sample_secs=10, window_secs=600, label="exp", min_run_secs=60,
-                     max_exp_per_sec=6000):
+                     max_exp_per_sec=20000):
     """A per-window EXP logger, shared by the water and nav farming loops. Returns an
     `exp_tick()` to call each loop iteration: it samples the ABSOLUTE EXP number every
     `sample_secs` (the FIRST sample is taken immediately so a gain is available within a
@@ -2466,7 +2466,7 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
     exp_tick = make_exp_tracker(log_exp=map_cfg.get("log_exp", True),
                                 sample_secs=float(map_cfg.get("exp_sample_secs", 10)),
                                 window_secs=float(map_cfg.get("exp_window_secs", 600)),
-                                max_exp_per_sec=float(map_cfg.get("exp_max_per_sec", 6000)))
+                                max_exp_per_sec=float(map_cfg.get("exp_max_per_sec", 20000)))
 
     def guard():
         """Per-tick housekeeping. Returns 'stop' (return now), 'pause'/'skip'
