@@ -47,6 +47,18 @@ def test_new_monster_popup_has_two_independent_signals():
             assert hits and hits[0][0] == tpl, f"{tpl} alone failed to fire on {src}: {hits}"
 
 
+def test_scores_out_param_reports_best_per_template():
+    # The near-miss telemetry relies on detect_lie_check filling `scores` with the best score
+    # per template, even when nothing clears threshold.
+    frame = _load("datasets/lie_check/monster_box_test.png")
+    scores = {}
+    detection.detect_lie_check(frame, template_filter=["monster_instr_box.png", "curse_lock.png"],
+                               work_width=1000, scores=scores)
+    assert set(scores) == {"monster_instr_box.png", "curse_lock.png"}
+    assert scores["monster_instr_box.png"] >= 0.78     # real popup, hits
+    assert scores["curse_lock.png"] < 0.78             # sub-threshold best is reported too
+
+
 def test_blank_screen_does_not_trigger():
     canvas = np.full((1626, 2691, 3), 30, np.uint8)  # dark full-screen, no popup
     assert detection.detect_lie_check(canvas) == []

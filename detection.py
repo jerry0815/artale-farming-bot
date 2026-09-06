@@ -243,10 +243,16 @@ LIE_CHECK_THRESHOLDS = {
     "curse_lock.png": 0.80,
     "curse_banner.png": 0.78,
     "monster_instr.png": 0.80,
-    "monster_instr_box.png": 0.80,   # name-the-monster, new opaque-box popup art
-    "monster_warn_box.png": 0.82,    # red warning line on the same popup (2nd OR signal for recall)
-    "monster_instr_temple.png": 0.80,  # same popup on a dark map (temple) -- text over dark bg
-    "monster_warn_temple.png": 0.82,   # (per-map: semi-transparent text doesn't cross backgrounds)
+    # Monster popup text is SEMI-TRANSPARENT and degrades on live animated frames. Recall-first
+    # (miss = ban risk; false alarm = only a beep, no auto-pause), so set as low as the measured
+    # false-alarm floor allows: a real farming scene scores ~0.72 on monster_instr_box, so 0.78
+    # keeps margin above that (avoids alarm fatigue) while real popups (~0.93-0.98) clear it
+    # easily. Below ~0.78 it starts firing on normal frames. (A YOLO detector would remove this
+    # fragility -- see docs.)
+    "monster_instr_box.png": 0.78,     # name-the-monster, opaque-box popup (underwater)
+    "monster_warn_box.png": 0.78,      # red warning line on the same popup (2nd OR signal)
+    "monster_instr_temple.png": 0.78,  # same popup on a dark map (temple)
+    "monster_warn_temple.png": 0.78,
 }
 
 # 每個模板佔畫面寬度的比例 (模板寬 / 來源截圖寬)。這些介面大小是相對於畫面的，
@@ -269,7 +275,8 @@ LIE_CHECK_FRACTIONS = {
 def detect_lie_check(game_img, templates_folder='assets/lie_check/', threshold=0.88,
                      work_width=700, reference_width=2750.0,
                      scale_min=0.85, scale_max=1.2, scale_step=0.05,
-                     template_filter=None, thresholds=None, fractions=None, debug=False):
+                     template_filter=None, thresholds=None, fractions=None, debug=False,
+                     scores=None):
     """
     偵測「需要真人介入」的畫面 (人機驗證、詛咒符文警告等)。
 
@@ -356,6 +363,9 @@ def detect_lie_check(game_img, templates_folder='assets/lie_check/', threshold=0
 
         if debug:
             print(f"lie-check 模板 {name}: 最高分 {best:.3f} (門檻 {thr})")
+        if scores is not None:                  # near-miss telemetry: best score per template.
+            scores[name] = float(best)          # (for a HIT, best is the first-over-thr value
+                                                #  due to the early break; sub-threshold = true max)
         if best >= thr:
             hits.append((name, float(best)))
 

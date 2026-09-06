@@ -254,6 +254,16 @@ def lie_check_fast_tick(interval=0.8):
         notify.send("another_player", "⚠️ Another player entered the map — bot PAUSED (F9 silence, F8 resume)")
         enemy_alarm_on(); kb.safe_release_all(); kb.pause = True
 
+# Near-miss telemetry: the full check only auto-dumps on a HIT, so a MISSED curse/monster screen
+# (the exact failure we're chasing) leaves no trace. When a template lands in [floor, threshold)
+# -- close but not firing -- dump the frame so we can see WHY it missed (degraded live text vs a
+# runtime problem) and feed it to the planned YOLO detector. Throttled so a normal frame that
+# grazes the floor can't spam. Floor is above the ~0.72 normal-frame ceiling so dumps are rare.
+_NEAR_MISS_FLOOR = 0.72
+_NEAR_MISS_INTERVAL = 30.0
+_last_near_miss_dump = [0.0]
+
+
 def lie_check_full_tick(interval=1.5):
     """Full check for the slower screens (curse / monster). Loop top only."""
     if not _lie_enabled:
@@ -267,12 +277,20 @@ def lie_check_full_tick(interval=1.5):
         return
     # higher work_width keeps the curse banner/lock detail (fine 2-line text + icon)
     # so they clear threshold on smaller live windows; per-template thresholds apply.
+    scores = {}
     hits = detect_lie_check(f, templates_folder=_LIE_DIR, template_filter=_FULL_TEMPLATES,
-                            work_width=1000)
+                            work_width=1000, scores=scores)
     if _full_alert.update(bool(hits)) and hits:
         print(f"[lie-check] ⚠️ 需真人處理畫面 {[(n, round(s, 2)) for n, s in hits]} -- ALARM (F8 暫停)")
         notify.send("lie_check", f"⚠️ 需真人處理畫面 (curse/monster) {[n for n, _ in hits]} — needs a human (F8 暫停)")
         dump_frame("full_auto", f, tag=_hit_tag(hits))
+    elif not hits:                                        # near-miss capture (below threshold)
+        near = [(n, s) for n, s in scores.items() if s >= _NEAR_MISS_FLOOR]
+        if near and now - _last_near_miss_dump[0] >= _NEAR_MISS_INTERVAL:
+            _last_near_miss_dump[0] = now
+            near.sort(key=lambda x: -x[1])
+            print(f"[lie-check] near-miss (below threshold) {[(n, round(s, 2)) for n, s in near]} -- dumping frame")
+            dump_frame("near_miss", f, tag=_hit_tag(near))
 
 def lie_check_tick():
     """Loop-top check: run both pipelines (fast covers transparent between states too)."""
