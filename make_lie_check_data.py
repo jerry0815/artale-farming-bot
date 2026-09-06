@@ -77,10 +77,16 @@ def _write(out_root, name, img, label_line):
         f.write(label_line)
 
 
-def build(out_root="datasets/lie_check_yolo", n_synth=200, seed=0):
+def build(out_root="datasets/lie_check_yolo", n_synth=100, seed=0):
     random.seed(seed)
-    os.makedirs(os.path.join(out_root, "images"), exist_ok=True)
-    os.makedirs(os.path.join(out_root, "labels"), exist_ok=True)
+    img_dir = os.path.join(out_root, "images"); lbl_dir = os.path.join(out_root, "labels")
+    # Clear prior generated frames so a rebuild is reproducible (no stale synth accumulating).
+    for d in (img_dir, lbl_dir):
+        if os.path.isdir(d):
+            for f in glob.glob(os.path.join(d, "*")):
+                os.remove(f)
+    os.makedirs(img_dir, exist_ok=True)
+    os.makedirs(lbl_dir, exist_ok=True)
     manifest_path = os.path.join(out_root, "boxes.json")
     manifest = json.load(open(manifest_path)) if os.path.exists(manifest_path) else {}
     n = 0
