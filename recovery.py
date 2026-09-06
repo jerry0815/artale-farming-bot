@@ -18,6 +18,7 @@ from PIL import Image
 import mss, pygetwindow as gw
 from screeninfo import get_monitors
 from detection import detect_character_on_minimap, detect_red_dots, detect_lie_check
+from lie_check_yolo import detect_lie_check_yolo
 from alarm import Alarm, AlertController
 import notify
 import os
@@ -280,6 +281,8 @@ def lie_check_full_tick(interval=1.5):
     scores = {}
     hits = detect_lie_check(f, templates_folder=_LIE_DIR, template_filter=_FULL_TEMPLATES,
                             work_width=1000, scores=scores)
+    yolo = detect_lie_check_yolo(f)                       # [] when the model file is absent
+    hits = hits + [(f"yolo:{cls}", cf) for cls, cf, _ in yolo]
     if _full_alert.update(bool(hits)) and hits:
         print(f"[lie-check] ⚠️ 需真人處理畫面 {[(n, round(s, 2)) for n, s in hits]} -- ALARM (F8 暫停)")
         notify.send("lie_check", f"⚠️ 需真人處理畫面 (curse/monster) {[n for n, _ in hits]} — needs a human (F8 暫停)")
