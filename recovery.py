@@ -1740,7 +1740,8 @@ def approach_shoot(seconds, detect_fn, anchor,
                    deplete_reads=4, stall_limit=8, verbose=True, label="",
                    mm_bounds=None, mm_y=None, fall_margin=22, fall_check_every=0.9,
                    attack_keys=None, priority_class=None, priority_range=None,
-                   priority_hold_hits=0, priority_lock_grace=0, fall_confirm=2, ease_margin=45):
+                   priority_hold_hits=0, priority_lock_grace=0, fall_confirm=2, ease_margin=45,
+                   continuous_attack=False, attack_dwell=0.25):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1765,6 +1766,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                             # HP bar means she hasn't moved (assume last pos). While WALKING she
                             # IS moving, so a stale pos would overshoot + false-stall -> never fake it.
     held = [None]           # currently-held walk key -> HELD across frames for smooth motion
+    _ha = [None]            # currently-held ATTACK key (continuous_attack) -> released on a move
     last_log = [0.0]
     last_fall = [t0]        # throttle the minimap fall check (stable_char is not free)
     fall_streak = 0         # consecutive out-of-band fall reads (debounce: bottom-edge phantoms)
@@ -1777,6 +1779,19 @@ def approach_shoot(seconds, detect_fn, anchor,
     def stop_walk():
         if held[0] is not None:
             kb.safe_release(held[0]); held[0] = None
+
+    def hold_attack(k):
+        """Continuous attack: HOLD the key down (the game repeats the skill while held), only
+        (re)pressing on a key change -- so attack uptime stays high across detection reads instead
+        of the press/release burst's gaps. Released by release_attack() on a non-attack decision."""
+        if _ha[0] != k:
+            if _ha[0] is not None:
+                kb.safe_release(_ha[0])
+            kb.safe_press(k); _ha[0] = k
+
+    def release_attack():
+        if _ha[0] is not None:
+            kb.safe_release(_ha[0]); _ha[0] = None
 
     def walk(key):
         """Hold `key` continuously (only (re)press on a direction change) so motion doesn't
@@ -1858,7 +1873,7 @@ def approach_shoot(seconds, detect_fn, anchor,
             # DEATH-TRIGGERED post-kill hold: if the fishhouse we were just hitting is GONE now
             # (killed -- reliable at ~0.99 recall), blanket its spot for priority_hold_hits to catch
             # the goby that spawn there. Fires ONCE at the kill, not on every attack beat.
-            if pri_engaged is not None and priority_hold_hits and priority_class:
+            if pri_engaged is not None and priority_hold_hits and priority_class and not continuous_attack:
                 if not any(m[2] == priority_class and abs(m[0] - pri_engaged) <= band for m in same):
                     log(f"fishhouse killed (x~{pri_engaged}) -> post-kill hold +{priority_hold_hits}")
                     stop_walk()
@@ -1874,7 +1889,7 @@ def approach_shoot(seconds, detect_fn, anchor,
             # spot). Only genuine, unlocked emptiness advances the deplete counter.
             _lock_bridge = (priority_class and pri_lock_pos is not None and pri_miss < priority_lock_grace)
             if not same and not _lock_bridge:
-                stop_walk(); rooted = False                # idle scan (not firing) -> she may drift
+                stop_walk(); release_attack(); rooted = False   # platform empty -> stop attacking too
                 nonempty_streak = 0
                 empty_reads += 1                          # DEBOUNCED: several empty frames -> clear
                 feet = [d[2] + d[4] for d in dets]
@@ -1937,15 +1952,20 @@ def approach_shoot(seconds, detect_fn, anchor,
                     log(f"priority occluded ({pri_miss}/{priority_lock_grace}) -> hold+fire last pos {tx}")
                 best_absdx = None; no_improve = 0
                 rooted = True                             # firing in place -> assume-last-pos is valid
-                log(f"IN RANGE dx={dx} px={px} -> attack '{akey}' burst ({tcls}, same={len(same)})")
+                log(f"IN RANGE dx={dx} px={px} -> attack '{akey}' ({tcls}, same={len(same)})")
                 stop_walk()
-                kb.safe_press(key); time.sleep(0.03); kb.safe_release(key)
-                for _ in range(3):                        # commit: several hits before re-evaluating
-                    kb.safe_press(akey); time.sleep(0.35); kb.safe_release(akey)
-                    time.sleep(0.05)
+                kb.safe_press(key); time.sleep(0.03); kb.safe_release(key)   # face the target
+                if continuous_attack:
+                    hold_attack(akey)                     # HOLD -> keeps attacking through re-detect
+                    time.sleep(attack_dwell)              # short dwell, then re-decide (still held)
+                else:
+                    for _ in range(3):                    # burst: several hits before re-evaluating
+                        kb.safe_press(akey); time.sleep(0.35); kb.safe_release(akey)
+                        time.sleep(0.05)
                 if priority_class and tcls == priority_class:
                     pri_engaged = tx        # remember the fishhouse we hit; hold fires when it DIES
             else:                                         # nearest visible mob is OUT of range
+                release_attack()                          # moving now -> the skill roots her, drop attack
                 # NET-progress stall: give up (advance) only if we stop getting CLOSER (best
                 # |dx| not improving) for stall_limit frames -- tolerates jitter + slow approach,
                 # and escapes a genuinely unreachable mob so the platform can't hang.
@@ -1986,6 +2006,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                         time.sleep(step)
         return True
     finally:
+        release_attack()                          # drop any held (continuous) attack key
         kb.safe_release(attack_key)
         kb.safe_release(Key.left); kb.safe_release(Key.right)
 
@@ -2659,7 +2680,9 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     priority_range=map_cfg.get("priority_range"),
                                     priority_hold_hits=int(map_cfg.get("priority_hold_hits", 0)),
                                     priority_lock_grace=int(map_cfg.get("priority_lock_grace", 0)),
-                                    fall_confirm=int(map_cfg.get("fall_confirm", 2)))
+                                    fall_confirm=int(map_cfg.get("fall_confirm", 2)),
+                                    continuous_attack=bool(map_cfg.get("continuous_attack", False)),
+                                    attack_dwell=float(map_cfg.get("attack_dwell_secs", 0.25)))
                 heal_skill()
                 if ok is False:
                     return False

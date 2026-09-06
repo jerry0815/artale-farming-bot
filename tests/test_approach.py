@@ -110,6 +110,24 @@ def test_attacks_in_place_when_in_range(monkeypatch):
     assert 'c' in pressed                            # fires
 
 
+def test_continuous_attack_holds_key_across_beats(monkeypatch):
+    # continuous_attack=True: HOLD the attack key -- pressed ONCE and kept down across beats,
+    # not re-pressed 3x/beat like the burst. (safe_press only fires on a key change.)
+    mob = [(0.9, 810, 490, 40, 30)]                   # in range dx~30
+    df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 0, 999])
+    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+                            continuous_attack=True, verbose=False)
+    assert pressed.count("x") == 1                    # held across 2 beats, not 6 burst presses
+
+
+def test_burst_attack_presses_each_hit(monkeypatch):
+    # Default (burst) still presses per hit -> more than one 'x' in a beat.
+    mob = [(0.9, 810, 490, 40, 30)]
+    df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0])
+    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x", verbose=False)
+    assert pressed.count("x") >= 3                    # burst = several presses
+
+
 def test_blind_attack_when_anchor_lost(monkeypatch):
     mob = [(0.7, 800, 480, 60, 40)]
     df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=None, clock_vals=[0, 0])
