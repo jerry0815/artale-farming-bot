@@ -40,7 +40,7 @@
   "continuous_note": "HOLD the attack key while in range (skill repeats on hold) and only release on a move/deplete/fell -- keeps her attacking through re-detects instead of the choppy burst gaps. attack_dwell_secs = pause between re-decisions while held.",
   "attack_key": "x",
   "attack_keys": { "fishhouse": "x", "goby": "x" },
-  "priority_class": null,
+  "priority_class": "fishhouse",
   "priority_hold_hits": 1,
   "priority_lock_grace": 2,
   "priority_note": "priority_class=null DISABLES fishhouse-first targeting -> she targets the nearest same-platform mob (original behavior); the lock, occlusion-hold and post-kill hold are all gated on priority_class so they're off too. Set priority_class='fishhouse' to re-enable (then priority_hold_hits / priority_lock_grace / priority_range apply).",
