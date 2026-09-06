@@ -37,13 +37,16 @@ PORT = 8001
 
 
 _ONLY_MULTI = False        # --only-multi-player: serve only frames with >1 player box (cleanup pass)
+_ONLY_MISSING = False       # --only-missing-player: serve only frames with 0 player boxes (add pass)
 
 
 def frames():
     names = sorted(os.path.basename(p) for p in glob.glob(os.path.join(IMG_DIR, "*.png")))
-    if _ONLY_MULTI:
+    if _ONLY_MULTI or _ONLY_MISSING:
         pc = CLASSES.index("player")
-        names = [n for n in names if sum(1 for b in read_boxes(n[:-4]) if b[0] == pc) > 1]
+        def _np(n):
+            return sum(1 for b in read_boxes(n[:-4]) if b[0] == pc)
+        names = [n for n in names if (_np(n) > 1 if _ONLY_MULTI else _np(n) == 0)]
     return names
 
 
@@ -402,8 +405,10 @@ if __name__ == "__main__":
     else:
         if "--only-multi-player" in sys.argv:
             _ONLY_MULTI = True                            # cleanup pass: only frames with >1 player box
+        if "--only-missing-player" in sys.argv:
+            _ONLY_MISSING = True                          # add pass: only frames with 0 player boxes
         os.makedirs(IMG_DIR, exist_ok=True)
         with socketserver.ThreadingTCPServer(("127.0.0.1", PORT), make_handler()) as srv:
-            tag = " (>1 player only)" if _ONLY_MULTI else ""
+            tag = " (>1 player only)" if _ONLY_MULTI else (" (0 player only)" if _ONLY_MISSING else "")
             print(f"labeling {len(frames())} frames{tag} -> http://localhost:{PORT}  (Ctrl+C to stop)")
             srv.serve_forever()
