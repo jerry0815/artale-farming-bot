@@ -1,0 +1,6 @@
+{
+  "datasets/lie_check/monster_box_test.png":     ["monster_check", 648, 250, 1080, 790],
+  "datasets/lie_check/monster_temple_test.png":  ["monster_check", 785, 290, 1235, 805],
+  "datasets/lie_check/rune_check_test.png":      ["curse", 750, 310, 2080, 625],
+  "datasets/lie_check/rune_check_live_test.png": ["curse", 530, 265, 1478, 490]
+}

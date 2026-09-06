@@ -39,6 +39,14 @@ datasets/dragons/dragons.yaml
 models/*.pt
 runs/
 
+# YOLO lie-check detector — generated dataset & run artifacts (boxes.json IS tracked)
+datasets/lie_check_yolo/images/
+datasets/lie_check_yolo/labels/
+datasets/lie_check_yolo/train.txt
+datasets/lie_check_yolo/val.txt
+datasets/lie_check_yolo/lie_check.yaml
+runs_lie_check/
+
 # YOLO weights (pretrained downloads + trained) and dataset scratch pools
 *.pt
 weights/
