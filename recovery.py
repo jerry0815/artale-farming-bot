@@ -1759,6 +1759,7 @@ def approach_shoot(seconds, detect_fn, anchor,
     last_player = None      # sticky anchor: lock onto the bar nearest last frame's player
     pri_lock_pos = None     # last screen pos of the engaged priority target (fishhouse)
     pri_miss = 0            # consecutive reads the priority target has been missing (occlusion debounce)
+    pri_engaged = None      # x of the fishhouse last hit -> post-kill hold fires when it DISAPPEARS
     rooted = False          # True only while firing in place -> the skill roots her, so a lost
                             # HP bar means she hasn't moved (assume last pos). While WALKING she
                             # IS moving, so a stale pos would overshoot + false-stall -> never fake it.
@@ -1853,6 +1854,19 @@ def approach_shoot(seconds, detect_fn, anchor,
                 _md = [(round(d[0], 2), d[1] + d[3] // 2, d[2] + d[4]) for d in dets]
                 dbg(f"[app {label}] player=({px},{pfeet}) band={band} "
                     f"dets(score,cx,feet)={_md} same_platform={[(m[0], m[2]) for m in same]}")
+            # DEATH-TRIGGERED post-kill hold: if the fishhouse we were just hitting is GONE now
+            # (killed -- reliable at ~0.99 recall), blanket its spot for priority_hold_hits to catch
+            # the goby that spawn there. Fires ONCE at the kill, not on every attack beat.
+            if pri_engaged is not None and priority_hold_hits and priority_class:
+                if not any(m[2] == priority_class and abs(m[0] - pri_engaged) <= band for m in same):
+                    log(f"fishhouse killed (x~{pri_engaged}) -> post-kill hold +{priority_hold_hits}")
+                    stop_walk()
+                    for _ in range(priority_hold_hits):
+                        if kb.pause:
+                            break
+                        kb.safe_press(attack_key); time.sleep(0.35); kb.safe_release(attack_key)
+                        time.sleep(0.05)
+                pri_engaged = None
             # Locked fishhouse occluded mid-kill (our own AoE VFX / a passing bone fish hides the WHOLE
             # platform): DON'T count it as depletion -- that abandons the fishhouse she's killing (the
             # #1 "gives up while attacking" case). Bridge it via the priority hold below (fires the lock
@@ -1917,17 +1931,8 @@ def approach_shoot(seconds, detect_fn, anchor,
                 for _ in range(3):                        # commit: several hits before re-evaluating
                     kb.safe_press(akey); time.sleep(0.35); kb.safe_release(akey)
                     time.sleep(0.05)
-                if priority_class and tcls == priority_class and priority_hold_hits:
-                    # Just hit the fishhouse (the goby SPAWNER). Keep the self-centered AoE up in
-                    # place for a few more hits WITHOUT re-detecting, so the 6 goby that pop right
-                    # here are caught while still stacked -- closing the detection gap that would
-                    # otherwise let them scatter before the next read.
-                    log(f"post-kill hold: +{priority_hold_hits} AoE hits (fishhouse burst)")
-                    for _ in range(priority_hold_hits):
-                        if kb.pause:
-                            break
-                        kb.safe_press(akey); time.sleep(0.35); kb.safe_release(akey)
-                        time.sleep(0.05)
+                if priority_class and tcls == priority_class:
+                    pri_engaged = tx        # remember the fishhouse we hit; hold fires when it DIES
             else:                                         # nearest visible mob is OUT of range
                 # NET-progress stall: give up (advance) only if we stop getting CLOSER (best
                 # |dx| not improving) for stall_limit frames -- tolerates jitter + slow approach,

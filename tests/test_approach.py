@@ -277,15 +277,27 @@ def test_priority_range_closes_more_on_priority_target(monkeypatch):
     assert Key.right in pressed and "x" not in pressed   # closed in, did not fire from afar
 
 
-def test_priority_hold_fires_extra_hits_after_fishhouse(monkeypatch):
-    # In-range on the fishhouse: the normal burst is 3 hits; priority_hold_hits=3 adds 3 more
-    # in-place AoE hits (no re-detect) to blanket the goby that spawn where it dies.
-    mob = [(0.9, 810, 490, 40, 30, "fishhouse")]      # dx~30 in range
-    df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0])
+def test_post_kill_hold_fires_when_fishhouse_dies(monkeypatch):
+    # DEATH-TRIGGERED: burst on the fishhouse (frame 1), then when it's GONE next read (killed) the
+    # hold fires to blanket the goby spot -- NOT on the same beat as the burst.
+    fh = [(0.9, 795, 490, 40, 30, "fishhouse")]       # in range
+    df, pressed, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0] * 8)
+    df = _DetectSeq([fh, []])                          # hit the fishhouse, then it's gone (killed)
     recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
                             attack_keys={"fishhouse": "x"}, priority_class="fishhouse",
-                            priority_hold_hits=3, verbose=False)
-    assert pressed.count("x") >= 6                     # 3 burst + 3 post-kill hold
+                            priority_hold_hits=2, verbose=False)
+    assert pressed.count("x") >= 5                     # burst(3) + post-kill hold(2)
+
+
+def test_no_post_kill_hold_while_fishhouse_alive(monkeypatch):
+    # Fishhouse stays present across beats -> only bursts, NO early hold (the "triggers too early"
+    # complaint). Each in-range beat is exactly 3 hits; two beats = 6, not 3+hold.
+    mob = [(0.9, 795, 490, 40, 30, "fishhouse")]
+    df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 0, 999])
+    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+                            attack_keys={"fishhouse": "x"}, priority_class="fishhouse",
+                            priority_hold_hits=2, verbose=False)
+    assert pressed.count("x") == 6                     # two bursts, no hold (fishhouse never died)
 
 
 def test_no_priority_hold_for_nonpriority_target(monkeypatch):
