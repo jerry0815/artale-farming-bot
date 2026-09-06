@@ -1742,7 +1742,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                    attack_keys=None, priority_class=None, priority_range=None,
                    priority_hold_hits=0, priority_lock_grace=0, fall_confirm=2, ease_margin=45,
                    continuous_attack=False, attack_dwell=0.25, face_deadzone=15,
-                   face_settle=0.2, fire_stall_limit=5):
+                   face_settle=0.2, fire_stall_limit=5, lock_switch_px=70):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1920,8 +1920,17 @@ def approach_shoot(seconds, detect_fn, anchor,
                 # fishhouses so she abandoned the one she was killing. Fishhouses are stationary, so
                 # matching to the lock keeps her on the same physical target until it dies.
                 ref = pri_lock_pos[0] if pri_lock_pos is not None else px
-                tx, _tfy, tcls = min(pri, key=lambda m: abs(m[0] - ref))
-                pri_lock_pos = (tx, _tfy); pri_miss = 0
+                cand = min(pri, key=lambda m: abs(m[0] - ref))
+                if (pri_lock_pos is not None and abs(cand[0] - ref) > lock_switch_px
+                        and pri_miss < priority_lock_grace):
+                    # The locked fishhouse isn't in this frame and the nearest one is a DIFFERENT,
+                    # far fishhouse (P3 has two ~930px apart; the model sees one at a time). Don't
+                    # oscillate to it -- HOLD the locked one (walk to it, it's stationary) until it
+                    # re-appears/dies, else she thrashes back and forth across the platform.
+                    tx, _tfy = pri_lock_pos; tcls = priority_class; holding = True
+                else:
+                    tx, _tfy, tcls = cand
+                    pri_lock_pos = (tx, _tfy); pri_miss = 0
             elif (priority_class and pri_lock_pos is not None and pri_miss < priority_lock_grace):
                 # Priority target BLINKED OUT (a bone fish swam through / our own AoE VFX) -- not
                 # necessarily dead. Stay committed to its last position instead of switching to a
@@ -2713,7 +2722,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     attack_dwell=float(map_cfg.get("attack_dwell_secs", 0.25)),
                                     face_deadzone=int(map_cfg.get("face_deadzone", 15)),
                                     face_settle=float(map_cfg.get("face_settle_secs", 0.2)),
-                                    fire_stall_limit=int(map_cfg.get("fire_stall_limit", 5)))
+                                    fire_stall_limit=int(map_cfg.get("fire_stall_limit", 5)),
+                                    lock_switch_px=int(map_cfg.get("lock_switch_px", 70)))
                 heal_skill()
                 if ok is False:
                     return False

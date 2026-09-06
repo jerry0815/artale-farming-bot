@@ -399,6 +399,21 @@ def test_priority_lock_survives_full_occlusion_no_deplete(monkeypatch):
     assert pressed.count("x") >= 9                     # kept firing through occlusion, not 3-then-deplete
 
 
+def test_priority_lock_holds_through_other_fishhouse_blink(monkeypatch):
+    # Two fishhouses far apart; the locked one (A, near) blinks out and only the OTHER (B, far) is
+    # detected. She must HOLD A (walk back toward it), not switch to B and oscillate across the
+    # platform. grace not exceeded -> stays committed to A's lock position.
+    A = (0.9, 250, 490, 40, 30, "fishhouse")          # cx=270 (near start)
+    B = (0.9, 1180, 490, 40, 30, "fishhouse")         # cx=1200 (far, ~930px away)
+    df, pressed, anc = _setup(monkeypatch, mobs=[], ptuple=(300, 500), clock_vals=[0, 0, 0, 0, 999])
+    df = _DetectSeq([[A], [B], [B]])                   # lock A, then only B visible (within grace)
+    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+                            attack_keys={"fishhouse": "x"}, priority_class="fishhouse",
+                            priority_lock_grace=3, lock_switch_px=70, verbose=False)
+    # frame2: B is ~930px right of the A-lock -> hold A -> she walks LEFT toward A, not right to B
+    assert Key.left in pressed and Key.right not in pressed
+
+
 def test_priority_lock_not_burned_while_approaching(monkeypatch):
     # Fishhouse locked but occluded WHILE she's still walking toward it (out of range), with a
     # goby now point-blank. The grace must NOT tick down while she's merely approaching (she has
