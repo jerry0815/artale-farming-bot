@@ -2462,6 +2462,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
     _next_buff = [time.time() + 5.0 + i for i in range(len(buff_groups))]
 
     _buff_settle = float(map_cfg.get("buff_settle_secs", 0.6))   # wait out the attack root first
+    _buff_gap = float(map_cfg.get("buff_gap_secs", 0.7))         # gap AFTER each cast so the next
+    #                                                             buff isn't swallowed by its animation
 
     def heal_skill():
         now = time.time()
@@ -2478,6 +2480,7 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
             print(f"[water] buff -> press {keys} (next in {int(iv)}s)")
             for k in keys:
                 kb.safe_press(k); time.sleep(0.3); kb.safe_release(k)
+                time.sleep(_buff_gap)          # let this cast's animation finish before the next
         STATUS["buff_at"] = time.time()
 
     # rotation: 'sweep' = farm the list in order (bottom->top) then reset via reset_node;
