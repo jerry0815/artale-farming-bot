@@ -1760,6 +1760,7 @@ def approach_shoot(seconds, detect_fn, anchor,
     pri_lock_pos = None     # last screen pos of the engaged priority target (fishhouse)
     pri_miss = 0            # consecutive reads the priority target has been missing (occlusion debounce)
     pri_engaged = None      # x of the fishhouse last hit -> post-kill hold fires when it DISAPPEARS
+    _prev_tx = None         # last chosen target x -> flag target SWITCHES in the debug trace
     rooted = False          # True only while firing in place -> the skill roots her, so a lost
                             # HP bar means she hasn't moved (assume last pos). While WALKING she
                             # IS moving, so a stale pos would overshoot + false-stall -> never fake it.
@@ -1913,6 +1914,17 @@ def approach_shoot(seconds, detect_fn, anchor,
             else:
                 pri_lock_pos = None                        # no lock (or gave up) -> nearest same-platform
                 tx, _tfy, tcls = min(same, key=lambda m: abs(m[0] - px))
+            # TARGET trace (file only): why she picked this target, and flag SWITCHES so target
+            # changes are diagnosable. mode=lock (fishhouse, nearest the lock), hold (occluded
+            # fishhouse), nearest (goby / no fishhouse). fh=candidate fishhouse x's.
+            if dbg_on():
+                _mode = "lock" if pri else ("hold" if holding else "nearest")
+                _fh_xs = sorted(int(m[0]) for m in pri)
+                _sw = "" if (_prev_tx is None or abs(tx - _prev_tx) <= 20) else f" SWITCH<-{_prev_tx}"
+                dbg(f"[tgt {label}] mode={_mode} tx={int(tx)} cls={tcls} px={px} "
+                    f"lock={None if pri_lock_pos is None else int(pri_lock_pos[0])} miss={pri_miss} "
+                    f"fh={_fh_xs} goby={sum(1 for m in same if m[2] != priority_class)}{_sw}")
+            _prev_tx = tx
             dx = tx - px
             key = Key.right if dx >= 0 else Key.left
             akey = (attack_keys or {}).get(tcls, attack_key)   # per-mob skill; falls back to default
