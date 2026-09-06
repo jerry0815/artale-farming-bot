@@ -1853,7 +1853,12 @@ def approach_shoot(seconds, detect_fn, anchor,
                 _md = [(round(d[0], 2), d[1] + d[3] // 2, d[2] + d[4]) for d in dets]
                 dbg(f"[app {label}] player=({px},{pfeet}) band={band} "
                     f"dets(score,cx,feet)={_md} same_platform={[(m[0], m[2]) for m in same]}")
-            if not same:
+            # Locked fishhouse occluded mid-kill (our own AoE VFX / a passing bone fish hides the WHOLE
+            # platform): DON'T count it as depletion -- that abandons the fishhouse she's killing (the
+            # #1 "gives up while attacking" case). Bridge it via the priority hold below (fires the lock
+            # spot). Only genuine, unlocked emptiness advances the deplete counter.
+            _lock_bridge = (priority_class and pri_lock_pos is not None and pri_miss < priority_lock_grace)
+            if not same and not _lock_bridge:
                 stop_walk(); rooted = False                # idle scan (not firing) -> she may drift
                 nonempty_streak = 0
                 empty_reads += 1                          # DEBOUNCED: several empty frames -> clear
@@ -1874,8 +1879,13 @@ def approach_shoot(seconds, detect_fn, anchor,
             # scatter. No priority mob present -> nearest same-platform mob.
             pri = [m for m in same if m[2] == priority_class] if priority_class else []
             holding = False
-            if pri:                                        # priority target visible -> lock onto nearest
-                tx, _tfy, tcls = min(pri, key=lambda m: abs(m[0] - px))
+            if pri:                                        # priority target visible -> commit to ONE
+                # Pick the fishhouse nearest the EXISTING lock, not nearest px -- the player anchor
+                # jumps hundreds of px between reads, and keying off px made "nearest" flip between
+                # fishhouses so she abandoned the one she was killing. Fishhouses are stationary, so
+                # matching to the lock keeps her on the same physical target until it dies.
+                ref = pri_lock_pos[0] if pri_lock_pos is not None else px
+                tx, _tfy, tcls = min(pri, key=lambda m: abs(m[0] - ref))
                 pri_lock_pos = (tx, _tfy); pri_miss = 0
             elif (priority_class and pri_lock_pos is not None and pri_miss < priority_lock_grace):
                 # Priority target BLINKED OUT (a bone fish swam through / our own AoE VFX) -- not

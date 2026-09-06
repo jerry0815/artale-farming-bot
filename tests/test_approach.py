@@ -318,6 +318,36 @@ def test_priority_lock_gives_up_after_grace(monkeypatch):
     assert Key.right in pressed                        # pursued the goby after giving up
 
 
+def test_priority_locks_to_one_fishhouse_despite_anchor_jump(monkeypatch):
+    # Two fishhouses; the player anchor JUMPS from near A to near B between reads (the real bug:
+    # noisy yolo_player/nametag px). Targeting must stay committed to the fishhouse she locked (A),
+    # not flip to whatever is 'nearest' the jumped px (B) and abandon A half-killed.
+    A = (0.9, 795, 490, 40, 30, "fishhouse")          # cx=815
+    B = (0.9, 1385, 490, 40, 30, "fishhouse")         # cx=1405
+    df, pressed, _ = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0, 0, 0, 999])
+    df = _DetectSeq([[A, B], [A, B]])
+    anc = _AnchorSeq([(800, 500), (1390, 500)])       # frame 2: anchor jumps to near B
+    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+                            attack_keys={"fishhouse": "x"}, priority_class="fishhouse",
+                            priority_range=60, verbose=False)
+    # frame 1 locks A (near, fires). frame 2 anchor jumps to B, but she stays on A -> walks LEFT
+    # back toward A instead of firing B. Without the lock she'd have fired B (nearest px).
+    assert Key.left in pressed
+
+
+def test_priority_lock_survives_full_occlusion_no_deplete(monkeypatch):
+    # She's mid-kill on a fishhouse when her attack VFX (or a bone fish) hides the WHOLE platform.
+    # Those empty reads must NOT count toward depletion (which abandons the fishhouse she's killing --
+    # the #1 'gives up while attacking' case); she holds and keeps firing the lock spot instead.
+    fh = (0.9, 795, 490, 40, 30, "fishhouse")
+    df, pressed, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0] * 12)
+    df = _DetectSeq([[fh], [], [], []])               # engage, then fully occluded reads
+    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+                            attack_keys={"fishhouse": "x"}, priority_class="fishhouse",
+                            priority_range=60, priority_lock_grace=3, deplete_reads=2, verbose=False)
+    assert pressed.count("x") >= 9                     # kept firing through occlusion, not 3-then-deplete
+
+
 def test_priority_lock_not_burned_while_approaching(monkeypatch):
     # Fishhouse locked but occluded WHILE she's still walking toward it (out of range), with a
     # goby now point-blank. The grace must NOT tick down while she's merely approaching (she has
