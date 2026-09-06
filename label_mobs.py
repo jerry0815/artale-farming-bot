@@ -36,8 +36,15 @@ LBL_DIR = os.path.join(ROOT, "labels")
 PORT = 8001
 
 
+_ONLY_MULTI = False        # --only-multi-player: serve only frames with >1 player box (cleanup pass)
+
+
 def frames():
-    return sorted(os.path.basename(p) for p in glob.glob(os.path.join(IMG_DIR, "*.png")))
+    names = sorted(os.path.basename(p) for p in glob.glob(os.path.join(IMG_DIR, "*.png")))
+    if _ONLY_MULTI:
+        pc = CLASSES.index("player")
+        names = [n for n in names if sum(1 for b in read_boxes(n[:-4]) if b[0] == pc) > 1]
+    return names
 
 
 def read_boxes(stem):
@@ -393,7 +400,10 @@ if __name__ == "__main__":
             got = grab_from_dir(src, model)
         print(f"[label] grabbed {got} frames -> {IMG_DIR}. Now run: python label_mobs.py")
     else:
+        if "--only-multi-player" in sys.argv:
+            _ONLY_MULTI = True                            # cleanup pass: only frames with >1 player box
         os.makedirs(IMG_DIR, exist_ok=True)
         with socketserver.ThreadingTCPServer(("127.0.0.1", PORT), make_handler()) as srv:
-            print(f"labeling {len(frames())} frames -> http://localhost:{PORT}  (Ctrl+C to stop)")
+            tag = " (>1 player only)" if _ONLY_MULTI else ""
+            print(f"labeling {len(frames())} frames{tag} -> http://localhost:{PORT}  (Ctrl+C to stop)")
             srv.serve_forever()
