@@ -43,10 +43,10 @@ def main():
     model = YOLO("yolo11n.pt")
     model.train(data=yaml_path, epochs=epochs, imgsz=1280, batch=-1,  # -1 = auto-fit GPU memory
                 project="runs_lie_check", name="train", exist_ok=True)
-    best = os.path.join("runs_lie_check", "train", "weights", "best.pt")
+    best = str(model.trainer.best)                    # authoritative path (ultralytics nests it)
     os.makedirs("models", exist_ok=True)
     shutil.copy(best, os.path.join("models", "lie_check_yolo.pt"))
-    print("[train] wrote models/lie_check_yolo.pt")
+    print(f"[train] wrote models/lie_check_yolo.pt (from {best})")
 
 
 if __name__ == "__main__":
