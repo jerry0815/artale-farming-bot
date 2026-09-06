@@ -1741,7 +1741,8 @@ def approach_shoot(seconds, detect_fn, anchor,
                    mm_bounds=None, mm_y=None, fall_margin=22, fall_check_every=0.9,
                    attack_keys=None, priority_class=None, priority_range=None,
                    priority_hold_hits=0, priority_lock_grace=0, fall_confirm=2, ease_margin=45,
-                   continuous_attack=False, attack_dwell=0.25, face_deadzone=15):
+                   continuous_attack=False, attack_dwell=0.25, face_deadzone=15,
+                   face_settle=0.2, fire_stall_limit=5):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1768,6 +1769,8 @@ def approach_shoot(seconds, detect_fn, anchor,
     held = [None]           # currently-held walk key -> HELD across frames for smooth motion
     _ha = [None]            # currently-held ATTACK key (continuous_attack) -> released on a move
     _faced = [None]         # direction she's currently facing -> a side change is a new decision
+    _fire_stall = 0         # consecutive in-range beats on the SAME target that isn't dying
+    _last_fire_tx = None    # target x of the last in-range beat (to detect a persistent target)
     last_log = [0.0]
     last_fall = [t0]        # throttle the minimap fall check (stable_char is not free)
     fall_streak = 0         # consecutive out-of-band fall reads (debounce: bottom-edge phantoms)
@@ -1962,12 +1965,26 @@ def approach_shoot(seconds, detect_fn, anchor,
                     # is swallowed while the attack key is down), face the new side, then resume
                     # holding. Otherwise keep the attack held. A deadzone ignores dx jitter near 0.
                     if _faced[0] != key and abs(dx) > face_deadzone:
+                        # A facing tap is SWALLOWED while the attack animation is still playing (she
+                        # keeps attacking the old side). Drop attack, let the cast clear (face_settle),
+                        # THEN turn with a firm tap, then resume. Without this she never actually turns.
                         release_attack()
-                        kb.safe_press(key); time.sleep(0.06); kb.safe_release(key); _faced[0] = key
+                        time.sleep(face_settle)
+                        kb.safe_press(key); time.sleep(0.12); kb.safe_release(key); _faced[0] = key
                     elif _faced[0] is None:
-                        kb.safe_press(key); time.sleep(0.03); kb.safe_release(key); _faced[0] = key
+                        kb.safe_press(key); time.sleep(0.12); kb.safe_release(key); _faced[0] = key
                     hold_attack(akey)                     # HOLD -> keeps attacking through re-detect
                     time.sleep(attack_dwell)              # short dwell, then re-decide (still held)
+                    # FIRE-STALL: the same in-range target persisting (not dying) means the turn was
+                    # swallowed again OR it's out of reach -> force a fresh re-face next beat.
+                    if _last_fire_tx is not None and abs(tx - _last_fire_tx) <= 30:
+                        _fire_stall += 1
+                    else:
+                        _fire_stall = 0
+                    _last_fire_tx = tx
+                    if _fire_stall >= fire_stall_limit:
+                        log(f"fire-stall at dx={dx} (target not dying) -> force re-face")
+                        _faced[0] = None; _fire_stall = 0
                 else:
                     kb.safe_press(key); time.sleep(0.03); kb.safe_release(key)   # face the target
                     for _ in range(3):                    # burst: several hits before re-evaluating
@@ -2694,7 +2711,9 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     fall_confirm=int(map_cfg.get("fall_confirm", 2)),
                                     continuous_attack=bool(map_cfg.get("continuous_attack", False)),
                                     attack_dwell=float(map_cfg.get("attack_dwell_secs", 0.25)),
-                                    face_deadzone=int(map_cfg.get("face_deadzone", 15)))
+                                    face_deadzone=int(map_cfg.get("face_deadzone", 15)),
+                                    face_settle=float(map_cfg.get("face_settle_secs", 0.2)),
+                                    fire_stall_limit=int(map_cfg.get("fire_stall_limit", 5)))
                 heal_skill()
                 if ok is False:
                     return False
