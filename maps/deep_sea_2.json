@@ -11,11 +11,12 @@
   "swim": {
     "tol_x": 10,
     "tol_y": 10,
-    "tol_y_down": 6,
+    "tol_y_down": 3,
     "tol_y_up": 16
   },
+  "swim_note": "tol_y_down (BELOW target) kept tight so she always seats ABOVE the platform (lower y = higher). With lift 5, band bottom = platform_y-5+3 = platform_y-2, so arrival is ~2px above the platform, never below it. tol_y_up (ABOVE) is generous (she sinks onto it); P4 overrides it tighter for the P3 stack. Measured platform y: P6~214, P5~171, P3=P4=136, P2~105, P1~87.",
   "fall_margin": 12,
-  "fall_note": "farming re-seats if >12px below the node (< the 17px P1-P2 gap, so she can't drift onto the platform below and keep 'farming' the node above). tol_y_down=6 keeps arrival from seating low. debounced by fall_confirm=2.",
+  "fall_note": "farming re-seats if >12px below the node (< the 17px P1-P2 gap, so she can't drift onto the platform below and keep 'farming' the node above). tol_y_down=3 keeps arrival from seating low. debounced by fall_confirm=2.",
   "swim_jump_burst": 8,
   "rotation": "sweep",
   "reset_node": "RIGHT",
@@ -37,7 +38,7 @@
   "approach": true,
   "continuous_attack": true,
   "attack_dwell_secs": 0.25,
-  "face_settle_secs": 0.3,
+  "face_settle_secs": 0.4,
   "fire_stall_limit": 4,
   "continuous_note": "HOLD the attack key while in range (skill repeats on hold) and only release on a move/deplete/fell -- keeps her attacking through re-detects instead of the choppy burst gaps. attack_dwell_secs = pause between re-decisions while held.",
   "attack_key": "x",
@@ -190,10 +191,14 @@
   "stacked_jump_secs": 1.7,
   "node_y_lift": 5,
   "node_lift_override": {
-    "P4": 5,
+    "P4": 7,
     "P6": 0
   },
   "node_lift_note": "P4=3: P4 and P3 read the same minimap y (~136, stacked). lift 8 (y128) over-rose her onto P3 and skipped P4; lift 0 didn't seat firmly. A small lift (y133) seats on P4 without reaching P3, then the stacked jump handles P4->P3.",
+  "node_tol_y_up_override": {
+    "P4": 8
+  },
+  "node_tol_y_up_note": "P4 only: default tol_y_up=16 lets her 'arrive' anywhere across the ~22px stacked band (so the lift often didn't take). 8 tightens the ABOVE band so she must actually rise near the lifted target to seat -- makes the lift consistent. Too tight -> she bobs; raise if she can't seat.",
   "node_arrive_jumps": {},
   "buff_interval_secs": 300,
   "platform_half": 60,

@@ -72,3 +72,12 @@ def test_load_map_and_accessors(tmp_path):
 
 def test_swim_tol_defaults():
     assert watermap.swim_tol({"minimap": {}}) == (3, 3)
+
+
+def test_node_swim_tol_override():
+    base = (10, 6, 16)
+    cfg = {"node_tol_y_up_override": {"P4": 8}}
+    assert watermap.node_swim_tol(cfg, "P4", base) == (10, 6, 8)    # tighter tol_up for P4
+    assert watermap.node_swim_tol(cfg, "P3", base) == (10, 6, 16)   # other nodes unchanged
+    assert watermap.node_swim_tol({}, "P4", base) == (10, 6, 16)    # no override -> unchanged
+    assert watermap.node_swim_tol(cfg, "P4", (5, 7)) == (5, 7)      # symmetric base untouched

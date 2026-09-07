@@ -2693,8 +2693,9 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                                          verbose=_log_swim, label=node,
                                                          start_near=dep if first else None))
             lift = _lift_override.get(node, _ylift)        # pin nodes (P4) use 0 -- target below
-            print(f"[water] --> farm {node} (center {cx},{cy}) lift={lift}")  # the pin is unreachable
-            if not _seat(node, lambda first: swim_to(cx, cy - lift, tol=tol, cap=12.0, jump_burst=_jb,
+            ntol = watermap.node_swim_tol(map_cfg, node, tol)   # tighten tol_y_up on stacked pins
+            print(f"[water] --> farm {node} (center {cx},{cy}) lift={lift} tol={ntol}")  # the pin is unreachable
+            if not _seat(node, lambda first: swim_to(cx, cy - lift, tol=ntol, cap=12.0, jump_burst=_jb,
                                                      jump_gap=_jg, verbose=_log_swim, label=node,
                                                      start_near=dep if first else None)):  # aim ABOVE
                 return False

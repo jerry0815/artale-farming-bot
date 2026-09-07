@@ -100,3 +100,15 @@ def swim_tol(cfg):
         base = s.get("tol_y", 3)
         return (tol_x, s.get("tol_y_down", base), s.get("tol_y_up", base))
     return (tol_x, s.get("tol_y", 3))
+
+
+def node_swim_tol(cfg, node, base):
+    """`base` swim_tol with tol_y_up (the ABOVE band) overridden for `node` when
+    node_tol_y_up_override sets it. Tightening tol_y_up on a stacked pin (P4) forces her to
+    actually rise near the lifted target to count as arrived, instead of 'arriving' anywhere
+    across the wide default above-band. Only applies to the 3-tuple asymmetric form; a
+    symmetric base is returned unchanged (there's no separate above-band to tighten)."""
+    ov = cfg.get("node_tol_y_up_override", {})
+    if node in ov and len(base) >= 3:
+        return (base[0], base[1], int(ov[node]))
+    return base
