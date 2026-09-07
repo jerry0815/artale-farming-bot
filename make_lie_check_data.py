@@ -14,6 +14,7 @@ import numpy as np
 from detection import LIE_CHECK_FRACTIONS
 
 CLASSES = {"monster_check": 0, "curse": 1, "transparent_shape": 2}
+SAMPLE_FOLDERS = {"monster": "monster_check", "curse": "curse", "transparent": "transparent_shape"}
 
 
 def locate_popup(frame, template_name, templates_folder="assets/lie_check/"):
@@ -115,6 +116,36 @@ def build(out_root="datasets/lie_check_yolo", n_synth=100, seed=0):
         n += 1
         if cls_name in popup_crops:
             popup_crops[cls_name].append(frame[y0:y1, x0:x1].copy())
+
+    # (b2) browser-labeled real frames from samples/<class>/ (label_lie_check.py wrote the
+    # boxes as class 0; the FOLDER sets the TRUE class). These are the accurate hand-drawn
+    # samples -- also collected as popup crops for synthesis.
+    for folder, cls_name in SAMPLE_FOLDERS.items():
+        cls_id = CLASSES[cls_name]
+        sdir = os.path.join("datasets", "lie_check", "samples", folder)
+        ldir = os.path.join(sdir, "labels")
+        for imgp in sorted(glob.glob(os.path.join(sdir, "*.png"))):
+            stem = os.path.splitext(os.path.basename(imgp))[0]
+            lblp = os.path.join(ldir, stem + ".txt")
+            if not os.path.exists(lblp):
+                print(f"[data] no label yet, skip: {imgp}"); continue
+            frame = cv2.imread(imgp)
+            if frame is None:
+                continue
+            boxes = [ln.split() for ln in open(lblp) if ln.strip()]
+            if not boxes:
+                continue
+            label = "".join(f"{cls_id} {cx} {cy} {w} {h}\n" for _c, cx, cy, w, h in boxes)
+            _write(out_root, f"real_{n:05d}", frame, label)   # remapped to the folder's class
+            n += 1
+            if cls_name in popup_crops:                       # crop the first box for synthesis
+                H, W = frame.shape[:2]
+                cx, cy, bw, bh = map(float, boxes[0][1:])
+                x0 = max(0, int((cx - bw / 2) * W)); y0 = max(0, int((cy - bh / 2) * H))
+                x1 = int((cx + bw / 2) * W); y1 = int((cy + bh / 2) * H)
+                crop = frame[y0:y1, x0:x1]
+                if crop.size:
+                    popup_crops[cls_name].append(crop.copy())
 
     # (c) synthetic monster/curse: paste a popup crop onto popup-free backgrounds
     bgs = [cv2.imread(p) for p in (glob.glob("datasets/mobs_real/**/*.png", recursive=True)
