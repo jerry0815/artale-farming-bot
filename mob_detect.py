@@ -66,21 +66,29 @@ def yolo_boxes(model, frame_bgr, roi=None, conf=0.3, imgsz=640, class_conf=None,
     return out
 
 
-def _pick_player(players, near=None):
+def _pick_player(players, near=None, max_jump=None):
     """Choose ONE player box from candidates [(score,x,y,w,h)]. When `near`=(x,y) is given
     (the last known player position), pick the box whose center-x is nearest it -- there is
     only ever one real player, so this keeps a flickering FALSE HP-bar box (on the attack VFX,
     a nametag, a buff icon) from hijacking the anchor and snapping it hundreds of px away.
-    Falls back to highest-confidence when there's no prior position."""
+    Falls back to highest-confidence when there's no prior position.
+
+    `max_jump` (screen px): if even the NEAREST box is farther than this from `near`, the real
+    player was missed this frame and only other players'/false boxes remain -- return None (no
+    lock) so the caller rides its last position instead of the anchor drifting box-by-box to a
+    distant phantom (the P3-crowd runaway to the map edge). None = no cap (legacy)."""
     if not players:
         return None
     if near is not None:
         nx = near[0]
-        return min(players, key=lambda t: abs((t[1] + t[3] // 2) - nx))
+        best = min(players, key=lambda t: abs((t[1] + t[3] // 2) - nx))
+        if max_jump is not None and abs((best[1] + best[3] // 2) - nx) > max_jump:
+            return None
+        return best
     return max(players, key=lambda t: t[0])
 
 
-def yolo_detect(model, frame_bgr, roi=None, conf=0.3, imgsz=640, near=None):
+def yolo_detect(model, frame_bgr, roi=None, conf=0.3, imgsz=640, near=None, max_jump=None):
     """ONE inference -> (mobs, player). mobs=[(score,x,y,w,h)] (classes 0,1); player = the
     class-2 box nearest `near`=(x,y) when given (temporal stability against multiple/false
     player detections), else the highest-confidence one. Use when you want both the mobs and
@@ -96,7 +104,7 @@ def yolo_detect(model, frame_bgr, roi=None, conf=0.3, imgsz=640, near=None):
             mobs.append(t)
         elif cls == PLAYER_CLASS:
             players.append(t)
-    return mobs, _pick_player(players, near)
+    return mobs, _pick_player(players, near, max_jump)
 
 
 class YoloPlayerAnchor:
@@ -113,13 +121,15 @@ class YoloPlayerAnchor:
     keeps the last position for a few missed frames -- the anchor stays put through a brief
     miss instead of vanishing (the same trick NametagAnchor uses)."""
 
-    def __init__(self, model, roi=None, conf=0.3, imgsz=640, foot_offset=0, stale_grace=3):
+    def __init__(self, model, roi=None, conf=0.3, imgsz=640, foot_offset=0, stale_grace=3,
+                 max_jump=None):
         self.model = model
         self.roi = roi
         self.conf = conf
         self.imgsz = imgsz
         self.foot_offset = foot_offset
         self.stale_grace = stale_grace
+        self.max_jump = max_jump          # reject a nearest-box leap farther than this (phantom guard)
         self.last = None
         self._miss = 0
         self._pushed = False
@@ -140,7 +150,7 @@ class YoloPlayerAnchor:
             self._pushed = False
         else:
             _mobs, box = yolo_detect(self.model, frame_bgr, self.roi, self.conf, self.imgsz,
-                                     near=self.last)   # prefer the box nearest last -> no anchor snap
+                                     near=self.last, max_jump=self.max_jump)   # nearest box, capped jump
         if box is None:
             if self.last is not None and self._miss < self.stale_grace:  # ride a brief miss
                 self._miss += 1

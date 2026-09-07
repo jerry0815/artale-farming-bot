@@ -2497,7 +2497,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
 
             def _make_anchor():
                 return _md.YoloPlayerAnchor(_mm, conf=_pconf, imgsz=_mimg, foot_offset=_pfoot,
-                                            stale_grace=_pgrace)
+                                            stale_grace=_pgrace,
+                                            max_jump=map_cfg.get("player_anchor_max_jump"))
             print(f"[water] anchor: yolo_player conf={_pconf} (class 2 of {map_cfg.get('mob_model', 'models/mob_yolo.pt')})")
         elif map_cfg.get("anchor") == "nametag":          # KenYu-style name-tag anchor
             _tagw = _p.load_nametag(map_cfg["nametag_template"])

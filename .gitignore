@@ -66,3 +66,4 @@ logs/
 
 # Discord webhook URL (secret) for notify.py
 notify.json
+datasets/lie_check_yolo/labels.cache

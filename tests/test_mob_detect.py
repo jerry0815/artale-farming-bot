@@ -21,3 +21,17 @@ def test_pick_player_nearest_last_ignores_higher_conf_false_box():
     players = [false_hi, real]
     picked = mob_detect._pick_player(players, near=(810, 500))
     assert picked is real
+
+
+def test_pick_player_max_jump_rejects_far_leap():
+    # Only OTHER players' boxes remain (her real HP bar was missed). Without a cap the anchor
+    # would hop to the nearest one and drift; with max_jump it returns None so the caller rides
+    # its last position instead of running to the map edge.
+    near_box = (0.9, 100, 0, 20, 10)    # center-x 110
+    far_box = (0.95, 800, 0, 20, 10)    # center-x 810
+    # nearest is within the cap -> accepted
+    assert mob_detect._pick_player([near_box, far_box], near=(115, 0), max_jump=250) is near_box
+    # only a far box -> leap 695 > 250 -> rejected (no lock)
+    assert mob_detect._pick_player([far_box], near=(115, 0), max_jump=250) is None
+    # no cap -> legacy behavior, takes the far box
+    assert mob_detect._pick_player([far_box], near=(115, 0)) is far_box
