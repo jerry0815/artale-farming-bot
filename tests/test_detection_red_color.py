@@ -33,7 +33,7 @@ def test_solo_background_is_empty():
     assert detection.detect_red_dots_color(_dark_minimap()) == []
 
 
-def test_rejects_a_two_pixel_speck():
+def test_rejects_a_small_speck():
     bg = _dark_minimap()
     bg[10:12, 10:12] = (60, 60, 240)   # 4px of red -> below min_area
     assert detection.detect_red_dots_color(bg) == []
