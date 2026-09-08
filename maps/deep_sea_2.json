@@ -21,7 +21,7 @@
   "rotation": "sweep",
   "reset_node": "RIGHT",
   "detector": "mob_yolo",
-  "shared_detect": true,
+  "shared_detect": false,
   "shared_detect_note": "ONE yolo_detect per approach beat gives both mobs + the player box (pushed to the anchor), instead of a separate mob pass + anchor pass -- ~halves hot-loop YOLO cost. Only applies with detector=mob_yolo + anchor=yolo_player. Set false to revert to the two-pass path.",
   "mob_model": "models/mob_yolo.pt",
   "mob_conf": 0.5,
