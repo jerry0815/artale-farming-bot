@@ -65,6 +65,23 @@ def test_char_buff_groups_override_map_buff_groups():
     assert out["buff_groups"] == [{"keys": ["a"], "interval_secs": 100}]
 
 
+def test_char_attack_key_replaces_map_attack_keys():
+    # A character's single attack_key must WIN over a map's per-mob attack_keys (which the loop
+    # prefers), so "all mobs use x" actually holds instead of the map routing gobies elsewhere.
+    m = {"attack_keys": {"fishhouse": "x", "goby": "z"}, "attack_key": "c"}
+    c = {"attack_key": "x"}                        # single key, no per-mob map
+    out = recovery.apply_character(m, c)
+    assert out["attack_key"] == "x"
+    assert "attack_keys" not in out               # map's per-mob dropped -> single key governs
+
+
+def test_char_attack_keys_form_is_kept():
+    m = {"attack_keys": {"fishhouse": "x"}}
+    c = {"attack_keys": {"fishhouse": "x", "goby": "z"}}   # character uses the per-mob form
+    out = recovery.apply_character(m, c)
+    assert out["attack_keys"] == {"fishhouse": "x", "goby": "z"}
+
+
 def test_load_char_reads_file(tmp_path):
     p = tmp_path / "archer1.json"
     p.write_text(json.dumps({"name": "archer1", "attack_key": "x"}), encoding="utf-8")

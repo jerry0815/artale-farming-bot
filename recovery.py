@@ -2440,6 +2440,10 @@ def apply_character(map_cfg, char_cfg):
     # leave the buffs unchanged).
     if char_cfg.get("buff_keys") is not None and char_cfg.get("buff_groups") is None:
         merged.pop("buff_groups", None)
+    # Same for attack: a character's single attack_key replaces the map's per-mob attack_keys
+    # (the loop prefers attack_keys), so a character can say "all mobs use x" and mean it.
+    if char_cfg.get("attack_key") is not None and char_cfg.get("attack_keys") is None:
+        merged.pop("attack_keys", None)
     return merged
 
 
