@@ -65,14 +65,15 @@ def test_char_buff_groups_override_map_buff_groups():
     assert out["buff_groups"] == [{"keys": ["a"], "interval_secs": 100}]
 
 
-def test_char_attack_key_replaces_map_attack_keys():
-    # A character's single attack_key must WIN over a map's per-mob attack_keys (which the loop
-    # prefers), so "all mobs use x" actually holds instead of the map routing gobies elsewhere.
+def test_char_attack_key_rewrites_map_attack_keys_to_all_x():
+    # A character's single attack_key means "all mobs use x" -- but it must REWRITE the map's
+    # per-mob attack_keys (not drop them), so class detection (with_class / priority_class)
+    # stays on. Dropping them silently disabled fishhouse-first targeting -> nodes couldn't clear.
     m = {"attack_keys": {"fishhouse": "x", "goby": "z"}, "attack_key": "c"}
     c = {"attack_key": "x"}                        # single key, no per-mob map
     out = recovery.apply_character(m, c)
     assert out["attack_key"] == "x"
-    assert "attack_keys" not in out               # map's per-mob dropped -> single key governs
+    assert out["attack_keys"] == {"fishhouse": "x", "goby": "x"}   # all classes -> x, taxonomy kept
 
 
 def test_char_attack_keys_form_is_kept():

@@ -2441,10 +2441,13 @@ def apply_character(map_cfg, char_cfg):
     # leave the buffs unchanged).
     if char_cfg.get("buff_keys") is not None and char_cfg.get("buff_groups") is None:
         merged.pop("buff_groups", None)
-    # Same for attack: a character's single attack_key replaces the map's per-mob attack_keys
-    # (the loop prefers attack_keys), so a character can say "all mobs use x" and mean it.
+    # Attack: a character's single attack_key means "all mobs use this key". Don't DROP the
+    # map's per-mob attack_keys (that would turn off class detection, breaking priority_class /
+    # per-mob targeting) -- instead rewrite each class to the character's key. Keeps the class
+    # taxonomy (with_class stays on) while enforcing the single key.
     if char_cfg.get("attack_key") is not None and char_cfg.get("attack_keys") is None:
-        merged.pop("attack_keys", None)
+        if merged.get("attack_keys"):
+            merged["attack_keys"] = {k: char_cfg["attack_key"] for k in merged["attack_keys"]}
     return merged
 
 
