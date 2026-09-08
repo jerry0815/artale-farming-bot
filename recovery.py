@@ -1835,7 +1835,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                    attack_keys=None, priority_class=None, priority_range=None,
                    priority_hold_hits=0, priority_lock_grace=0, fall_confirm=2, ease_margin=45,
                    continuous_attack=False, attack_dwell=0.25, face_deadzone=15,
-                   face_settle=0.2, fire_stall_limit=5, lock_switch_px=70):
+                   face_settle=0.2, fire_stall_limit=5, lock_switch_px=70, combined=None):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1926,6 +1926,11 @@ def approach_shoot(seconds, detect_fn, anchor,
             f = capture()
             if f is None:
                 time.sleep(0.1); continue
+            _shared_dets = None
+            if combined is not None:                      # shared single pass: mobs + player box
+                _shared_dets, _pbox = combined(f, anchor.last)   # ONE inference this beat...
+                anchor.push(_pbox)                        # ...its player box feeds the anchor (falls
+                #                                            back to nametag when None, as before)
             p = anchor.locate(f)                          # HP-bar/name-tag anchor
             if p is None:
                 if last_player is None:                   # never locked yet -> brief blind attack
@@ -1962,7 +1967,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                         out.append((mx + mw // 2, my + mh, d[5] if len(d) > 5 else None))
                 return out
 
-            dets = detect_fn(f, strip)
+            dets = _shared_dets if _shared_dets is not None else detect_fn(f, strip)
             same = same_platform(dets)
             if dbg_on():                                   # full per-frame trace (file only)
                 _md = [(round(d[0], 2), d[1] + d[3] // 2, d[2] + d[4]) for d in dets]
@@ -2730,6 +2735,20 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
             print(f"[water] {node}: did not seat (try {i + 1}/{_arrive_retries + 1})")
         return False
 
+    # Shared-pass detection (opt-in via map "shared_detect"): ONE yolo_detect per beat gives BOTH
+    # the mobs AND the player box, halving hot-loop inference vs the separate detect_fn + anchor
+    # passes. Only when detector+anchor are the SAME mob YOLO; other detectors/anchors keep the
+    # two-pass path (combined stays None). approach_shoot pushes the player box to the anchor.
+    _combined = None
+    if map_cfg.get("shared_detect") and detector == "mob_yolo" and map_cfg.get("anchor") == "yolo_player":
+        _pmax = map_cfg.get("player_anchor_max_jump")
+
+        def _combined(frame, near):
+            return mob_detect.yolo_detect(_mm, frame, roi=None, conf=_mconf, imgsz=_mimg,
+                                          class_conf=_cconf, with_class=_wc, player_conf=_pconf,
+                                          near=near, max_jump=_pmax)
+        print("[water] shared-pass detection ON (one YOLO inference/beat: mobs + player)")
+
     def farm_node(node, prev=None):
         cx, cy = centers[node]
         STATUS["node"] = node
@@ -2818,7 +2837,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     face_deadzone=int(map_cfg.get("face_deadzone", 15)),
                                     face_settle=float(map_cfg.get("face_settle_secs", 0.2)),
                                     fire_stall_limit=int(map_cfg.get("fire_stall_limit", 5)),
-                                    lock_switch_px=int(map_cfg.get("lock_switch_px", 70)))
+                                    lock_switch_px=int(map_cfg.get("lock_switch_px", 70)),
+                                    combined=_combined)
                 heal_skill()
                 if ok is False:
                     return False

@@ -136,6 +136,14 @@ class CompositeAnchor:
         self.which = None
         self.last = None
 
+    def push(self, player_box):
+        """Forward a shared-pass player box to the FIRST anchor if it supports .push (the
+        YoloPlayerAnchor). locate() then uses it for anchor 0 and still falls through to the
+        nametag/title anchors when the pushed box is None (player missed)."""
+        a0 = self.anchors[0] if self.anchors else None
+        if a0 is not None and hasattr(a0, "push"):
+            a0.push(player_box)
+
     def locate(self, frame_bgr):
         for i, a in enumerate(self.anchors):
             p = a.locate(frame_bgr)

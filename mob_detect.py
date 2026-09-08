@@ -88,21 +88,32 @@ def _pick_player(players, near=None, max_jump=None):
     return max(players, key=lambda t: t[0])
 
 
-def yolo_detect(model, frame_bgr, roi=None, conf=0.3, imgsz=640, near=None, max_jump=None):
+def yolo_detect(model, frame_bgr, roi=None, conf=0.3, imgsz=640, near=None, max_jump=None,
+                class_conf=None, with_class=False, player_conf=None):
     """ONE inference -> (mobs, player). mobs=[(score,x,y,w,h)] (classes 0,1); player = the
     class-2 box nearest `near`=(x,y) when given (temporal stability against multiple/false
     player detections), else the highest-confidence one. Use when you want both the mobs and
-    the player from a single predict() call per frame."""
-    boxes, ox, oy = _predict(model, frame_bgr, roi, conf, imgsz)
+    the player from a single predict() call per frame (the shared-pass: feed the player box to
+    YoloPlayerAnchor.push so the loop pays for ONE inference instead of two).
+
+    Mob filtering matches yolo_boxes exactly: `class_conf` = per-class floor {cls: thr},
+    `with_class` appends the class name. `player_conf` = the class-2 floor (defaults to `conf`).
+    Inference runs at the LOWEST of all these floors so weak boxes are returned, then each is
+    filtered by its own floor -- so the mobs equal yolo_boxes(..., class_conf, with_class) and
+    the player equals a class-2 pick at player_conf, from a single predict."""
+    pconf = conf if player_conf is None else player_conf
+    run_conf = min([conf, pconf, *(class_conf or {}).values()])
+    boxes, ox, oy = _predict(model, frame_bgr, roi, run_conf, imgsz)
     if boxes is None:
         return [], None
     mobs, players = [], []
     for b in boxes:
-        cls = int(b.cls[0])
+        cls = int(b.cls[0]); score = float(b.conf[0])
         t = _box_tuple(b, ox, oy)
         if cls in MOB_CLASSES:
-            mobs.append(t)
-        elif cls == PLAYER_CLASS:
+            if score >= (class_conf or {}).get(cls, conf):
+                mobs.append(t + (model.names[cls],) if with_class else t)
+        elif cls == PLAYER_CLASS and score >= pconf:
             players.append(t)
     return mobs, _pick_player(players, near, max_jump)
 

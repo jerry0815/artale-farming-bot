@@ -84,3 +84,28 @@ def test_composite_anchor_falls_back_to_secondary():
     assert c.locate(None) == (99, 88) and c.which == 1  # primary None -> secondary used
     c2 = player.CompositeAnchor([A((5, 6)), A((7, 8))])
     assert c2.locate(None) == (5, 6) and c2.which == 0  # primary wins
+
+
+def test_composite_anchor_push_forwards_and_falls_back():
+    import player
+
+    class _Yolo:                     # fake YoloPlayerAnchor: locates iff a non-None box was pushed
+        def __init__(self): self.pushed = None; self.last = None
+        def push(self, box): self.pushed = box
+        def locate(self, f):
+            b = self.pushed; self.pushed = None
+            return (b[1], b[2]) if b else None
+
+    class _Nametag:
+        last = (5, 5)
+        def locate(self, f): return (5, 5)
+
+    yolo, nt = _Yolo(), _Nametag()
+    c = player.CompositeAnchor([yolo, nt])
+    c.push((0.9, 100, 200, 10, 10))
+    assert yolo.pushed == (0.9, 100, 200, 10, 10)   # forwarded to anchor 0
+    assert c.locate(None) == (100, 200)             # used the pushed box
+    assert c.which == 0
+    c.push(None)                                     # player missed this beat
+    assert c.locate(None) == (5, 5)                 # anchor 0 -> None -> nametag fallback
+    assert c.which == 1

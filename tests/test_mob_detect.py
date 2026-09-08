@@ -35,3 +35,33 @@ def test_pick_player_max_jump_rejects_far_leap():
     assert mob_detect._pick_player([far_box], near=(115, 0), max_jump=250) is None
     # no cap -> legacy behavior, takes the far box
     assert mob_detect._pick_player([far_box], near=(115, 0)) is far_box
+
+
+class _FB:  # fake ultralytics box: b.cls[0], b.conf[0], b.xyxy[0].tolist()
+    def __init__(self, cls, conf, xyxy):
+        self.cls = [cls]; self.conf = [conf]
+        class _T:
+            def __init__(s, v): s._v = v
+            def tolist(s): return s._v
+        self.xyxy = [_T(xyxy)]
+
+
+class _FM:  # fake model with class names
+    names = {0: "fishhouse", 1: "goby", 2: "player"}
+
+
+def test_yolo_detect_mobs_equal_yolo_boxes_and_picks_player(monkeypatch):
+    # Shared pass must yield mobs IDENTICAL to the separate yolo_boxes call, plus the player.
+    boxes = [_FB(0, 0.40, [10, 10, 50, 50]),    # fishhouse, weak but >= class floor 0.3
+             _FB(1, 0.70, [100, 100, 140, 150]),  # goby, >= 0.6
+             _FB(2, 0.90, [200, 20, 240, 40]),   # player
+             _FB(0, 0.20, [300, 10, 340, 50])]   # fishhouse, below floor -> dropped
+    monkeypatch.setattr(mob_detect, "_predict", lambda *a, **k: (boxes, 0, 0))
+    m = _FM(); cc = {0: 0.3}
+    mobs_boxes = mob_detect.yolo_boxes(m, None, conf=0.6, class_conf=cc, with_class=True)
+    mobs_det, player = mob_detect.yolo_detect(m, None, conf=0.6, class_conf=cc, with_class=True,
+                                              player_conf=0.5, near=(210, 30))
+    assert mobs_det == mobs_boxes                                   # identical mob filtering
+    assert mobs_det == [(0.4, 10, 10, 40, 40, "fishhouse"),
+                        (0.7, 100, 100, 40, 50, "goby")]
+    assert player == (0.9, 200, 20, 40, 20)                        # the class-2 box
