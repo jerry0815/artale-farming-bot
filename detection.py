@@ -155,6 +155,39 @@ def detect_red_dots(minimap_img, templates_folder='assets/minimap_other_characte
         
     return red_centers
 
+# Red minimap dots (other players). Bright, saturated red; hue sits at the 0 end of the
+# OpenCV H wheel (0-179) and can wrap to the top, so two ranges are OR'd. Derived from
+# assets/minimap_other_character/*.png. Size band rejects 1-2px specks and oversized blobs;
+# the red dot is the same marker size class as the yellow character dot (~15-120px area),
+# widened here to 8-250 to stay tolerant across window sizes -- verified on real frames.
+RED_HSV_RANGES = [
+    (np.array([0, 120, 120], np.uint8),   np.array([10, 255, 255], np.uint8)),
+    (np.array([170, 120, 120], np.uint8), np.array([179, 255, 255], np.uint8)),
+]
+RED_MIN_AREA = 8
+RED_MAX_AREA = 250
+
+
+def detect_red_dots_color(minimap_bgr, hsv_ranges=RED_HSV_RANGES,
+                          min_area=RED_MIN_AREA, max_area=RED_MAX_AREA):
+    """Red dots (other players) on a MINIMAP crop via HSV color -- the color analogue of
+    detect_red_dots (template). Presence-only: returns each qualifying blob's center
+    [cx, cy]; the caller only checks whether the list is non-empty. Robust and ~1ms vs
+    the multi-template match. Mirrors recovery._char_color_from_mm."""
+    if minimap_bgr is None or minimap_bgr.size == 0:
+        return []
+    hsv = cv2.cvtColor(minimap_bgr, cv2.COLOR_BGR2HSV)
+    mask = None
+    for lo, hi in hsv_ranges:
+        m = cv2.inRange(hsv, lo, hi)
+        mask = m if mask is None else cv2.bitwise_or(mask, m)
+    num, _labels, stats, cents = cv2.connectedComponentsWithStats(mask, 8)
+    centers = []
+    for i in range(1, num):                       # 0 is the background component
+        if min_area <= stats[i, cv2.CC_STAT_AREA] <= max_area:
+            centers.append([int(cents[i][0]), int(cents[i][1])])
+    return centers
+
 def detect_platforms_on_minimap(minimap_img, templates_folder='assets/minimap_platforms/', threshold=0.7):
     all_rects = []
     template_paths = glob(os.path.join(templates_folder, '*.png'))
