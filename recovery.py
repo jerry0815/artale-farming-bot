@@ -512,17 +512,85 @@ def set_enemy_threshold(t):
     ENEMY_THRESHOLD = float(t)
 
 
+# --- enemy-dot shadow rollout: the TEMPLATE detector stays authoritative (drives the alarm);
+# the new HSV color detector (detect_red_dots_color) runs alongside in SHADOW so we can prove it
+# matches the template on REAL frames before switching. On any activity we log presence agreement
+# and dump the FULL frame (throttled) so the rare other-player frames -- and any color false-alarm
+# or miss -- accumulate for offline double-checking. The shadow never changes the alarm decision
+# and never raises into the safety loop. ---
+_ENEMY_SAMPLE_DIR = "datasets/enemy_dots/samples"      # full frames dumped here for offline review
+_ENEMY_SHADOW_LOG = "logs/enemy_dots_shadow.jsonl"     # one line per template/color activity
+_ENEMY_AGREE_DUMP_INTERVAL = 30.0    # both agree (player present or both quiet-with-one-firing): rarer dumps
+_ENEMY_DISAGREE_DUMP_INTERVAL = 10.0 # color-only or template-only: the interesting cases, dumped more often
+_enemy_shadow_state = {"agree": 0.0, "disagree": 0.0}  # last-dump wall-clock per category (throttle)
+
+
+def _dump_enemy_sample(frame, tag=""):
+    """Save a FULL frame to datasets/enemy_dots/samples/ for offline template-vs-color review.
+    Best-effort -- never raises (rides the safety path)."""
+    try:
+        os.makedirs(_ENEMY_SAMPLE_DIR, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S", time.localtime()) + f"_{int((time.time() % 1) * 1000):03d}"
+        safe = "".join(ch for ch in tag if ch.isalnum() or ch in "-_.")
+        path = os.path.join(_ENEMY_SAMPLE_DIR, f"{ts}_enemy_{safe}.png")
+        cv2.imwrite(path, frame)
+        return path
+    except Exception:
+        return None
+
+
+def _append_enemy_shadow_log(row):
+    """Append one shadow-comparison row (ts, template count, color count, agree) as JSON.
+    Best-effort -- never raises."""
+    try:
+        import json
+        os.makedirs(os.path.dirname(_ENEMY_SHADOW_LOG) or ".", exist_ok=True)
+        with open(_ENEMY_SHADOW_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _enemy_shadow(frame, mm, template_dots):
+    """Double-check the color detector against the authoritative template result on this frame.
+    Logs every activity and dumps a sample (throttled) whenever either detector fires. Compares
+    at the PRESENCE level (len>0) -- the boolean the safety check actually uses. Never raises."""
+    try:
+        color_dots = detect_red_dots_color(mm)
+    except Exception:
+        return
+    t, c = len(template_dots), len(color_dots)
+    if t == 0 and c == 0:
+        return                                     # all-clear frame -> nothing to learn
+    agree = (t > 0) == (c > 0)
+    now = time.time()
+    _append_enemy_shadow_log({"ts": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
+                              "template": t, "color": c, "agree": agree})
+    key = "agree" if agree else "disagree"
+    interval = _ENEMY_AGREE_DUMP_INTERVAL if agree else _ENEMY_DISAGREE_DUMP_INTERVAL
+    if now - _enemy_shadow_state[key] >= interval:
+        _enemy_shadow_state[key] = now
+        _dump_enemy_sample(frame, f"t{t}_c{c}_{'agree' if agree else 'DISAGREE'}")
+
+
 def _enemy_dots(frame):
-    """Red dots (other players) in the minimap band of a captured BGR frame, via HSV color
-    (detect_red_dots_color). Presence-only -> non-empty means escape."""
+    """Red dots (other players) in the minimap band of a captured BGR frame. TEMPLATE match is
+    authoritative (drives the another-player alarm); detect_red_dots_color runs in shadow to
+    validate the switch (see _enemy_shadow). Presence-only -> non-empty means escape."""
     if frame is None:
         return []
     ey = min(MM_Y + MM_H, frame.shape[0]); ex = min(MM_X + MM_W, frame.shape[1])
     mm = frame[MM_Y:ey, MM_X:ex]                  # FULL configured minimap band (lower platforms too)
     try:
-        return detect_red_dots_color(mm)
+        dots = detect_red_dots(mm, templates_folder="assets/minimap_other_character/",
+                               threshold=ENEMY_THRESHOLD)
     except Exception:
         return []
+    try:
+        _enemy_shadow(frame, mm, dots)            # shadow double-check: never affects the return
+    except Exception:
+        pass
+    return dots
 
 
 def get_enemy():
