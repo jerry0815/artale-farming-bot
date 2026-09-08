@@ -109,3 +109,23 @@ def test_composite_anchor_push_forwards_and_falls_back():
     c.push(None)                                     # player missed this beat
     assert c.locate(None) == (5, 5)                 # anchor 0 -> None -> nametag fallback
     assert c.which == 1
+
+
+def test_composite_anchor_rejects_far_fallback_phantom():
+    import player
+
+    class _Yolo:                       # locates once at (150,300), then misses
+        def __init__(self): self.r = [(150, 300)]; self.last = (150, 300)
+        def locate(self, f): return self.r.pop(0) if self.r else None
+
+    class _Nametag:                    # always the phantom at x=635 (far from 150)
+        last = (635, 350)
+        def locate(self, f): return (635, 350)
+
+    c = player.CompositeAnchor([_Yolo(), _Nametag()], max_jump=250)
+    assert c.locate(None) == (150, 300)         # yolo hit -> good = 150
+    assert c.locate(None) is None               # yolo misses -> nametag 635 is 485px away -> rejected
+
+    c2 = player.CompositeAnchor([_Yolo(), _Nametag()])   # no cap -> legacy: phantom slips through
+    c2.locate(None)
+    assert c2.locate(None) == (635, 350)

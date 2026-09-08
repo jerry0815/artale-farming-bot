@@ -131,10 +131,12 @@ class CompositeAnchor:
     return the first that locates the player -- so if one is covered (attack VFX, a mob),
     the other still finds you. `which` names the anchor that last succeeded (for debug)."""
 
-    def __init__(self, anchors):
+    def __init__(self, anchors, max_jump=None):
         self.anchors = anchors
         self.which = None
         self.last = None
+        self.max_jump = max_jump      # reject a fallback that leaps > this (screen px) from the
+        self._good = None             # last ACCEPTED pos -- guards a phantom nametag match
 
     def push(self, player_box):
         """Forward a shared-pass player box to the FIRST anchor if it supports .push (the
@@ -147,10 +149,19 @@ class CompositeAnchor:
     def locate(self, frame_bgr):
         for i, a in enumerate(self.anchors):
             p = a.locate(frame_bgr)
-            if p is not None:
-                self.which = i
-                self.last = getattr(a, "last", None)
-                return p
+            if p is None:
+                continue
+            # Phantom guard: a fallback anchor (e.g. the nametag false-locked on a static blob /
+            # another player's name) can report a spot far from where the player actually is.
+            # Reject a leap > max_jump from the last accepted position -> treat as "not found"
+            # so the caller waits for a real re-lock instead of chasing the phantom.
+            if (self.max_jump is not None and self._good is not None
+                    and abs(p[0] - self._good[0]) > self.max_jump):
+                continue
+            self.which = i
+            self.last = getattr(a, "last", None)
+            self._good = p
+            return p
         self.which = None
         return None
 

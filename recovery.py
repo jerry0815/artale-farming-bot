@@ -2595,7 +2595,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                     return name
                 title = _p.NametagAnchor(_titlew, feet_offset=int(map_cfg.get("title_feet_offset", 40)),
                                          accept_thres=float(map_cfg.get("title_accept", 0.55)))
-                return _p.CompositeAnchor([name, title])   # name tag first, 稱號 fallback
+                return _p.CompositeAnchor([name, title],   # name tag first, 稱號 fallback
+                                          max_jump=map_cfg.get("player_anchor_max_jump"))
             print(f"[water] anchor: nametag ({map_cfg['nametag_template']})"
                   + (f" + title fallback ({map_cfg['title_template']})" if _titlew is not None else ""))
         else:
@@ -2620,7 +2621,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                     anchors.append(_p.NametagAnchor(_fb_titlew,
                                                     feet_offset=int(_fb.get("title_feet_offset", 40)),
                                                     accept_thres=float(_fb.get("title_accept", 0.55))))
-                return _p.CompositeAnchor(anchors)          # primary first, nametag(+title) fallback
+                return _p.CompositeAnchor(anchors,          # primary first, nametag(+title) fallback
+                                          max_jump=map_cfg.get("player_anchor_max_jump"))
             print(f"[water] anchor fallback: nametag ({_fb['nametag_template']})"
                   + (f" + title ({_fb['title_template']})" if _fb_titlew is not None else ""))
         print(f"[water] approach ON: detector={detector} range={_arange} band={_aband}")
