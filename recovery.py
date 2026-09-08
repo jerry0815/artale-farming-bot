@@ -2410,7 +2410,8 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
 
 
 CHAR_FIELDS = ("attack_key", "attack_keys", "buff_keys", "buff_groups",
-               "buff_interval_secs", "buff_settle_secs")
+               "buff_interval_secs", "buff_settle_secs",
+               "nametag_template", "title_template")   # per-character name/title for the anchor
 
 
 def load_char(path):
@@ -2607,10 +2608,15 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
         # VFX covering the HP bar that yolo_player keys on) falls back to the name tag/title,
         # which sit BELOW the character and stay visible through the skill burst.
         _fb = map_cfg.get("nametag_fallback")
-        if _fb and _fb.get("nametag_template"):
+        # A character overrides the fallback tag/title with its OWN (top-level nametag_template /
+        # title_template, merged in by apply_character) -- so playing "Lulala" matches Lulala's
+        # name, not the map's default "Qoolo". Falls back to the map's when the character sets none.
+        _fb_tag_path = map_cfg.get("nametag_template") or (_fb or {}).get("nametag_template")
+        _fb_title_path = map_cfg.get("title_template") or (_fb or {}).get("title_template")
+        if _fb and _fb_tag_path:
             _primary_make = _make_anchor
-            _fb_tagw = _p.load_nametag(_fb["nametag_template"])
-            _fb_titlew = _p.load_nametag(_fb["title_template"]) if _fb.get("title_template") else None
+            _fb_tagw = _p.load_nametag(_fb_tag_path)
+            _fb_titlew = _p.load_nametag(_fb_title_path) if _fb_title_path else None
 
             def _make_anchor():
                 anchors = [_primary_make(),
@@ -2623,8 +2629,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                                     accept_thres=float(_fb.get("title_accept", 0.55))))
                 return _p.CompositeAnchor(anchors,          # primary first, nametag(+title) fallback
                                           max_jump=map_cfg.get("player_anchor_max_jump"))
-            print(f"[water] anchor fallback: nametag ({_fb['nametag_template']})"
-                  + (f" + title ({_fb['title_template']})" if _fb_titlew is not None else ""))
+            print(f"[water] anchor fallback: nametag ({_fb_tag_path})"
+                  + (f" + title ({_fb_title_path})" if _fb_titlew is not None else ""))
         print(f"[water] approach ON: detector={detector} range={_arange} band={_aband}")
 
     # Buff groups: each key set fires on its OWN interval, so e.g. 'd' every 5min and a slow buff

@@ -116,3 +116,11 @@ def test_farming_loop_water_merges_char_before_reading(monkeypatch, tmp_path):
     ch.write_text('{"attack_key": "x"}', encoding="utf-8")
     recovery.farming_loop_water("m.json", char=str(ch))
     assert seen["attack_key"] == "x"
+
+
+def test_char_nametag_title_override_the_map():
+    m = {"nametag_fallback": {"nametag_template": "a/qoolo.png", "title_template": "a/qoolo_t.png"}}
+    c = {"nametag_template": "a/lulala.png", "title_template": "a/lulala_t.png"}
+    out = recovery.apply_character(m, c)
+    assert out["nametag_template"] == "a/lulala.png"      # character's tag wins
+    assert out["title_template"] == "a/lulala_t.png"

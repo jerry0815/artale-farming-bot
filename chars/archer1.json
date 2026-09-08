@@ -1,6 +1,8 @@
 {
   "name": "archer1",
   "attack_key": "x",
+  "nametag_template": "assets/player/deep_sea_2_nametag_1.png",
+  "title_template": "assets/player/deep_sea_2_title_1.png",
   "buff_keys": ["a", "j"],
   "buff_interval_secs": 300,
   "buff_settle_secs": 0.6
