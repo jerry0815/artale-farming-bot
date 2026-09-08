@@ -48,6 +48,23 @@ def test_apply_character_does_not_mutate_inputs():
     assert m["attack_key"] == "c"                  # original map unchanged
 
 
+def test_char_buff_keys_replace_map_buff_groups():
+    # A character's simple buff_keys must WIN over a map's buff_groups (which otherwise shadows
+    # buff_keys in the loop) -- else switching character never changes the buffs.
+    m = {"buff_groups": [{"keys": ["d"], "interval_secs": 300}], "attack_key": "c"}
+    c = {"buff_keys": ["a", "j"], "buff_interval_secs": 240}
+    out = recovery.apply_character(m, c)
+    assert out["buff_keys"] == ["a", "j"]
+    assert "buff_groups" not in out               # map's groups dropped so the loop uses buff_keys
+
+
+def test_char_buff_groups_override_map_buff_groups():
+    m = {"buff_groups": [{"keys": ["d"]}]}
+    c = {"buff_groups": [{"keys": ["a"], "interval_secs": 100}]}
+    out = recovery.apply_character(m, c)
+    assert out["buff_groups"] == [{"keys": ["a"], "interval_secs": 100}]
+
+
 def test_load_char_reads_file(tmp_path):
     p = tmp_path / "archer1.json"
     p.write_text(json.dumps({"name": "archer1", "attack_key": "x"}), encoding="utf-8")

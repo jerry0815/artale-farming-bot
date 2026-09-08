@@ -3,6 +3,6 @@
   "attack_key": "x",
   "attack_keys": { "fishhouse": "x", "goby": "z" },
   "buff_keys": ["a", "j"],
-  "buff_interval_secs": 240,
+  "buff_interval_secs": 300,
   "buff_settle_secs": 0.6
 }

@@ -2409,7 +2409,7 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
             farm_state = navmap.WALK_SHOOT if farm_state == navmap.STAND_SHOOT else navmap.STAND_SHOOT
 
 
-CHAR_FIELDS = ("attack_key", "attack_keys", "buff_keys",
+CHAR_FIELDS = ("attack_key", "attack_keys", "buff_keys", "buff_groups",
                "buff_interval_secs", "buff_settle_secs")
 
 
@@ -2434,6 +2434,12 @@ def apply_character(map_cfg, char_cfg):
     for k in CHAR_FIELDS:
         if char_cfg.get(k) is not None:
             merged[k] = char_cfg[k]
+    # A character's buff spec REPLACES the map's. The loop prefers buff_groups over buff_keys,
+    # so if the character gives the simple buff_keys form (and not buff_groups), drop the map's
+    # buff_groups -- otherwise it would shadow the character's buffs (switching character would
+    # leave the buffs unchanged).
+    if char_cfg.get("buff_keys") is not None and char_cfg.get("buff_groups") is None:
+        merged.pop("buff_groups", None)
     return merged
 
 
