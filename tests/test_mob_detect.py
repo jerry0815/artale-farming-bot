@@ -65,3 +65,12 @@ def test_yolo_detect_mobs_equal_yolo_boxes_and_picks_player(monkeypatch):
     assert mobs_det == [(0.4, 10, 10, 40, 40, "fishhouse"),
                         (0.7, 100, 100, 40, 50, "goby")]
     assert player == (0.9, 200, 20, 40, 20)                        # the class-2 box
+
+
+def test_yolo_anchor_reacquires_after_misses(monkeypatch):
+    a = mob_detect.YoloPlayerAnchor(model=object(), imgsz=640, stale_grace=0)   # water config
+    a.last = (100, 100)                    # a stale reference (max_jump would reject a far box)
+    monkeypatch.setattr(mob_detect, "yolo_detect", lambda *a2, **k: ([], None))   # keep missing
+    for _ in range(a.reacquire):
+        assert a.locate(None) is None
+    assert a.last is None                  # forgot `last` -> next read re-acquires without the cap

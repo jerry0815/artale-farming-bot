@@ -129,3 +129,17 @@ def test_composite_anchor_rejects_far_fallback_phantom():
     c2 = player.CompositeAnchor([_Yolo(), _Nametag()])   # no cap -> legacy: phantom slips through
     c2.locate(None)
     assert c2.locate(None) == (635, 350)
+
+
+def test_composite_anchor_reacquires_after_sustained_rejection():
+    import player
+
+    class _Far:                            # always reports a spot far from _good -> rejected
+        last = (999, 0)
+        def locate(self, f): return (999, 0)
+
+    c = player.CompositeAnchor([_Far()], max_jump=250)
+    c._good = (100, 0)                     # 899px away -> guard rejects
+    for _ in range(3):
+        assert c.locate(None) is None      # rejected while _good is fresh
+    assert c.locate(None) == (999, 0)      # after 3 rejections _good dropped -> re-acquired

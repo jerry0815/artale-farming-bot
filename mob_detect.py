@@ -9,10 +9,13 @@ splits the result into (mobs, player_box) so the loop pays for a single predict(
 instead of a separate detector + anchor. YoloPlayerAnchor exposes the player box as a
 .locate(frame)->(x, feet_y) anchor (feet = bottom-center of the box).
 """
+import time as _t
+
 MOB_CLASSES = (0, 1)        # fishhouse, goby
 PLAYER_CLASS = 2
 
 _MODEL_CACHE = {}
+_last_reject_log = [0.0]     # throttle for the "player box rejected by max_jump" diagnostic
 
 
 def load_yolo(path="models/mob_yolo.pt"):
@@ -82,7 +85,16 @@ def _pick_player(players, near=None, max_jump=None):
     if near is not None:
         nx = near[0]
         best = min(players, key=lambda t: abs((t[1] + t[3] // 2) - nx))
-        if max_jump is not None and abs((best[1] + best[3] // 2) - nx) > max_jump:
+        jump = abs((best[1] + best[3] // 2) - nx)
+        if max_jump is not None and jump > max_jump:
+            # DIAGNOSTIC (throttled): a player box WAS found but the cap rejected it. This is the
+            # tell between "YOLO can't see her" (no log) and "the guard is rejecting a real box"
+            # (this log) -- so a lost-anchor stall points at the right cause, not a needless retrain.
+            now = _t.time()
+            if now - _last_reject_log[0] > 3.0:
+                _last_reject_log[0] = now
+                print(f"[anchor] player box @x={best[1] + best[3] // 2} (conf {best[0]:.2f}) REJECTED: "
+                      f"jumped {jump}px > cap {max_jump} from near x={nx}")
             return None
         return best
     return max(players, key=lambda t: t[0])
@@ -141,6 +153,9 @@ class YoloPlayerAnchor:
         self.foot_offset = foot_offset
         self.stale_grace = stale_grace
         self.max_jump = max_jump          # reject a nearest-box leap farther than this (phantom guard)
+        self.reacquire = 3                # after this many straight misses, forget `last` and
+        #                                   re-acquire WITHOUT the cap -- else a stale `last` makes
+        #                                   max_jump reject every valid box forever (the lost trap)
         self.last = None
         self._miss = 0
         self._pushed = False
@@ -163,10 +178,12 @@ class YoloPlayerAnchor:
             _mobs, box = yolo_detect(self.model, frame_bgr, self.roi, self.conf, self.imgsz,
                                      near=self.last, max_jump=self.max_jump)   # nearest box, capped jump
         if box is None:
-            if self.last is not None and self._miss < self.stale_grace:  # ride a brief miss
-                self._miss += 1
+            self._miss += 1
+            if self.last is not None and self._miss <= self.stale_grace:  # ride a brief miss
                 return self.last
-            return None
+            if self._miss >= self.reacquire:         # lost too long -> forget `last` so the next
+                self.last = None                     # read re-acquires (near=None: highest-conf,
+            return None                              # no max_jump cap) instead of rejecting forever
         self._miss = 0
         self.last = self._to_pos(box)
         return self.last

@@ -10,6 +10,7 @@ Tunables live in a map config under "player" (all optional):
   {"foot_offset":135, "hue_lo":120, "region":[x0,y0,x1,y1],
    "min_w":18,"max_w":140,"min_h":2,"max_h":16}
 """
+import time as _t
 import cv2
 import numpy as np
 
@@ -137,6 +138,8 @@ class CompositeAnchor:
         self.last = None
         self.max_jump = max_jump      # reject a fallback that leaps > this (screen px) from the
         self._good = None             # last ACCEPTED pos -- guards a phantom nametag match
+        self._none = 0                # straight None returns -> drop _good to re-acquire (below)
+        self._last_reject_log = 0.0   # throttle for the "fallback rejected by cap" diagnostic
 
     def push(self, player_box):
         """Forward a shared-pass player box to the FIRST anchor if it supports .push (the
@@ -157,12 +160,21 @@ class CompositeAnchor:
             # so the caller waits for a real re-lock instead of chasing the phantom.
             if (self.max_jump is not None and self._good is not None
                     and abs(p[0] - self._good[0]) > self.max_jump):
+                now = _t.time()                        # DIAGNOSTIC (throttled): a fallback located
+                if now - self._last_reject_log > 3.0:  # her but the guard rejected it as a far jump
+                    self._last_reject_log = now
+                    print(f"[anchor] fallback #{i} @x={p[0]} REJECTED: {abs(p[0] - self._good[0])}px "
+                          f"> cap {self.max_jump} from last x={self._good[0]}")
                 continue
             self.which = i
             self.last = getattr(a, "last", None)
             self._good = p
+            self._none = 0
             return p
         self.which = None
+        self._none += 1
+        if self._none >= 3:           # rejecting/missing too long -> drop the guard so a real
+            self._good = None         # detection can re-acquire (else max_jump traps her lost)
         return None
 
 
