@@ -1835,7 +1835,8 @@ def approach_shoot(seconds, detect_fn, anchor,
                    attack_keys=None, priority_class=None, priority_range=None,
                    priority_hold_hits=0, priority_lock_grace=0, fall_confirm=2, ease_margin=45,
                    continuous_attack=False, attack_dwell=0.25, face_deadzone=15,
-                   face_settle=0.2, fire_stall_limit=5, lock_switch_px=70, combined=None):
+                   face_settle=0.2, fire_stall_limit=5, lock_switch_px=70, combined=None,
+                   lost_limit=12):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1852,6 +1853,7 @@ def approach_shoot(seconds, detect_fn, anchor,
     best_absdx = None       # closest we've gotten to the current target (net-progress stall)
     no_improve = 0
     last_player = None      # sticky anchor: lock onto the bar nearest last frame's player
+    _lost = 0               # consecutive beats the anchor found NOTHING -> re-seat past lost_limit
     pri_lock_pos = None     # last screen pos of the engaged priority target (fishhouse)
     pri_miss = 0            # consecutive reads the priority target has been missing (occlusion debounce)
     pri_engaged = None      # x of the fishhouse last hit -> post-kill hold fires when it DISAPPEARS
@@ -1933,6 +1935,13 @@ def approach_shoot(seconds, detect_fn, anchor,
                 #                                            back to nametag when None, as before)
             p = anchor.locate(f)                          # HP-bar/name-tag anchor
             if p is None:
+                _lost += 1
+                if _lost >= lost_limit:                   # anchor blind for too long (YOLO HP-bar +
+                    # nametag both failing) -> she'd otherwise blind-attack to the 90s cap. Re-seat
+                    # instead, and SAVE the frame so the missed HP bar can be labeled + retrained.
+                    _dump_player_miss(f, label)
+                    log(f"player lost {_lost} beats (anchor can't find her) -> re-seat")
+                    kb.safe_release_all(); return LOST
                 if last_player is None:                   # never locked yet -> brief blind attack
                     log("player NOT found (no prior lock) -> blind attack")
                     stop_walk()
@@ -1946,6 +1955,8 @@ def approach_shoot(seconds, detect_fn, anchor,
                 # moved -- so assume her last position and keep firing.
                 p = last_player
                 log(f"player NOT found (rooted) -> assume last position {p}")
+            else:
+                _lost = 0                                 # a real lock -> reset the lost streak
             last_player = p
             if getattr(anchor, "which", None):            # composite fell past the primary anchor
                 log(f"anchor fallback #{anchor.which} (nametag) located player at {p}")
@@ -2160,6 +2171,29 @@ FARM_CTX = {
 
 DEPLETED = "DEPLETED"   # _stand_shoot sentinel: platform ran dry mid-shoot -> rotate now
 FELL = "FELL"           # approach_shoot sentinel: her minimap y dropped off the platform -> re-seat
+LOST = "LOST"           # approach_shoot sentinel: the player anchor found nothing for many beats
+#                         (YOLO HP-bar + nametag both failing) -> re-seat instead of blind-attacking
+
+_PLAYER_MISS_DIR = "datasets/player_misses"
+_last_player_miss = [0.0]
+
+
+def _dump_player_miss(frame, label="", interval=20.0):
+    """Save a frame where the player anchor failed, to retrain the mob YOLO's player (HP-bar)
+    class. Label them later with:  python label_mobs.py --grab-dir datasets/player_misses
+    Throttled (one per `interval`s) so a stuck stretch can't flood; never raises."""
+    now = time.time()
+    if frame is None or now - _last_player_miss[0] < interval:
+        return
+    _last_player_miss[0] = now
+    try:
+        os.makedirs(_PLAYER_MISS_DIR, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S", time.localtime()) + f"_{int((now % 1) * 1000):03d}"
+        path = os.path.join(_PLAYER_MISS_DIR, f"{ts}_{label or 'miss'}.png")
+        cv2.imwrite(path, frame)
+        print(f"[player-miss] saved {path} (label -> retrain player class)")
+    except Exception as e:
+        print(f"[player-miss] dump failed: {e}")
 
 
 def _reactive_deplete(low_streak, count, threshold, debounce):
@@ -2863,6 +2897,14 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                 heal_skill()
                 if ok is False:
                     return False
+                if ok is LOST:                           # anchor blind too long -> re-seat (don't
+                    print(f"[water] {node}: player anchor lost -> re-seat")   # blind-attack to the cap)
+                    _lost_at = stable_char()
+                    if not _seat_on_platform(_lost_at if _lost_at[0] >= 0 else None):
+                        return False
+                    node_anchor = _make_anchor() if _make_anchor else None
+                    _node_t0 = time.time()
+                    continue
                 if ok is FELL:                           # knocked/walked off mid-beat -> re-seat & farm on
                     print(f"[water] {node}: fell off platform -> re-seat")
                     # PHANTOM GUARD: seed the re-seat swim with her ACTUAL fallen position

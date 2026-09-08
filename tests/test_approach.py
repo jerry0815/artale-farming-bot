@@ -429,3 +429,20 @@ def test_priority_lock_not_burned_while_approaching(monkeypatch):
                             priority_class="fishhouse", priority_lock_grace=1,
                             stall_limit=8, verbose=False)
     assert Key.right in pressed and "x" not in pressed  # kept approaching the fishhouse, never fired the goby
+
+
+def test_returns_LOST_and_collects_frame_when_anchor_blind(monkeypatch):
+    # The anchor never locates the player -> after lost_limit beats, approach_shoot bails with
+    # LOST (so farm_node re-seats) and saves the frame for retraining the player class.
+    df, _pressed, _ = _setup(monkeypatch, mobs=[], ptuple=(0, 0), clock_vals=[0] * 40)
+
+    class _Blind:
+        last = None
+        def locate(self, f):
+            return None
+
+    dumped = []
+    monkeypatch.setattr(recovery, "_dump_player_miss", lambda f, label="": dumped.append(label))
+    out = recovery.approach_shoot(10, df, _Blind(), lost_limit=3, verbose=False, label="P2")
+    assert out is recovery.LOST
+    assert dumped == ["P2"]        # collected the miss frame for labeling
