@@ -17,7 +17,8 @@ import numpy as np
 from PIL import Image
 import mss, pygetwindow as gw
 from screeninfo import get_monitors
-from detection import detect_character_on_minimap, detect_red_dots, detect_lie_check
+from detection import (detect_character_on_minimap, detect_red_dots,
+                       detect_red_dots_color, detect_lie_check)
 from lie_check_yolo import detect_lie_check_yolo
 from alarm import Alarm, AlertController
 import notify
@@ -512,14 +513,14 @@ def set_enemy_threshold(t):
 
 
 def _enemy_dots(frame):
-    """Red dots (other players) in the minimap band of a captured BGR frame."""
+    """Red dots (other players) in the minimap band of a captured BGR frame, via HSV color
+    (detect_red_dots_color). Presence-only -> non-empty means escape."""
     if frame is None:
         return []
     ey = min(MM_Y + MM_H, frame.shape[0]); ex = min(MM_X + MM_W, frame.shape[1])
     mm = frame[MM_Y:ey, MM_X:ex]                  # FULL configured minimap band (lower platforms too)
     try:
-        return detect_red_dots(mm, templates_folder="assets/minimap_other_character/",
-                               threshold=ENEMY_THRESHOLD)
+        return detect_red_dots_color(mm)
     except Exception:
         return []
 
