@@ -942,6 +942,34 @@ def focus():
     return u.GetForegroundWindow() == hwnd
 
 
+def is_focused():
+    """True iff the game window is the CURRENT foreground window. Read-only -- unlike focus() it
+    never raises/steals the window, so it's cheap to poll at each iteration. Returns True when it
+    can't tell (non-Windows / API error) so a detection glitch never blocks farming."""
+    try:
+        u = ctypes.windll.user32
+        hwnd = u.FindWindowW(None, TITLE)
+        return bool(hwnd) and u.GetForegroundWindow() == hwnd
+    except Exception:
+        return True
+
+
+def ensure_game_focused(check=None, refocus=None, label="focus"):
+    """Guarantee the GAME holds focus at an iteration boundary so key presses can't leak into
+    another window (e.g. the user alt-tabbed, a popup stole focus). If focus was lost, release
+    all keys and try to bring the game back. Returns True if the game is (now) focused, False if
+    it still isn't -- the caller must NOT send keys that iteration. `check`/`refocus` injectable
+    for tests."""
+    check = check or is_focused
+    refocus = refocus or focus
+    if check():
+        return True
+    kb.safe_release_all()                     # never hold a key down while focus is elsewhere
+    print(f"[{label}] game lost focus -> refocus")
+    refocus()
+    return check()
+
+
 def stable_char(n=3):
     """Robust position: take reads and return the center of the DENSEST cluster, so
     scattered buff-glow phantoms are rejected even if a few slip past the color filter
@@ -2404,6 +2432,8 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
         if kb.pause:
             kb.safe_release_all(); lie_check_silence(); active_freeze(now)
             STATUS["state"] = "paused"; STATUS["lie"] = False; time.sleep(0.1); continue
+        if not ensure_game_focused(label="nav"):       # keys must land in the GAME, not another
+            active_freeze(now); time.sleep(0.3); continue   # window -> refocus before farming
         STATUS["state"] = "farming"
         active_tick(now)                              # advance ACTIVE farm time
         lie_check_fast_tick()                         # FULL curse/monster now runs in the monitor thread
@@ -2806,6 +2836,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
         if kb.pause:
             kb.safe_release_all(); lie_check_silence(); _freeze_active(now)
             STATUS["state"] = "paused"; STATUS["lie"] = False; time.sleep(0.1); return "pause"
+        if not ensure_game_focused(label="water"):     # keys must land in the GAME, not another
+            _freeze_active(now); time.sleep(0.3); return "skip"   # window -> refocus before farming
         STATUS["state"] = "farming"
         active_tick(now)                                   # advance ACTIVE farm time
         lie_check_fast_tick(); STATUS["lie"] = is_lie_check_active()   # FULL runs in the monitor thread

@@ -488,3 +488,26 @@ def test_dump_yolo_fail_throttles_and_dedups(monkeypatch, tmp_path):
     recovery._dump_yolo_fail(A, interval=3.0);  assert len(saved) == 1    # interval ok but identical -> dedup
     t[0] += 5.0
     recovery._dump_yolo_fail(B, interval=3.0);  assert len(saved) == 2    # different scene -> save
+
+
+def test_ensure_game_focused_only_refocuses_when_lost(monkeypatch):
+    # Guarantees keys land in the GAME: no-op when already focused; on focus loss it releases
+    # keys, refocuses once, and reports whether the game came back.
+    released = []
+    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: released.append(1))
+
+    # already focused -> no release, no refocus
+    calls = {"refocus": 0}
+    ok = recovery.ensure_game_focused(check=lambda: True,
+                                      refocus=lambda: calls.__setitem__("refocus", calls["refocus"] + 1))
+    assert ok is True and calls["refocus"] == 0 and released == []
+
+    # lost then regained: releases keys, refocuses, returns True
+    seq = iter([False, True])
+    ok2 = recovery.ensure_game_focused(check=lambda: next(seq),
+                                       refocus=lambda: calls.__setitem__("refocus", calls["refocus"] + 1))
+    assert ok2 is True and calls["refocus"] == 1 and released == [1]
+
+    # still lost after refocus -> returns False (caller must not send keys)
+    ok3 = recovery.ensure_game_focused(check=lambda: False, refocus=lambda: None)
+    assert ok3 is False
