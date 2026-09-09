@@ -1836,7 +1836,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                    priority_hold_hits=0, priority_lock_grace=0, fall_confirm=2, ease_margin=45,
                    continuous_attack=False, attack_dwell=0.25, face_deadzone=15,
                    face_settle=0.2, fire_stall_limit=5, lock_switch_px=70, combined=None,
-                   lost_limit=12, fail_dump_interval=3.0):
+                   lost_limit=12, collect_misses=False, fail_dump_interval=3.0):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1854,7 +1854,9 @@ def approach_shoot(seconds, detect_fn, anchor,
     no_improve = 0
     last_player = None      # sticky anchor: lock onto the bar nearest last frame's player
     _lost = 0               # consecutive beats the anchor found NOTHING -> re-seat past lost_limit
-    _yolo_primary = _yolo_primary_anchor(anchor)   # for the true-recall-failure dump (may be None)
+    # Miss-frame collection is OFF by default (set collect_miss_frames in the map to gather a
+    # retrain batch). When off, skip the yolo-fail dump entirely -- no anchor resolution, no writes.
+    _yolo_primary = _yolo_primary_anchor(anchor) if collect_misses else None
     pri_lock_pos = None     # last screen pos of the engaged priority target (fishhouse)
     pri_miss = 0            # consecutive reads the priority target has been missing (occlusion debounce)
     pri_engaged = None      # x of the fishhouse last hit -> post-kill hold fires when it DISAPPEARS
@@ -1945,7 +1947,8 @@ def approach_shoot(seconds, detect_fn, anchor,
                 if _lost >= lost_limit:                   # anchor blind for too long (YOLO HP-bar +
                     # nametag both failing) -> she'd otherwise blind-attack to the 90s cap. Re-seat
                     # instead, and SAVE the frame so the missed HP bar can be labeled + retrained.
-                    _dump_player_miss(f, label)
+                    if collect_misses:
+                        _dump_player_miss(f, label)
                     log(f"player lost {_lost} beats (anchor can't find her) -> re-seat")
                     kb.safe_release_all(); return LOST
                 if last_player is None:                   # never locked yet -> brief blind attack
@@ -2955,6 +2958,7 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     face_settle=float(map_cfg.get("face_settle_secs", 0.2)),
                                     fire_stall_limit=int(map_cfg.get("fire_stall_limit", 5)),
                                     lock_switch_px=int(map_cfg.get("lock_switch_px", 70)),
+                                    collect_misses=bool(map_cfg.get("collect_miss_frames", False)),
                                     fail_dump_interval=float(map_cfg.get("yolo_fail_dump_interval", 3.0)),
                                     combined=_combined)
                 heal_skill()

@@ -431,11 +431,10 @@ def test_priority_lock_not_burned_while_approaching(monkeypatch):
     assert Key.right in pressed and "x" not in pressed  # kept approaching the fishhouse, never fired the goby
 
 
-def test_returns_LOST_and_collects_frame_when_anchor_blind(monkeypatch):
+def test_returns_LOST_when_anchor_blind_and_collection_gated(monkeypatch):
     # The anchor never locates the player -> after lost_limit beats, approach_shoot bails with
-    # LOST (so farm_node re-seats) and saves the frame for retraining the player class.
-    df, _pressed, _ = _setup(monkeypatch, mobs=[], ptuple=(0, 0), clock_vals=[0] * 40)
-
+    # LOST (so farm_node re-seats). The frame dump is gated by collect_misses: OFF by default
+    # (no disk writes now that the retrain is done), ON only when explicitly collecting.
     class _Blind:
         last = None
         def locate(self, f):
@@ -443,9 +442,17 @@ def test_returns_LOST_and_collects_frame_when_anchor_blind(monkeypatch):
 
     dumped = []
     monkeypatch.setattr(recovery, "_dump_player_miss", lambda f, label="": dumped.append(label))
+
+    # default (collect_misses=False): still returns LOST, but does NOT write a frame
+    df, _p, _ = _setup(monkeypatch, mobs=[], ptuple=(0, 0), clock_vals=[0] * 40)
     out = recovery.approach_shoot(10, df, _Blind(), lost_limit=3, verbose=False, label="P2")
-    assert out is recovery.LOST
-    assert dumped == ["P2"]        # collected the miss frame for labeling
+    assert out is recovery.LOST and dumped == []
+
+    # collect_misses=True: re-seat AND save the frame for labeling
+    df2, _p2, _ = _setup(monkeypatch, mobs=[], ptuple=(0, 0), clock_vals=[0] * 40)
+    out2 = recovery.approach_shoot(10, df2, _Blind(), lost_limit=3, verbose=False, label="P2",
+                                   collect_misses=True)
+    assert out2 is recovery.LOST and dumped == ["P2"]
 
 
 def test_yolo_primary_anchor_resolves_from_composite_bare_or_none():
