@@ -216,14 +216,7 @@
   "yolo_player_conf": 0.3,
   "player_anchor_max_jump": 250,
   "player_anchor_max_jump_note": "screen px. If the nearest player-box leaps more than this from her last position, it's another player's HP bar (P3 is crowded), not her -- reject it (no lock) so she rides last / stops instead of the anchor drifting box-by-box to the right edge. Big enough for real walking between beats; lower if she still chases, raise if she can't re-lock after moving.",
-  "nametag_fallback": {
-    "nametag_template": "assets/player/deep_sea_2_nametag.png",
-    "nametag_feet_offset": 6,
-    "nametag_accept": 0.55,
-    "title_template": "assets/player/deep_sea_2_title.png",
-    "title_feet_offset": 40,
-    "title_accept": 0.55
-  },
+  "nametag_fallback_disabled_note": "PURE HP BAR: nametag/title fallback removed on purpose -- it phantomed onto the nearby player (UwUsagi) during crowded P3/P6 bursts. The YOLO HP-bar class is now the ONLY anchor; a miss rides stale_grace + hold-last-position (she's rooted while attacking, when the bar is buried under damage numbers) and a sustained loss hits the LOST re-seat. To re-enable, restore a nametag_fallback block: {nametag_template, nametag_feet_offset, nametag_accept, title_template, title_feet_offset, title_accept}.",
   "breaks": false,
   "node_max_secs": 90,
   "start_sink": true,
