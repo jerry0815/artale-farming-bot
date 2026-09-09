@@ -7,7 +7,7 @@ MID_R narrowing) in the portal-rope-recovery spec before we implement.
 
   python verify_bands.py
 
-Press F8 to stop -> prints an extent summary. Walk to the far LEFT and far RIGHT
+Press 'n' to stop -> prints an extent summary. Walk to the far LEFT and far RIGHT
 of each platform (and to its lowest droop) so the min/max captures the whole
 ledge. UNMAPPED reads (in no band) are flagged -> those are spots a band must
 grow to cover.
@@ -46,9 +46,9 @@ def main():
     if not rec.focus():
         print("[verify] could not focus game"); return
     print("[verify] READ-ONLY live band check. Walk each platform L<->R edge.")
-    print("[verify] F8 to stop. New nodes under test:", ", ".join(sorted(NEW)))
+    print("[verify] 'n' to stop. New nodes under test:", ", ".join(sorted(NEW)))
     print("[verify] WALK ONE PLATFORM PER RUN. The RAW box below is ground truth.")
-    lis = Listener(on_press=kb.on_press); lis.start()   # F8 -> kb.pause
+    lis = Listener(on_press=kb.on_press); lis.start()   # 'n' -> kb.pause
     raw = None            # [xmin, xmax, ymin, ymax, n]  <- pure reads, no bands
     labels = {}           # proposed label -> count (secondary hint only)
     last_line = None

@@ -37,19 +37,21 @@ def wait_with_pause(duration):
         time.sleep(0.01) # 檢查頻率
     return True # 表示等待完成
 
-f9_callback = None   # set by recovery.py to silence alarms on F9
+f9_callback = None   # set by recovery.py to silence alarms on 'm' (was F9)
 f10_callback = None  # set by recovery.py to dump the current frame on F10
 
 
 def on_press(key):
     global pause
     try:
-        if key == Key.f8:
+        ch = getattr(key, "char", None)          # letter/number keys expose .char; special keys -> None
+        ch = ch.lower() if ch else ch
+        if ch == "n":                            # pause / resume toggle (was F8)
             pause = not pause
             print(f"[狀態切換] {'暫停中' if pause else '繼續運行'}")
-        elif key == Key.f9 and f9_callback is not None:
+        elif ch == "m" and f9_callback is not None:   # silence alarms (was F9)
             f9_callback()
-        elif key == Key.f10 and f10_callback is not None:
+        elif key == Key.f10 and f10_callback is not None:  # frame dump (unchanged)
             f10_callback()
     except AttributeError:
         # 非特殊按鍵，例如 'a' 'b' 等

@@ -5,7 +5,7 @@ Logs (t,x,y) position samples + key down/up events + node marks to a
 `build_route.py` turns the capture into a route.json node-graph.
 
 CLI (via recovery.py):  python recovery.py record-route <map_name>
-Hotkeys while recording:  F10 = stop,  F9 = mark a node,  F8 = existing pause.
+Hotkeys while recording:  F10 = stop,  F9 = mark a node,  'n' = existing pause.
 
 See docs/superpowers/specs/2026-08-24-route-recorder-and-ui-design.md.
 """
@@ -144,7 +144,7 @@ class RouteRecorder:
 def record_live(map_name, poll_hz=30):
     """Live recorder: wires a real pynput listener (F10 stop, F9 mark, key logging)
     around the position poll, using recovery.get_character_full for positions and
-    keyboard.pause (F8) for pausing. Writes routes/<map_name>.capture.jsonl."""
+    keyboard.pause ('n') for pausing. Writes routes/<map_name>.capture.jsonl."""
     import os
     from pynput.keyboard import Key, Listener
     import recovery
@@ -163,7 +163,7 @@ def record_live(map_name, poll_hz=30):
         fh.flush()
 
     def on_press(key):
-        kb.on_press(key)                       # keep the existing F8 pause behavior
+        kb.on_press(key)                       # keep the existing 'n' pause behavior
         if key == Key.f10:
             state["stopped"] = True
             return False                       # stop the listener
@@ -191,7 +191,7 @@ def record_live(map_name, poll_hz=30):
     lis = Listener(on_press=on_press, on_release=on_release)
     lis.start()
     print(f"[record] recording -> {out_path}")
-    print("[record] play the map. F9 = mark node, F10 = stop, F8 = pause.")
+    print("[record] play the map. F9 = mark node, F10 = stop, 'n' = pause.")
     try:
         period = 1.0 / poll_hz
         while not state["stopped"]:

@@ -8,7 +8,7 @@ tool does not.
 
 Usage:
   python live_test_yolo.py         # snapshot -> annotated PNG + count
-  python live_test_yolo.py loop    # live count ~1/sec until F8 (F8 = kb.pause)
+  python live_test_yolo.py loop    # live count ~1/sec until 'n' ('n' = kb.pause)
 
 Annotated image -> debug_output/live_yolo.png:
   yellow rect = active-playfield band (TOP_FARM) that gates the count
@@ -74,7 +74,7 @@ def loop():
     model = monsters.load_dragon_model()
     if model is None:
         print("[live] no models/dragon_yolo.pt found"); lis.stop(); return
-    print("[live] playfield dragon count; F8 to stop")
+    print("[live] playfield dragon count; 'n' to stop")
     try:
         while not R.kb.pause:
             print(f"[live] dragons={monsters.count_dragons_yolo(R.capture, model, ROI)}")

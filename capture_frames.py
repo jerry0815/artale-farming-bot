@@ -7,7 +7,7 @@ Usage:
       outdir : where to save frames (default: datasets/dragons/images)
       fps    : frames per second (default: 8)
 Farm across BOTH platforms and varied densities (0/few/many/overlapping);
-press F8 to stop. Aim for ~200-400 frames.
+press 'n' to stop. Aim for ~200-400 frames.
 """
 import os, sys, time
 import cv2
@@ -29,15 +29,15 @@ def main():
 
     if not R.focus():
         print("could not focus game window"); return
-    lis = Listener(on_press=R.kb.on_press); lis.start()   # F8 stops
+    lis = Listener(on_press=R.kb.on_press); lis.start()   # 'n' stops
     R.kb.pause = False
-    print(f"[cap] farm both platforms; press F8 to stop. Saving clean frames to {outdir}/")
+    print(f"[cap] farm both platforms; press 'n' to stop. Saving clean frames to {outdir}/")
 
     t0, n, interval, next_t, misses = time.time(), 0, 1.0 / fps, 0.0, 0
     try:
         while time.time() - t0 < cap_secs:
             if R.kb.pause:
-                print("[cap] F8 -> stop"); break
+                print("[cap] 'n' -> stop"); break
             t = time.time() - t0
             if t < next_t:
                 time.sleep(0.01); continue

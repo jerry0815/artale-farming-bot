@@ -9,7 +9,7 @@ Usage:
     python record_climb_frames.py [outdir] [fps]
       outdir : where to save frames (default: climb_frames)
       fps    : frames per second (default: 5)
-Climb bottom->top SLOWLY (so the transition is well sampled); press F8 to stop.
+Climb bottom->top SLOWLY (so the transition is well sampled); press 'n' to stop.
 """
 import os, sys, json, time
 import ctypes
@@ -50,15 +50,15 @@ def main():
 
     if not R.focus():
         print("could not focus game window"); return
-    lis = Listener(on_press=R.kb.on_press); lis.start()          # F8 stops
-    R.kb.pause = False                                            # clear any stale F8 state
-    print(f"[frames] climb bottom->top SLOWLY; press F8 to stop. Saving to {outdir}/")
+    lis = Listener(on_press=R.kb.on_press); lis.start()          # 'n' stops
+    R.kb.pause = False                                            # clear any stale 'n' state
+    print(f"[frames] climb bottom->top SLOWLY; press 'n' to stop. Saving to {outdir}/")
 
     reads, t0, n, interval, next_t, misses = [], time.time(), 0, 1.0 / fps, 0.0, 0
     try:
         while time.time() - t0 < cap_secs:
             if R.kb.pause:
-                print("[frames] F8 pressed -> stop"); break
+                print("[frames] 'n' pressed -> stop"); break
             t = time.time() - t0
             if t < next_t:
                 time.sleep(0.01); continue

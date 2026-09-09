@@ -1,5 +1,5 @@
 """Supervised single climb burst: focus game, hold Up for N seconds, release,
-screenshot. Climbing up a rope cannot drop the character. F8 aborts.
+screenshot. Climbing up a rope cannot drop the character. 'n' aborts.
 
 Usage: python climb_burst.py [seconds]   (default 1.0)
 """
@@ -35,7 +35,7 @@ def main():
     print("before:", get_character())
     shot("climb_before.png")
     focus()
-    print(f"holding Up for {secs}s ... (F8 to abort)")
+    print(f"holding Up for {secs}s ... ('n' to abort)")
     try:
         kb.safe_press(Key.up)
         end = time.time() + secs

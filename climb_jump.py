@@ -1,5 +1,5 @@
 """Fast atomic rope EXIT: focus, climb Up to the top, then jump onto the platform
-in one uninterrupted sequence (no pausing on the rope). F8 aborts.
+in one uninterrupted sequence (no pausing on the rope). 'n' aborts.
 
 Climb stops when y reaches platform level OR y stops decreasing (top reached) OR
 a hard time cap. Then it up-jumps (Up held + Alt) to hop onto the platform.
@@ -39,7 +39,7 @@ def main():
     try:
         while time.time() - t0 < CLIMB_MAX:
             if kb.pause:
-                reason = "F8"; break
+                reason = "'n'"; break
             x, y = get_character()
             if y >= 0:
                 if y <= PLATFORM_TOP_Y:
@@ -53,7 +53,7 @@ def main():
                 last_y = y
             time.sleep(0.08)
         # up-jump onto the platform (keep Up held, tap Jump)
-        if reason != "F8":
+        if reason != "'n'":
             kb.safe_press(JUMP)
             time.sleep(0.15)
             kb.safe_release(JUMP)

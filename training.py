@@ -78,7 +78,8 @@ def press_key_with_pause(key, duration):
 
 def on_press(key):
     global pause
-    if key == Key.f8:
+    ch = getattr(key, "char", None)              # 'n' pause/resume toggle (was F8)
+    if ch and ch.lower() == "n":
         pause = not pause
         print(f"[狀態切換] {'暫停中' if pause else '繼續運行'}")
 
@@ -111,7 +112,7 @@ def movement_loop():
         #     wait_with_pause(cycle_time - elapsed)
 
 if __name__ == "__main__":
-    print("自動操作啟動中，按 F8 可暫停 / 恢復")
+    print("自動操作啟動中，按 'n' 可暫停 / 恢復")
     time.sleep(3)
 
     listener = Listener(on_press=on_press)

@@ -6,7 +6,7 @@ loop), and Record route (map name + node marks from the browser). Live status +
 a big green/red lie-check banner, polled from recovery.STATUS.
 
 The bot runs in a background thread; the panel sets keyboard.pause and reads the
-shared status, so the existing F8 hotkey and all lie-check ticks keep working.
+shared status, so the existing 'n' hotkey and all lie-check ticks keep working.
 See docs/superpowers/specs/2026-08-24-route-recorder-and-ui-design.md.
 """
 import json
@@ -225,7 +225,7 @@ def _build_actions(controller_ref):
 
     def _panic():
         kb.safe_release_all()
-        print("[panel] safety -> release keys and PAUSE (F8 to resume).")
+        print("[panel] safety -> release keys and PAUSE ('n' to resume).")
         kb.pause = True
 
     def farm(map_path, char=None):
@@ -860,7 +860,7 @@ def serve(port=PORT):
     ref = [None]
     controller = Controller(_build_actions(ref))
     ref[0] = controller
-    lis = Listener(on_press=kb.on_press)           # keep F8 pause working
+    lis = Listener(on_press=kb.on_press)           # keep 'n' pause working
     lis.start()
     handler = make_handler(controller)
     with socketserver.ThreadingTCPServer(("127.0.0.1", port), handler) as httpd:

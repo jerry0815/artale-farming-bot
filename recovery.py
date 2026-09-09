@@ -5,7 +5,7 @@ band crop misses) in the SAME coordinate frame as the existing calibration
 (offset 20,171 -> so ROPE_MINIMAP_X=91, PLATFORM_Y=101 stay valid).
 
 CLI:
-  python recovery.py runnav                     # full production farming run (F8 start/pause)
+  python recovery.py runnav                     # full production farming run ('n' start/pause)
   python recovery.py nav [secs]                 # bounded runnav test (default 90s)
   python recovery.py focus                      # bring game to foreground (verify)
   (run with no/unknown cmd to print the full command list)
@@ -29,7 +29,7 @@ import pyautogui
 from pynput.keyboard import Key, Listener
 import random
 import threading
-import keyboard as kb   # safe_press/release/release_all + F8 pause listener
+import keyboard as kb   # safe_press/release/release_all + 'n' pause listener
 import navmap
 import watermap
 
@@ -245,15 +245,15 @@ def lie_check_fast_tick(interval=0.8):
         hits = detect_lie_check(f, templates_folder=_LIE_DIR,
                                 template_filter=_FAST_TEMPLATES, work_width=520)
         if _fast_alert.update(bool(hits)) and hits:
-            print(f"[lie-check] ⚠️ 透明圖形驗證 {[(n, round(s, 2)) for n, s in hits]} -- ALARM (F8 暫停)")
-            notify.send("lie_check", f"⚠️ 透明圖形驗證 (captcha) detected {[n for n, _ in hits]} — needs a human (F8 暫停)")
+            print(f"[lie-check] ⚠️ 透明圖形驗證 {[(n, round(s, 2)) for n, s in hits]} -- ALARM ('n' 暫停)")
+            notify.send("lie_check", f"⚠️ 透明圖形驗證 (captcha) detected {[n for n, _ in hits]} — needs a human ('n' 暫停)")
             dump_frame("fast_auto", f, tag=_hit_tag(hits))
     dots = _enemy_dots(f)                                  # another player -> alarm + pause
     if dbg_on():
         dbg(f"[enemy] scan -> {len(dots)} red dot(s)" + (f" at {dots}" if dots else ""))
     if dots:
-        print("[water] another player -> ALARM + PAUSE (F9 silence, F8 resume)")
-        notify.send("another_player", "⚠️ Another player entered the map — bot PAUSED (F9 silence, F8 resume)")
+        print("[water] another player -> ALARM + PAUSE ('m' silence, 'n' resume)")
+        notify.send("another_player", "⚠️ Another player entered the map — bot PAUSED ('m' silence, 'n' resume)")
         enemy_alarm_on(); kb.safe_release_all(); kb.pause = True
 
 # Near-miss telemetry: the full check only auto-dumps on a HIT, so a MISSED curse/monster screen
@@ -288,8 +288,8 @@ def lie_check_full_tick(interval=1.5):
     #   live frames while staying above that floor. Recall-first, measured not guessed.
     hits = hits + [(f"yolo:{cls}", cf) for cls, cf, _ in yolo]
     if _full_alert.update(bool(hits)) and hits:
-        print(f"[lie-check] ⚠️ 需真人處理畫面 {[(n, round(s, 2)) for n, s in hits]} -- ALARM (F8 暫停)")
-        notify.send("lie_check", f"⚠️ 需真人處理畫面 (curse/monster) {[n for n, _ in hits]} — needs a human (F8 暫停)")
+        print(f"[lie-check] ⚠️ 需真人處理畫面 {[(n, round(s, 2)) for n, s in hits]} -- ALARM ('n' 暫停)")
+        notify.send("lie_check", f"⚠️ 需真人處理畫面 (curse/monster) {[n for n, _ in hits]} — needs a human ('n' 暫停)")
         dump_frame("full_auto", f, tag=_hit_tag(hits))
     elif not hits:                                        # near-miss capture (below threshold)
         near = [(n, s) for n, s in scores.items() if s >= _NEAR_MISS_FLOOR]
@@ -362,12 +362,12 @@ def is_lie_check_active():
     return bool(_fast_alert.alarm.active or _full_alert.alarm.active)
 
 
-# --- another-player alarm: a DISTINCT lower tone, sounds until F9 acknowledges it ---
+# --- another-player alarm: a DISTINCT lower tone, sounds until 'm' acknowledges it ---
 _enemy_alarm = Alarm(freq=700, beep_ms=250, gap_ms=120)
 
 
 def enemy_alarm_on():
-    """Start the another-player alarm (keeps beeping until F9 / silence)."""
+    """Start the another-player alarm (keeps beeping until 'm' / silence)."""
     _enemy_alarm.start()
 
 
@@ -376,22 +376,22 @@ def enemy_alarm_silence():
 
 
 def silence_all_alarms():
-    """F9: acknowledge -- stop every alarm (lie-check + another-player). Quiet when nothing
-    is sounding, so F9 stays usable for other things (e.g. record-route node marks)."""
+    """'m': acknowledge -- stop every alarm (lie-check + another-player). Quiet when nothing
+    is sounding, so 'm' stays usable for other things (e.g. record-route node marks)."""
     active = is_lie_check_active() or _enemy_alarm.active
     lie_check_silence()
     enemy_alarm_silence()
     if active:
-        print("[alarm] silenced (F9)")
+        print("[alarm] silenced ('m')")
 
 
-kb.f9_callback = silence_all_alarms   # F9 silences alarms wherever kb.on_press is the listener
+kb.f9_callback = silence_all_alarms   # 'm' silences alarms wherever kb.on_press is the listener
 kb.f10_callback = lambda: dump_frame("manual")   # F10 dumps the current frame for offline recall tuning
 
 
 # --- shared status + cooperative stop, for the control UI (panel.py) --------------
 # STATUS is a plain dict updated in-place by the loops; the UI polls it. STOP is a
-# cooperative stop the UI sets to end a background-thread run (F8 pause still works).
+# cooperative stop the UI sets to end a background-thread run ('n' pause still works).
 STATUS = {"state": "idle", "node": None, "count": None, "lie": False,
           "exp_per_min": None, "exp_10min": None, "exp_total": 0,
           "run_secs": 0, "run_active_base": None, "run_active_since": None, "buff_at": None,
@@ -1376,7 +1376,7 @@ def climb_rope_hop(grab_x, land_y_max, dismount=None, land_node=None, cap=12.0):
     a monster knocks her off (no rise for CLIMB_STALL_S -> she's back on the platform),
     release, re-walk to the rope, and re-grab -- up to MAX_GRABS attempts within cap. If
     land_node is given, verify she settled on it. Returns True on success; on any miss
-    releases keys and returns False so the caller degrades to panic. F8 (kb.pause) aborts."""
+    releases keys and returns False so the caller degrades to panic. 'n' (kb.pause) aborts."""
     if not focus():
         return False
     t0, best, reached = time.time(), 999, False
@@ -1566,7 +1566,7 @@ def swim_to(target_x, target_y, tol=(3, 3), cap=8.0, locate=None, jump=True,
             jump_burst=4, jump_gap=0.04, axis="xy", settle=2, verbose=False, label="",
             start_near=None):
     """Swim toward (target_x, target_y) until within `tol` on both axes or `cap` seconds.
-    Returns True on arrival. F8 (kb.pause) aborts. `locate` (default get_character_full)
+    Returns True on arrival. 'n' (kb.pause) aborts. `locate` (default get_character_full)
     is injectable for tests.
 
     LANDING: arrival requires `settle` CONSECUTIVE in-band reads (not one), and no jump is
@@ -1671,7 +1671,7 @@ def sink_to_bottom(bottom_y, cap=15.0, locate=None, settle=4, near=35):
     """Straight descent (no direction held): release ALL keys and let her SINK. Returns True once
     she LANDED after sinking -- was sinking, then stopped for `settle` reads AND is within `near`
     px of `bottom_y`. Used for start_sink (she's already over the drop). The RESET uses
-    hold_to_bottom instead (it must WALK to the rightmost drop first). F8 aborts."""
+    hold_to_bottom instead (it must WALK to the rightmost drop first). 'n' aborts."""
     locate = locate or get_character_full
     kb.safe_release_all()
     t0 = time.time()
@@ -1705,7 +1705,7 @@ def hold_to_bottom(bottom_y, key, cap=15.0, near=35, settle=3):
     `bottom_y`) AND she is NOT still sinking (y didn't rise since the last read) -- so a fast fall
     passing THROUGH the band can't conclude arrival; she must have come to REST on the bottom
     platform, for `settle` consecutive reads. The `near` band also rejects a far minimap phantom
-    (e.g. y~347, well below the bottom platform). Releases `key` on exit. F8 aborts."""
+    (e.g. y~347, well below the bottom platform). Releases `key` on exit. 'n' aborts."""
     kb.safe_release_all()
     kb.safe_press(key)
     t0 = time.time()
@@ -2332,7 +2332,7 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
     ONE state move on the current platform (STAND_SHOOT or WALK_SHOOT), then counts
     dragons at the resulting standstill; a low count (< deplete_threshold) rotates to
     the next platform via travel(), otherwise the states alternate. Recovery and
-    rotation both go through navmap.travel(). Preserves EXP/red-dot safety, F8 pause,
+    rotation both go through navmap.travel(). Preserves EXP/red-dot safety, 'n' pause,
     jittered breaks, and jittered skill/heal cadence. max_seconds bounds it."""
     import random as _r
     import monsters, navmap
@@ -2440,7 +2440,7 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
 
         # safety
         if enemy_check and enemy_check():
-            print("[nav] another player -> ALARM + panic (F9 to silence)")
+            print("[nav] another player -> ALARM + panic ('m' to silence)")
             enemy_alarm_on()
             if panic: panic()
             time.sleep(1); continue
@@ -2811,7 +2811,7 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
         lie_check_fast_tick(); STATUS["lie"] = is_lie_check_active()   # FULL runs in the monitor thread
         exp_tick()
         if enemy_check and enemy_check():
-            print("[water] another player -> ALARM + panic (F9 to silence)")
+            print("[water] another player -> ALARM + panic ('m' to silence)")
             enemy_alarm_on()
             if panic: panic()
             time.sleep(1); return "skip"
@@ -3079,7 +3079,7 @@ def break_cycle(idle_seconds=30):
 def record_climb_attempt(cap=20.0):
     """Data collection ONLY (sense-only, presses NO keys): while the USER manually
     climbs bottom->top, poll get_character_full() at ~30Hz into reads=[[t,x,y],...].
-    Stops on F8 (kb.pause) or `cap` seconds. Zero-risk: never moves the character."""
+    Stops on 'n' (kb.pause) or `cap` seconds. Zero-risk: never moves the character."""
     reads, t0 = [], time.time()
     while time.time() - t0 < cap:
         if kb.pause:
@@ -3164,7 +3164,7 @@ if __name__ == "__main__":
     if cmd == "focus":
         print("focused:", focus())
     elif cmd == "recover":
-        lis = Listener(on_press=kb.on_press); lis.start()   # F8 aborts
+        lis = Listener(on_press=kb.on_press); lis.start()   # 'n' aborts
         try:
             print("RESULT:", recover_to_farming())
         finally:
@@ -3172,10 +3172,10 @@ if __name__ == "__main__":
     elif cmd == "where":                                    # print current node classification
         x, y = stable_char(4)
         print(f"({x},{y}) -> {navmap.classify_node(x, y)}")
-    elif cmd == "trackpos":                                 # live minimap (x,y) readout; F8/Ctrl-C to stop
+    elif cmd == "trackpos":                                 # live minimap (x,y) readout; 'n'/Ctrl-C to stop
         hz = float(sys.argv[sys.argv.index("--hz") + 1]) if "--hz" in sys.argv else 6.0
         lis = Listener(on_press=kb.on_press); lis.start()
-        print(f"[trackpos] live minimap (x,y) at {hz:.0f}Hz -- move up/down to watch the pin. F8 pauses, Ctrl-C stops.")
+        print(f"[trackpos] live minimap (x,y) at {hz:.0f}Hz -- move up/down to watch the pin. 'n' pauses, Ctrl-C stops.")
         prev = None
         try:
             while True:
@@ -3194,13 +3194,13 @@ if __name__ == "__main__":
     elif cmd == "hop":                                      # test one climb_rope_hop: hop GX LY [dismount]
         gx, ly = int(sys.argv[2]), int(sys.argv[3])
         dm = sys.argv[4] if len(sys.argv) > 4 else None
-        lis = Listener(on_press=kb.on_press); lis.start()   # F8 aborts
+        lis = Listener(on_press=kb.on_press); lis.start()   # 'n' aborts
         try:
             print("RESULT:", climb_rope_hop(gx, ly, dismount=dm))
         finally:
             kb.safe_release_all(); lis.stop()
     elif cmd == "portal":                                   # run the full nav chain -> TOP_FARM
-        lis = Listener(on_press=kb.on_press); lis.start()   # F8 aborts
+        lis = Listener(on_press=kb.on_press); lis.start()   # 'n' aborts
         try:
             print("RESULT:", navmap.travel("TOP_FARM", locate_fn=_nav_locate,
                                             execute_fn=execute_edge))
@@ -3216,8 +3216,8 @@ if __name__ == "__main__":
         import json as _json
         if not focus():
             print("no focus"); sys.exit(1)
-        lis = Listener(on_press=kb.on_press); lis.start()      # F8 stops
-        print("[record-climb] manually climb bottom->top; press F8 to stop")
+        lis = Listener(on_press=kb.on_press); lis.start()      # 'n' stops
+        print("[record-climb] manually climb bottom->top; press 'n' to stop")
         try:
             tr = record_climb_attempt()
         finally:
@@ -3228,20 +3228,20 @@ if __name__ == "__main__":
     elif cmd == "drop":
         if not focus():
             print("could not focus"); sys.exit(1)
-        lis = Listener(on_press=kb.on_press); lis.start()   # F8 aborts
+        lis = Listener(on_press=kb.on_press); lis.start()   # 'n' aborts
         try:
             print("RESULT:", drop_to_fallen())
         finally:
             kb.safe_release_all(); lis.stop()
     elif cmd == "break":
         secs = int(sys.argv[2]) if len(sys.argv) > 2 else 30
-        lis = Listener(on_press=kb.on_press); lis.start()   # F8 aborts
+        lis = Listener(on_press=kb.on_press); lis.start()   # 'n' aborts
         try:
             print("RESULT:", break_cycle(secs))
         finally:
             kb.safe_release_all(); lis.stop()
     elif cmd == "demo":
-        lis = Listener(on_press=kb.on_press); lis.start()   # F8 aborts
+        lis = Listener(on_press=kb.on_press); lis.start()   # 'n' aborts
         try:
             demo_sequence()
         finally:
@@ -3249,7 +3249,7 @@ if __name__ == "__main__":
     elif cmd == "gobottom":
         if not focus():
             print("could not focus"); sys.exit(1)
-        lis = Listener(on_press=kb.on_press); lis.start()   # F8 aborts
+        lis = Listener(on_press=kb.on_press); lis.start()   # 'n' aborts
         try:
             print("RESULT:", go_to_bottom())
         finally:
@@ -3258,7 +3258,7 @@ if __name__ == "__main__":
         secs = int(sys.argv[2]) if len(sys.argv) > 2 else 20
         if not focus():
             print("could not focus"); sys.exit(1)
-        lis = Listener(on_press=kb.on_press); lis.start()   # F8 aborts
+        lis = Listener(on_press=kb.on_press); lis.start()   # 'n' aborts
         try:
             print("RESULT:", farm_bottom(secs))
         finally:
@@ -3268,10 +3268,10 @@ if __name__ == "__main__":
         def _enemy_check(): return len(get_enemy()) > 0
         def _panic():
             kb.safe_release_all()
-            print("[safety] trigger -> releasing keys and PAUSING (no Free Market). F8 to resume.")
+            print("[safety] trigger -> releasing keys and PAUSING (no Free Market). 'n' to resume.")
             kb.pause = True
         lis = Listener(on_press=kb.on_press); lis.start(); kb.pause = True
-        print("FULL RUN (runnav) ready. Switch to the game and press F8 to start / pause.")
+        print("FULL RUN (runnav) ready. Switch to the game and press 'n' to start / pause.")
         import watermap
         _navcfg = watermap.load_map("maps/dragon_nest.json")   # rest cadence overrides live here
         try:
@@ -3361,12 +3361,12 @@ if __name__ == "__main__":
         def _enemy_check(): return len(get_enemy()) > 0
         def _panic():
             kb.safe_release_all()
-            print("[safety] trigger -> releasing keys and PAUSING. F8 to resume.")
+            print("[safety] trigger -> releasing keys and PAUSING. 'n' to resume.")
             kb.pause = True
         lis = Listener(on_press=kb.on_press); lis.start()
         if secs is None:
             kb.pause = True
-            print("WATER RUN (waternav) ready. Switch to the game and press F8 to start / pause.")
+            print("WATER RUN (waternav) ready. Switch to the game and press 'n' to start / pause.")
         try:
             farming_loop_water(_map_path, enemy_check=_enemy_check, panic=_panic,
                                max_seconds=secs)
@@ -3374,10 +3374,10 @@ if __name__ == "__main__":
             kb.safe_release_all(); lis.stop()
     else:
         print("usage: python recovery.py <cmd>")
-        print("  run:   runnav          full production farming run (F8 to start/pause)")
+        print("  run:   runnav          full production farming run ('n' to start/pause)")
         print("  test:  nav [secs]      bounded runnav (default 90s)")
         print("  nav debug: focus | where | trackpos [--hz N] | hop GX LY [dismount] | portal | drop | gobottom | recover")
         print("  route: record-route <map>   record a path -> routes/<map>.capture.jsonl")
-        print("  water: waternav [secs] --map maps/<name>.json   water-map farming (F8 start/pause)")
+        print("  water: waternav [secs] --map maps/<name>.json   water-map farming ('n' start/pause)")
         print("  water: fishcount --map maps/<name>.json [--sweep|--scale S|--thr T|--per N|--roi x0,y0,x1,y1]")
         print("  other: farmbottom [s] | demo | break [s] | record-climb")
