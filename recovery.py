@@ -1228,6 +1228,8 @@ def _walk_shoot(key, target_x, going_right, seed=None, cap=3.5, fall_y=FALLEN_Y_
     while time.time() - t0 < cap:
         if kb.pause:
             break
+        if not focus_ok_or_bail("dragon"):     # focus lost mid-walk -> release + refocus, end sweep
+            break
         lie_check_fast_tick()      # transparent-shape check while walk-shooting (3s window)
         r = _plausible_read(last)
         if r is not None:
@@ -2329,6 +2331,8 @@ def _stand_shoot(node, seconds, count_fn=None, threshold=2, check_every=0.5, deb
     next_check, low = t0 + check_every, 0
     while time.time() - t0 < seconds:
         if kb.pause:
+            break
+        if not focus_ok_or_bail("dragon"):     # focus lost mid-stand -> release + refocus, end beat
             break
         kb.safe_press('c'); time.sleep(0.1)           # HOLD attack (continuous, not tapped)
         r = _plausible_read(last)                     # rejects buff-glow phantom reads
