@@ -460,3 +460,24 @@ def test_yolo_primary_anchor_resolves_from_composite_bare_or_none():
     assert recovery._yolo_primary_anchor(y) is y                       # bare
     assert recovery._yolo_primary_anchor(player.CompositeAnchor([y, _Nametag()])) is y   # wrapped
     assert recovery._yolo_primary_anchor(player.CompositeAnchor([_Nametag()])) is None   # no yolo
+
+
+def test_dump_yolo_fail_throttles_and_dedups(monkeypatch, tmp_path):
+    # "Collect much more" = more VARIETY, not copies. Throttle spaces saves in time; the dedup
+    # skips a frame near-identical to the last SAVED one (a stuck same-scene stretch).
+    saved = []
+    monkeypatch.setattr(recovery.cv2, "imwrite", lambda p, f: saved.append(p) or True)
+    monkeypatch.setattr(recovery, "_YOLO_FAIL_DIR", str(tmp_path))
+    recovery._last_yolo_fail[0] = 0.0
+    recovery._last_fail_small[0] = None
+    t = [1000.0]
+    monkeypatch.setattr(recovery.time, "time", lambda: t[0])
+    A = np.zeros((36, 64, 3), np.uint8)
+    B = np.full((36, 64, 3), 255, np.uint8)
+    recovery._dump_yolo_fail(A, interval=3.0);  assert len(saved) == 1    # first -> save
+    t[0] += 1.0
+    recovery._dump_yolo_fail(A, interval=3.0);  assert len(saved) == 1    # within interval -> throttled
+    t[0] += 5.0
+    recovery._dump_yolo_fail(A, interval=3.0);  assert len(saved) == 1    # interval ok but identical -> dedup
+    t[0] += 5.0
+    recovery._dump_yolo_fail(B, interval=3.0);  assert len(saved) == 2    # different scene -> save

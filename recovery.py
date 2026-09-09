@@ -1836,7 +1836,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                    priority_hold_hits=0, priority_lock_grace=0, fall_confirm=2, ease_margin=45,
                    continuous_attack=False, attack_dwell=0.25, face_deadzone=15,
                    face_settle=0.2, fire_stall_limit=5, lock_switch_px=70, combined=None,
-                   lost_limit=12):
+                   lost_limit=12, fail_dump_interval=3.0):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1939,7 +1939,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                 # TRUE recall failure this beat: YOLO returned no class-2 box (regardless of whether
                 # the nametag then covered it). Dump it (throttled) to build a real retrain set --
                 # this is the sample kind we found we DIDN'T have (past dumps were guard rejections).
-                _dump_yolo_fail(f, label)
+                _dump_yolo_fail(f, label, interval=fail_dump_interval)
             if p is None:
                 _lost += 1
                 if _lost >= lost_limit:                   # anchor blind for too long (YOLO HP-bar +
@@ -2204,26 +2204,39 @@ def _dump_player_miss(frame, label="", interval=20.0):
 
 _YOLO_FAIL_DIR = "datasets/player_yolo_fail"
 _last_yolo_fail = [0.0]
+_last_fail_small = [None]        # 64x36 gray of the last SAVED fail frame -> near-duplicate reject
 
 
-def _dump_yolo_fail(frame, label="", interval=20.0):
+def _dump_yolo_fail(frame, label="", interval=3.0, dup_thresh=6.0):
     """Save a frame where the YOLO player anchor returned ZERO class-2 boxes -- a TRUE recall
     failure (the HP bar was there but the model didn't fire), as opposed to _dump_player_miss
     which triggers on the LOST sentinel and, as it turned out, mostly caught GUARD REJECTIONS
     (YOLO did detect, the max_jump veto threw it out). This dump fires per-beat whenever YOLO
-    saw nothing -- even when the nametag then covered it -- so we finally build a real
-    recall-failure set to judge whether a retrain is warranted. Label with:
-      python label_mobs.py --grab-dir datasets/player_yolo_fail
-    Throttled (one per `interval`s) so an occluded stretch can't flood; never raises."""
+    saw nothing -- even when the nametag then covered it -- so we build a real recall-failure
+    set to retrain on. Label with:  python label_mobs.py --grab-dir datasets/player_yolo_fail
+
+    Two filters keep the set useful, not bloated: `interval` throttles the rate, and `dup_thresh`
+    skips a frame that's near-identical (mean abs gray diff < thresh) to the last SAVED one -- so
+    a stuck same-scene stretch adds VARIETY, not 200 copies of one burst. Never raises."""
     now = time.time()
     if frame is None or now - _last_yolo_fail[0] < interval:
         return
+    small = None
+    try:
+        small = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (64, 36))
+        if _last_fail_small[0] is not None and \
+                float(np.mean(cv2.absdiff(small, _last_fail_small[0]))) < dup_thresh:
+            return                                   # same scene as the last save -> skip (variety)
+    except Exception:
+        small = None
     _last_yolo_fail[0] = now
     try:
         os.makedirs(_YOLO_FAIL_DIR, exist_ok=True)
         ts = time.strftime("%Y%m%d_%H%M%S", time.localtime()) + f"_{int((now % 1) * 1000):03d}"
         path = os.path.join(_YOLO_FAIL_DIR, f"{ts}_{label or 'fail'}.png")
         cv2.imwrite(path, frame)
+        if small is not None:
+            _last_fail_small[0] = small
         print(f"[yolo-fail] saved {path} (YOLO returned no player box -> label to retrain recall)")
     except Exception as e:
         print(f"[yolo-fail] dump failed: {e}")
@@ -2942,6 +2955,7 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     face_settle=float(map_cfg.get("face_settle_secs", 0.2)),
                                     fire_stall_limit=int(map_cfg.get("fire_stall_limit", 5)),
                                     lock_switch_px=int(map_cfg.get("lock_switch_px", 70)),
+                                    fail_dump_interval=float(map_cfg.get("yolo_fail_dump_interval", 3.0)),
                                     combined=_combined)
                 heal_skill()
                 if ok is False:
