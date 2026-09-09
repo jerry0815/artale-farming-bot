@@ -158,7 +158,17 @@ class CompositeAnchor:
             # another player's name) can report a spot far from where the player actually is.
             # Reject a leap > max_jump from the last accepted position -> treat as "not found"
             # so the caller waits for a real re-lock instead of chasing the phantom.
-            if (self.max_jump is not None and self._good is not None
+            #
+            # BUT skip this for a TRUSTED anchor (YoloPlayerAnchor): whenever YOLO detects the
+            # class-2 box we USE it. Guarding it here lets a fallback's phantom _good reject the
+            # primary's REAL move: if a pinned nametag phantom holds _good at x=1485 while the
+            # player really walked to x=510, every valid YOLO box is 900px away -> rejected forever,
+            # and since the nametag keeps "succeeding" _none never hits the re-acquire release. So
+            # the low-priority phantom permanently locks out the high-priority real anchor. The
+            # trusted anchor self-limits (near-pick + re-acquire), so accept its box and reset _good.
+            # The guard still protects phantom-prone fallbacks (nametag/title), which set no flag.
+            trusted = getattr(a, "trusted", False)
+            if (not trusted and self.max_jump is not None and self._good is not None
                     and abs(p[0] - self._good[0]) > self.max_jump):
                 now = _t.time()                        # DIAGNOSTIC (throttled): a fallback located
                 if now - self._last_reject_log > 3.0:  # her but the guard rejected it as a far jump

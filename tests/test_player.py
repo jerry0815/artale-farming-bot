@@ -131,6 +131,40 @@ def test_composite_anchor_rejects_far_fallback_phantom():
     assert c2.locate(None) == (635, 350)
 
 
+def test_composite_self_guarded_primary_not_rejected_by_phantom_good():
+    import player
+    # Reproduces the P6 log: a pinned nametag phantom set _good far right (x=1485); the player
+    # really walked left and the SELF-GUARDED YOLO primary (has its own max_jump) reports x=510.
+    # The composite must TRUST the primary (skip its cross-anchor guard) so YOLO reclaims the
+    # lock -- else the low-priority phantom locks out the real anchor forever.
+    class _Yolo:                           # trusted primary (YoloPlayerAnchor sets .trusted = True)
+        trusted = True
+        last = (510, 300)
+        def locate(self, f): return (510, 300)
+
+    class _Nametag:                        # phantom, no self-guard
+        last = (1485, 802)
+        def locate(self, f): return (1485, 802)
+
+    c = player.CompositeAnchor([_Yolo(), _Nametag()], max_jump=250)
+    c._good = (1485, 802)                  # phantom pinned _good far from the real player
+    assert c.locate(None) == (510, 300)    # primary trusted despite 975px gap -> reclaims lock
+    assert c.which == 0 and c._good == (510, 300)   # _good follows the real player back
+
+
+def test_composite_guard_still_rejects_unguarded_primary_phantom():
+    import player
+    # The guard must STILL protect a nametag-PRIMARY map (both anchors are nametags, no self-guard):
+    # a primary with no max_jump attr that leaps far from _good is still rejected as a phantom.
+    class _Nametag:
+        def __init__(self, p): self.p = p; self.last = p
+        def locate(self, f): return self.p
+
+    c = player.CompositeAnchor([_Nametag((999, 0)), _Nametag((100, 0))], max_jump=250)
+    c._good = (100, 0)                      # primary is 899px away -> guard applies (not self-guarded)
+    assert c.locate(None) == (100, 0) and c.which == 1   # primary rejected -> secondary used
+
+
 def test_composite_anchor_reacquires_after_sustained_rejection():
     import player
 

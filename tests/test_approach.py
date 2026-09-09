@@ -446,3 +446,17 @@ def test_returns_LOST_and_collects_frame_when_anchor_blind(monkeypatch):
     out = recovery.approach_shoot(10, df, _Blind(), lost_limit=3, verbose=False, label="P2")
     assert out is recovery.LOST
     assert dumped == ["P2"]        # collected the miss frame for labeling
+
+
+def test_yolo_primary_anchor_resolves_from_composite_bare_or_none():
+    # The true-failure dump needs the YoloPlayerAnchor to read its .last_had_box. The resolver
+    # finds it whether the loop's anchor is a bare YoloPlayerAnchor or wrapped in a CompositeAnchor,
+    # and returns None for a nametag-only anchor (no flag) so the dump simply never fires there.
+    class _Yolo:
+        last_had_box = True
+    class _Nametag:
+        last = (0, 0)
+    y = _Yolo()
+    assert recovery._yolo_primary_anchor(y) is y                       # bare
+    assert recovery._yolo_primary_anchor(player.CompositeAnchor([y, _Nametag()])) is y   # wrapped
+    assert recovery._yolo_primary_anchor(player.CompositeAnchor([_Nametag()])) is None   # no yolo

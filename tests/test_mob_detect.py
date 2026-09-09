@@ -67,6 +67,31 @@ def test_yolo_detect_mobs_equal_yolo_boxes_and_picks_player(monkeypatch):
     assert player == (0.9, 200, 20, 40, 20)                        # the class-2 box
 
 
+def test_yolo_anchor_no_veto_always_uses_detected_box(monkeypatch):
+    # "Whenever YOLO detects, use it": with no max_jump veto (the default), a class-2 box that
+    # moved far from `last` is still returned -- she just walked fast; we must NOT drop to nametag.
+    a = mob_detect.YoloPlayerAnchor(model=object(), imgsz=640, stale_grace=0)  # max_jump None
+    assert a.trusted is True                                   # composite will accept its box
+    a.last = (1081, 300)                                       # stale reference far from the new box
+    far = (0.34, 760, 290, 40, 20)                             # center-x 780, 301px from 1081, weak
+    monkeypatch.setattr(mob_detect, "yolo_detect",
+                        lambda *a2, **k: ([], mob_detect._pick_player([far], k.get("near"),
+                                                                      k.get("max_jump"))))
+    assert a.locate(None) == (780, 310)                        # used (no veto) despite the 301px move
+
+
+def test_yolo_anchor_last_had_box_tracks_true_recall(monkeypatch):
+    # last_had_box distinguishes a TRUE recall miss (zero class-2 boxes) from a real detection --
+    # it's what drives the yolo-fail dump. A box -> True; no box -> False (even riding stale_grace).
+    a = mob_detect.YoloPlayerAnchor(model=object(), imgsz=640, stale_grace=2)
+    monkeypatch.setattr(mob_detect, "yolo_detect", lambda *a2, **k: ([], (0.9, 100, 200, 40, 20)))
+    a.locate(None)
+    assert a.last_had_box is True                     # detected a class-2 box
+    monkeypatch.setattr(mob_detect, "yolo_detect", lambda *a2, **k: ([], None))
+    a.locate(None)                                     # rides stale_grace but saw NO box
+    assert a.last_had_box is False                     # -> counted as a true recall failure
+
+
 def test_yolo_anchor_reacquires_after_misses(monkeypatch):
     a = mob_detect.YoloPlayerAnchor(model=object(), imgsz=640, stale_grace=0)   # water config
     a.last = (100, 100)                    # a stale reference (max_jump would reject a far box)

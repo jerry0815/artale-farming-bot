@@ -1854,6 +1854,7 @@ def approach_shoot(seconds, detect_fn, anchor,
     no_improve = 0
     last_player = None      # sticky anchor: lock onto the bar nearest last frame's player
     _lost = 0               # consecutive beats the anchor found NOTHING -> re-seat past lost_limit
+    _yolo_primary = _yolo_primary_anchor(anchor)   # for the true-recall-failure dump (may be None)
     pri_lock_pos = None     # last screen pos of the engaged priority target (fishhouse)
     pri_miss = 0            # consecutive reads the priority target has been missing (occlusion debounce)
     pri_engaged = None      # x of the fishhouse last hit -> post-kill hold fires when it DISAPPEARS
@@ -1934,6 +1935,11 @@ def approach_shoot(seconds, detect_fn, anchor,
                 anchor.push(_pbox)                        # ...its player box feeds the anchor (falls
                 #                                            back to nametag when None, as before)
             p = anchor.locate(f)                          # HP-bar/name-tag anchor
+            if _yolo_primary is not None and not _yolo_primary.last_had_box:
+                # TRUE recall failure this beat: YOLO returned no class-2 box (regardless of whether
+                # the nametag then covered it). Dump it (throttled) to build a real retrain set --
+                # this is the sample kind we found we DIDN'T have (past dumps were guard rejections).
+                _dump_yolo_fail(f, label)
             if p is None:
                 _lost += 1
                 if _lost >= lost_limit:                   # anchor blind for too long (YOLO HP-bar +
@@ -2194,6 +2200,43 @@ def _dump_player_miss(frame, label="", interval=20.0):
         print(f"[player-miss] saved {path} (label -> retrain player class)")
     except Exception as e:
         print(f"[player-miss] dump failed: {e}")
+
+
+_YOLO_FAIL_DIR = "datasets/player_yolo_fail"
+_last_yolo_fail = [0.0]
+
+
+def _dump_yolo_fail(frame, label="", interval=20.0):
+    """Save a frame where the YOLO player anchor returned ZERO class-2 boxes -- a TRUE recall
+    failure (the HP bar was there but the model didn't fire), as opposed to _dump_player_miss
+    which triggers on the LOST sentinel and, as it turned out, mostly caught GUARD REJECTIONS
+    (YOLO did detect, the max_jump veto threw it out). This dump fires per-beat whenever YOLO
+    saw nothing -- even when the nametag then covered it -- so we finally build a real
+    recall-failure set to judge whether a retrain is warranted. Label with:
+      python label_mobs.py --grab-dir datasets/player_yolo_fail
+    Throttled (one per `interval`s) so an occluded stretch can't flood; never raises."""
+    now = time.time()
+    if frame is None or now - _last_yolo_fail[0] < interval:
+        return
+    _last_yolo_fail[0] = now
+    try:
+        os.makedirs(_YOLO_FAIL_DIR, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S", time.localtime()) + f"_{int((now % 1) * 1000):03d}"
+        path = os.path.join(_YOLO_FAIL_DIR, f"{ts}_{label or 'fail'}.png")
+        cv2.imwrite(path, frame)
+        print(f"[yolo-fail] saved {path} (YOLO returned no player box -> label to retrain recall)")
+    except Exception as e:
+        print(f"[yolo-fail] dump failed: {e}")
+
+
+def _yolo_primary_anchor(anchor):
+    """The YoloPlayerAnchor inside `anchor` (the composite's primary), or `anchor` itself when it
+    IS one (no nametag fallback configured), or None. Detected by the .last_had_box flag it sets
+    each locate() -- True when YOLO produced a class-2 box this beat, False when it saw none."""
+    if hasattr(anchor, "last_had_box"):
+        return anchor
+    inner = getattr(anchor, "anchors", None)
+    return inner[0] if inner and hasattr(inner[0], "last_had_box") else None
 
 
 def _reactive_deplete(low_streak, count, threshold, debounce):
@@ -2617,11 +2660,17 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
             _pconf = float(map_cfg.get("yolo_player_conf", _mconf))   # player recall > mob (HP bar is small)
             _pgrace = int(map_cfg.get("yolo_stale_grace", 0))  # 0 -> approach_shoot governs misses (rooted vs walk)
 
+            # YOLO pick veto is its OWN key (default OFF): whenever the class-2 box is detected we
+            # USE it -- she crosses a platform faster than player_anchor_max_jump per beat, so a
+            # cap here just vetoes a real fast move (log: box @780 conf0.34 "jumped" 301px, yet she
+            # WAS at 780) and drops us onto the phantom-prone nametag. player_anchor_max_jump stays
+            # for the composite's nametag/title guard only. Set yolo_player_max_jump to re-enable.
+            _pjump = map_cfg.get("yolo_player_max_jump")
             def _make_anchor():
                 return _md.YoloPlayerAnchor(_mm, conf=_pconf, imgsz=_mimg, foot_offset=_pfoot,
-                                            stale_grace=_pgrace,
-                                            max_jump=map_cfg.get("player_anchor_max_jump"))
-            print(f"[water] anchor: yolo_player conf={_pconf} (class 2 of {map_cfg.get('mob_model', 'models/mob_yolo.pt')})")
+                                            stale_grace=_pgrace, max_jump=_pjump)
+            print(f"[water] anchor: yolo_player conf={_pconf} veto={_pjump or 'off (always use detection)'}"
+                  f" (class 2 of {map_cfg.get('mob_model', 'models/mob_yolo.pt')})")
         elif map_cfg.get("anchor") == "nametag":          # KenYu-style name-tag anchor
             _tagw = _p.load_nametag(map_cfg["nametag_template"])
             _titlew = _p.load_nametag(map_cfg["title_template"]) if map_cfg.get("title_template") else None

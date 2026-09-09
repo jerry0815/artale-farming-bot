@@ -70,3 +70,4 @@ datasets/lie_check_yolo/labels.cache
 
 # collected player-anchor miss frames (label + retrain, not source)
 datasets/player_misses/
+datasets/player_yolo_fail/

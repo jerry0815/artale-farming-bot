@@ -152,6 +152,8 @@ class YoloPlayerAnchor:
         self.imgsz = imgsz
         self.foot_offset = foot_offset
         self.stale_grace = stale_grace
+        self.trusted = True               # composite always accepts this anchor's box (it self-limits
+        #                                   via near-pick + re-acquire) -> "whenever YOLO detects, use it"
         self.max_jump = max_jump          # reject a nearest-box leap farther than this (phantom guard)
         self.reacquire = 3                # after this many straight misses, forget `last` and
         #                                   re-acquire WITHOUT the cap -- else a stale `last` makes
@@ -160,6 +162,9 @@ class YoloPlayerAnchor:
         self._miss = 0
         self._pushed = False
         self._box = None
+        self.last_had_box = False          # did YOLO return a class-2 box on the last locate()?
+        #                                    False = zero boxes this beat (a TRUE recall miss, which
+        #                                    the loop dumps for retraining) vs a box that was used
 
     def push(self, player_box):
         """Supply the player box from a shared yolo_detect() call (None if not detected)."""
@@ -178,12 +183,14 @@ class YoloPlayerAnchor:
             _mobs, box = yolo_detect(self.model, frame_bgr, self.roi, self.conf, self.imgsz,
                                      near=self.last, max_jump=self.max_jump)   # nearest box, capped jump
         if box is None:
+            self.last_had_box = False                # YOLO saw no class-2 box this beat (true miss)
             self._miss += 1
             if self.last is not None and self._miss <= self.stale_grace:  # ride a brief miss
                 return self.last
             if self._miss >= self.reacquire:         # lost too long -> forget `last` so the next
                 self.last = None                     # read re-acquires (near=None: highest-conf,
             return None                              # no max_jump cap) instead of rejecting forever
+        self.last_had_box = True                     # a real class-2 detection this beat
         self._miss = 0
         self.last = self._to_pos(box)
         return self.last
