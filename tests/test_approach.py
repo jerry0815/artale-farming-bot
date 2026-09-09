@@ -511,3 +511,19 @@ def test_ensure_game_focused_only_refocuses_when_lost(monkeypatch):
     # still lost after refocus -> returns False (caller must not send keys)
     ok3 = recovery.ensure_game_focused(check=lambda: False, refocus=lambda: None)
     assert ok3 is False
+
+
+def test_focus_ok_or_bail_bails_and_releases_on_focus_loss(monkeypatch):
+    # The attack-loop guard: keep firing when focused; on focus loss release keys, refocus, and
+    # return False so the loop bails (caller re-seats, re-presses held keys -- no key leak).
+    released = []
+    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: released.append(1))
+    refocused = []
+
+    assert recovery.focus_ok_or_bail(check=lambda: True,
+                                     refocus=lambda: refocused.append(1)) is True
+    assert released == [] and refocused == []          # focused -> no-op, keep firing
+
+    ok = recovery.focus_ok_or_bail(check=lambda: False, refocus=lambda: refocused.append(1))
+    assert ok is False                                 # lost focus -> bail
+    assert released == [1] and refocused == [1]        # released keys AND tried to refocus

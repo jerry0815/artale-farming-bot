@@ -970,6 +970,21 @@ def ensure_game_focused(check=None, refocus=None, label="focus"):
     return check()
 
 
+def focus_ok_or_bail(label="attack", check=None, refocus=None):
+    """Beat-level focus guard for the ATTACK loops (they run many beats without returning to the
+    boundary guard). True -> keep firing. On focus loss: release all keys, refocus, and return
+    False so the loop BAILS to its caller -- which re-seats and re-enters the beat with keys
+    pressed fresh. Bailing (vs a mid-loop continue) is what keeps a continuous-HOLD attack from
+    being left released after the refocus. `check`/`refocus` injectable for tests."""
+    check = check or is_focused
+    if check():
+        return True
+    kb.safe_release_all()
+    print(f"[{label}] lost focus mid-attack -> release + refocus, re-seat")
+    (refocus or focus)()
+    return False
+
+
 def stable_char(n=3):
     """Robust position: take reads and return the center of the DENSEST cluster, so
     scattered buff-glow phantoms are rejected even if a few slip past the color filter
@@ -1779,6 +1794,8 @@ def water_shoot(center, seconds, count_fn=None, threshold=1, tol=(3, 3),
         while time.time() - t0 < seconds:
             if kb.pause:
                 return False
+            if not focus_ok_or_bail("water"):    # focus lost -> release the held attack, refocus,
+                return False                      # bail so the caller re-parks and re-holds attack
             lie_check_fast_tick()
             # Phantom-safe: anchor the read to the parked center and reject a blob that leaps far
             # from it (buff-glow speck). A bare read let one phantom fire a false "drifted off" ->
@@ -1831,6 +1848,8 @@ def walk_shoot(node_mm_x, seconds, detect_fn, attack_key='c', half=60, tol=(3, 3
     try:
         while time.time() - t0 < seconds:
             if kb.pause or STOP.is_set():
+                return False
+            if not focus_ok_or_bail(label or "walk"):   # focus lost mid-sweep -> bail; caller re-seats
                 return False
             lie_check_fast_tick()
             x, _y = stable_char(2)                         # minimap x (robust)
@@ -1936,6 +1955,8 @@ def approach_shoot(seconds, detect_fn, anchor,
         while time.time() - t0 < seconds:
             if kb.pause:
                 return False
+            if not focus_ok_or_bail(label or "attack"):   # focus lost mid-attack -> bail; farm_node
+                return False                                # re-seats and resumes (no key leak)
             lie_check_fast_tick()          # unified safety scan: lie-check + another-player
             # FALL check: she can be knocked (or walk) OFF the platform mid-beat; the screen-space
             # anchor keeps "farming" the platform below. Read her minimap y (robust, densest-cluster
