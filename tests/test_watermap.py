@@ -81,18 +81,3 @@ def test_node_swim_tol_override():
     assert watermap.node_swim_tol(cfg, "P3", base) == (10, 6, 16)   # other nodes unchanged
     assert watermap.node_swim_tol({}, "P4", base) == (10, 6, 16)    # no override -> unchanged
     assert watermap.node_swim_tol(cfg, "P4", (5, 7)) == (5, 7)      # symmetric base untouched
-
-
-def test_nearest_node_resumes_at_players_platform():
-    import recovery
-    # deep_sea_2-like stacked layout: P6 bottom (high y) -> P1 top (low y); P3/P4 share y, differ x.
-    centers = {"P6": (140, 213), "P5": (92, 171), "P4": (74, 136),
-               "P3": (92, 136), "P2": (105, 105), "P1": (87, 87)}
-    order = ["P6", "P5", "P4", "P3", "P2", "P1"]
-    assert recovery.nearest_node((140, 213), centers, order) == 0    # on P6 -> index 0
-    assert recovery.nearest_node((92, 172), centers, order) == 1     # on P5
-    assert recovery.nearest_node((106, 104), centers, order) == 4    # on P2 -> resume mid-sweep, not P6
-    assert recovery.nearest_node((75, 137), centers, order) == 2     # stacked pair -> P4 (x distinguishes)
-    assert recovery.nearest_node((91, 136), centers, order) == 3     # stacked pair -> P3
-    assert recovery.nearest_node((-1, -1), centers, order) == 0      # unreadable -> fall back to bottom
-    assert recovery.nearest_node((50, 50), {}, []) == 0              # empty order -> 0

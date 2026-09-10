@@ -2599,23 +2599,6 @@ def apply_character(map_cfg, char_cfg):
     return merged
 
 
-def nearest_node(pos, centers, order):
-    """Index in `order` of the node whose center is nearest the minimap `pos`=(x,y). `centers`
-    maps node -> (cx, cy). Returns 0 when pos is unreadable (x < 0) or `order` is empty. Used to
-    resume a sweep at the player's ACTUAL platform after a pause, instead of always restarting at
-    the bottom (farm_nodes[0])."""
-    mx, my = pos
-    if mx < 0 or not order:
-        return 0
-    best_i, best_d = 0, None
-    for i, nd in enumerate(order):
-        cx, cy = centers[nd]
-        d = (cx - mx) ** 2 + (cy - my) ** 2
-        if best_d is None or d < best_d:
-            best_d, best_i = d, i
-    return best_i
-
-
 def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                        stand_secs=(6, 8), break_every=(8 * 60, 15 * 60),
                        rest_range=(30, 120), skill_interval=(240, 300),
@@ -3077,14 +3060,6 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                 break                                    # time mode: one beat then advance
         return True
 
-    def _current_node_index():
-        """Which platform she's actually on now -> resume the sweep THERE after a pause instead of
-        restarting at the bottom. Reads her (phantom-safe) minimap position and picks the nearest
-        node; falls back to 0 (bottom) if she can't be read."""
-        i = nearest_node(stable_char(), centers, farm_nodes)
-        print(f"[water] resume at {farm_nodes[i]} (her current platform)")
-        return i
-
     start_safety_monitor()                            # curse/monster runs off the action loop
     if rotation == "sweep":
         print(f"[water] sweep {farm_nodes} then reset via {reset_node or '(bottom)'}")
@@ -3092,28 +3067,28 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
             _b0 = centers[farm_nodes[0]][1]               # straight down instead of swim-wandering
             print(f"[water] start -> sink to bottom (y={_b0}) before first sweep")
             sink_to_bottom(_b0, cap=15.0, near=int(map_cfg.get("sink_near", 35)))
-        _resume_from_current = False                      # after a pause/skip, resume at her ACTUAL
-        while True:                                       # platform, not always the bottom (P6)
+        _resume_i = 0                                     # a break RECORDS the platform she was on so
+        while True:                                       # unpause CONTINUES there, not always P6
             g = guard()
             if g == "stop":
                 stop_safety_monitor(); return
             if g != "ok":
-                _resume_from_current = True               # paused/skipped -> next 'ok' resumes at her
                 continue
-            _start_i = _current_node_index() if _resume_from_current else 0
-            _resume_from_current = False
             broke = False
-            prev = None                                   # resume start: no jump-from-below (she's there)
-            for node in farm_nodes[_start_i:]:            # bottom -> top, starting at her platform
+            prev = None
+            for _i in range(_resume_i, len(farm_nodes)):  # bottom -> top, resuming where we stopped
+                node = farm_nodes[_i]
                 if guard() != "ok":
+                    _resume_i = _i                        # remember her platform -> resume here on unpause
                     broke = True; break
                 take_break_if_due()
                 if not farm_node(node, prev=prev):       # prev enables the P4->P3 jump-up
+                    _resume_i = _i
                     broke = True; break
                 prev = node
             if broke:
-                _resume_from_current = True               # any interruption -> resume at her platform
                 continue
+            _resume_i = 0                                 # full sweep done -> reset to bottom, start fresh
             # reached the top -> reset to the bottom. NO tol-based alignment: she HOLDS toward the
             # drop (right) until she reaches the rightmost edge and falls, then sinks straight to the
             # bottom (re-holding off any ledge). Going all the way right can't stop her short of the
