@@ -17,6 +17,7 @@ def _setup(monkeypatch, mobs, ptuple, clock_vals):
     monkeypatch.setattr(recovery, "capture", lambda: np.zeros((10, 10, 3), np.uint8))
     monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
     monkeypatch.setattr(recovery, "lie_check_full_tick", lambda *a, **k: None)
+    monkeypatch.setattr(recovery, "is_focused", lambda: True)   # tests run without the game focused
     monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
     it = iter(clock_vals)
     monkeypatch.setattr(recovery.time, "time", lambda: next(it, 10_000))
