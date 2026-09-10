@@ -325,6 +325,10 @@ def _safety_monitor_loop():
                 STATUS["lie"] = is_lie_check_active()
             except Exception as e:
                 print(f"[safety] monitor error: {e}")
+        try:
+            _maybe_escalate_to_free_market()           # OUTSIDE the pause gate: the enemy alarm fires
+        except Exception as e:                          # a pause, and the escape must run DURING it
+            print(f"[free-market] monitor error: {e}")
         _safety_stop.wait(0.3)                          # poll ~3x/s; full_tick paces the real work
 
 
@@ -387,6 +391,66 @@ def silence_all_alarms():
 
 kb.f9_callback = silence_all_alarms   # 'm' silences alarms wherever kb.on_press is the listener
 kb.f10_callback = lambda: dump_frame("manual")   # F10 dumps the current frame for offline recall tuning
+
+
+# --- auto-escape: if another player stays and the alarm is left un-acknowledged, click the
+# 自由市場 (Free Market) button to leave the map. Opt-in per map (free_market_escape). The button
+# coords are its center in the 1942x1136 capture FRAME; the live screen point is _window_box()
+# + this offset (recomputed each time), so it survives the window being moved. ---
+_FM_ESCAPE = [False]           # enabled for the current run?
+_FM_AFTER = [20.0]            # seconds the enemy alarm may sound UN-acked before we click
+_FM_XY = [(1452, 1092)]      # 自由市場 button center in the capture frame (deep_sea_2, 1942x1136)
+_enemy_alarm_since = [None]   # when the enemy alarm began sounding continuously (None = quiet)
+_fm_clicked = [False]         # clicked this episode already -> don't re-click until it's silenced
+
+
+def _click_screen(x, y):
+    """Left-click at a PHYSICAL screen pixel. The process is DPI-aware at runtime, so these match
+    _window_box()/mss coords and SetCursorPos lands where the capture frame says."""
+    u = ctypes.windll.user32
+    u.SetCursorPos(int(x), int(y)); time.sleep(0.05)
+    u.mouse_event(0x0002, 0, 0, 0, 0)          # LEFTDOWN
+    time.sleep(0.03)
+    u.mouse_event(0x0004, 0, 0, 0, 0)          # LEFTUP
+
+
+def click_free_market():
+    """Focus the game and click 自由市場 to leave the map. Screen point = window box + the button's
+    frame offset (recomputed live). One click -- it opens/teleports directly."""
+    box = _window_box()
+    if box is None:
+        print("[free-market] game window not found -> cannot click"); return
+    fx, fy = _FM_XY[0]
+    sx, sy = box["left"] + fx, box["top"] + fy
+    print(f"[free-market] enemy alarm un-acked {int(_FM_AFTER[0])}s -> click 自由市場 @ screen ({sx},{sy})")
+    try:
+        notify.send("another_player",
+                    f"⚠️ No response in {int(_FM_AFTER[0])}s — auto-clicking Free Market to leave the map")
+    except Exception:
+        pass
+    if not focus():
+        print("[free-market] could not focus game -> skip click"); return
+    _click_screen(sx, sy)
+
+
+def _maybe_escalate_to_free_market():
+    """If the enemy alarm has sounded UN-acknowledged for _FM_AFTER seconds, click Free Market once.
+    Tracks the alarm's continuous-active time; silencing it ('m') drops _enemy_alarm.active and
+    resets here -- so pressing 'm' within the window cancels the escape. Runs from the safety
+    monitor thread (which keeps ticking while the bot is paused, i.e. exactly the enemy state)."""
+    if not _FM_ESCAPE[0] or not _enemy_alarm.active:
+        _enemy_alarm_since[0] = None
+        _fm_clicked[0] = False
+        return
+    now = time.time()
+    if _enemy_alarm_since[0] is None:
+        _enemy_alarm_since[0] = now
+    elif not _fm_clicked[0] and now - _enemy_alarm_since[0] >= _FM_AFTER[0]:
+        _fm_clicked[0] = True                        # click ONCE; won't repeat until silenced
+        try:
+            click_free_market()
+        except Exception as e:
+            print(f"[free-market] click failed: {e}")
 
 
 # --- shared status + cooperative stop, for the control UI (panel.py) --------------
@@ -3060,6 +3124,13 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                 break                                    # time mode: one beat then advance
         return True
 
+    _FM_ESCAPE[0] = bool(map_cfg.get("free_market_escape", False))   # auto-leave if enemy un-acked
+    _FM_AFTER[0] = float(map_cfg.get("free_market_after_secs", 20))
+    _FM_XY[0] = tuple(map_cfg.get("free_market_button_xy", (1452, 1092)))
+    _enemy_alarm_since[0] = None; _fm_clicked[0] = False              # fresh run
+    if _FM_ESCAPE[0]:
+        print(f"[free-market] auto-escape ON: click 自由市場 if the enemy alarm is un-acked "
+              f"{int(_FM_AFTER[0])}s (button frame {_FM_XY[0]})")
     start_safety_monitor()                            # curse/monster runs off the action loop
     if rotation == "sweep":
         print(f"[water] sweep {farm_nodes} then reset via {reset_node or '(bottom)'}")
