@@ -2106,6 +2106,7 @@ def approach_shoot(seconds, detect_fn, anchor,
 
             dets = _shared_dets if _shared_dets is not None else detect_fn(f, strip)
             same = same_platform(dets)
+            STATUS["count"] = len(same)                    # live same-platform mob count for the panel
             if dbg_on():                                   # full per-frame trace (file only)
                 _md = [(round(d[0], 2), d[1] + d[3] // 2, d[2] + d[4]) for d in dets]
                 dbg(f"[app {label}] player=({px},{pfeet}) band={band} "
