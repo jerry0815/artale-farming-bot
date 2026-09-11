@@ -853,7 +853,7 @@ def make_handler(controller):
     return Handler
 
 
-def serve(port=PORT):
+def serve(port=PORT, open_browser=False):
     import keyboard as kb
     from pynput.keyboard import Listener
     install_log_tee()                              # capture loop prints for the panel log pane
@@ -865,6 +865,9 @@ def serve(port=PORT):
     handler = make_handler(controller)
     with socketserver.ThreadingTCPServer(("127.0.0.1", port), handler) as httpd:
         print(f"[panel] control panel at http://localhost:{port}  (Ctrl+C to quit)")
+        if open_browser:                           # one-click launch (run_panel.bat): the socket is
+            import webbrowser                      # already listening here, so open the page NOW --
+            webbrowser.open(f"http://localhost:{port}")   # no race with the slow torch/ultralytics import
         try:
             httpd.serve_forever()
         finally:
@@ -872,4 +875,5 @@ def serve(port=PORT):
 
 
 if __name__ == "__main__":
-    serve()
+    import sys
+    serve(open_browser="--open" in sys.argv)
