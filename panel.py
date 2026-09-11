@@ -637,6 +637,9 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
  async function quitPanel(){
    if(!confirm('Quit the panel? This stops any running farm and shuts down the server.')) return;
    try{ await fetch('/cmd?action=quit'); }catch(e){}          // server dies mid-response -> ignore
+   window.close();                                            // closes iff the browser allows it
+   window.open('', '_self'); window.close();                 // some browsers only close after this
+   // fallback: browsers block close() for tabs they didn't script-open (ours is OS-opened)
    document.body.innerHTML = '<div style="font:16px system-ui;padding:2em">Panel stopped — you can close this tab.</div>';
  }
  async function train(step){
