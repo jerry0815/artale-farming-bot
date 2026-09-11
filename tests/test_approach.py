@@ -189,6 +189,7 @@ def test_minimap_bound_fires_in_place_at_platform_edge(monkeypatch):
     monkeypatch.setattr(recovery, "lie_check_full_tick", lambda *a, **k: None)
     monkeypatch.setattr(player, "find_player", lambda f, cfg=None, near=None: (800, 500))
     monkeypatch.setattr(recovery, "stable_char", lambda n=2: (180, 136))   # at right bound
+    monkeypatch.setattr(recovery, "is_focused", lambda: True)              # test runs without game focus
     monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
     presses = []
     monkeypatch.setattr(recovery.kb, "safe_press", lambda k: presses.append(k))

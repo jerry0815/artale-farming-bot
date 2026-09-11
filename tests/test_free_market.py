@@ -68,13 +68,16 @@ def test_disabled_never_clicks(monkeypatch):
     assert clicks == []
 
 
-def test_click_free_market_uses_window_box_offset(monkeypatch):
-    # screen click point = window box origin + the button's frame offset (survives window moves)
+def test_click_free_market_uses_window_box_offset_then_silences(monkeypatch):
+    # screen click point = window box origin + the button's frame offset (survives window moves),
+    # and after the click the alarm is silenced (the escape is done -> no human ack needed).
     monkeypatch.setattr(recovery, "_window_box", lambda: {"left": 61, "top": 935, "width": 1942, "height": 1136})
     monkeypatch.setattr(recovery, "focus", lambda: True)
     monkeypatch.setattr(recovery.notify, "send", lambda *a, **k: None)
     recovery._FM_XY[0] = (1452, 1092)
-    got = []
+    got, silenced = [], []
     monkeypatch.setattr(recovery, "_click_screen", lambda x, y: got.append((x, y)))
+    monkeypatch.setattr(recovery, "enemy_alarm_silence", lambda: silenced.append(1))
     recovery.click_free_market()
     assert got == [(61 + 1452, 935 + 1092)]                   # (1513, 2027)
+    assert silenced == [1]                                    # alarm auto-silenced after escaping
