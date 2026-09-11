@@ -611,7 +611,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      roi <input id=droi placeholder="x0,y0,x1,y1 (blank=full)" style="width:190px">
      <button class=go onclick="snap()">📸 Snap</button>
      <label><input type=checkbox id=dlive> live (2s)</label>
-     <label title="show the dragon-nest count ROIs + which dragons count (green) vs are ignored (red)"><input type=checkbox id=ddragon> 🐉 dragon ROI</label>
+     <label title="dragon-nest maps only: overlay the per-node count ROIs (green=counted, red=ignored). Leave off for water/other maps -- Snap already previews the current map's detector."><input type=checkbox id=ddragon> count ROIs (dragon-nest)</label>
    </div>
    <div id=dstat style="font-family:ui-monospace,monospace;font-size:12px;margin:6px 0;white-space:nowrap;overflow-x:auto"></div>
    <img id=detimg style="max-width:100%;border-radius:6px;display:none">
@@ -736,9 +736,10 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
        const h=t/3600|0, m=(t%3600)/60|0, x=t%60;
        return (h? h+':'+String(m).padStart(2,'0') : m) + ':' + String(x).padStart(2,'0'); };
      const buff = s.buff_ago==null ? 'not yet' : hms(s.buff_ago)+' ago';
+     const dash = v => (v==null || v==='' ? '–' : v);          // null/blank -> '–' (map-agnostic)
      document.getElementById('stat').textContent =
-       `farming time: ${hms(s.run_secs)}\nmode: ${s.mode}\nstate: ${s.state}\nnode: ${s.node}`
-       + `\ndragons: ${s.count}\nbuff: ${buff}\nmarks: ${s.recorder_marks}`;
+       `farming time: ${hms(s.run_secs)}\nmode: ${dash(s.mode)}\nstate: ${dash(s.state)}\nnode: ${dash(s.node)}`
+       + `\nmobs: ${dash(s.count)}\nbuff: ${buff}\nmarks: ${s.recorder_marks}`;
      const fmt = n => (n==null ? '–' : Number(n).toLocaleString());
      document.getElementById('exppm').textContent = fmt(s.exp_per_min);
      document.getElementById('exptot').textContent = fmt(s.exp_total);
