@@ -39,7 +39,12 @@ class _Tee:
         self._logfiles = list(logfiles)
 
     def write(self, s):
-        self._real.write(s)
+        if self._real is not None:
+            try:
+                self._real.write(s)
+            except Exception:
+                pass                                  # pythonw: stdout is None or cp1252 (can't encode
+        #                                               Chinese) -> keep the UTF-8 file + ring log only
         with _LOG_LOCK:
             self._buf += s
             while "\n" in self._buf:
@@ -55,7 +60,11 @@ class _Tee:
                         pass
 
     def flush(self):
-        self._real.flush()
+        if self._real is not None:
+            try:
+                self._real.flush()
+            except Exception:
+                pass
         for lf in self._logfiles:
             try:
                 lf.flush()
@@ -81,7 +90,9 @@ def install_log_tee(logdir="logs"):
         files.append(open(os.path.join(logdir, "latest.log"), "w", buffering=1, encoding="utf-8"))
         LOG_PATH[0] = path
     except Exception as e:
-        sys.stderr.write(f"[panel] log file disabled: {e}\n")
+        if sys.stderr is not None:
+            try: sys.stderr.write(f"[panel] log file disabled: {e}\n")
+            except Exception: pass
     sys.stdout = _Tee(sys.stdout, files)
     if LOG_PATH[0]:
         print(f"[panel] logging to {LOG_PATH[0]}  (and logs/latest.log)")
@@ -604,7 +615,8 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
  <div id=side>
  <fieldset><legend>Log</legend>
    <div class=row><button onclick="document.getElementById('log').innerHTML=''">clear</button>
-     <label><input type=checkbox id=autoscroll checked> auto-scroll</label></div>
+     <label><input type=checkbox id=autoscroll checked> auto-scroll</label>
+     <button class=stop style="margin-left:auto" onclick="quitPanel()">⏻ Quit panel</button></div>
    <div id=log></div>
  </fieldset>
  </div>
@@ -621,6 +633,11 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      document.getElementById('tab-b-'+t).classList.toggle('active', t===name);
    }
    document.getElementById('detprev').classList.toggle('hidden', name==='exp');  // preview irrelevant while recording EXP
+ }
+ async function quitPanel(){
+   if(!confirm('Quit the panel? This stops any running farm and shuts down the server.')) return;
+   try{ await fetch('/cmd?action=quit'); }catch(e){}          // server dies mid-response -> ignore
+   document.body.innerHTML = '<div style="font:16px system-ui;padding:2em">Panel stopped — you can close this tab.</div>';
  }
  async function train(step){
    const q = new URLSearchParams({action:'train', step});
@@ -830,6 +847,14 @@ def make_handler(controller):
                 return controller.pause()
             if action == "stop":
                 return controller.stop()
+            if action == "quit":
+                import os
+                import keyboard as _kb
+                controller.stop()                     # stop any farm run (its finally releases keys)
+                _kb.safe_release_all()                # belt-and-suspenders: never exit with a key held
+                # exit off-thread so this request can return 200 first (pythonw has no console to Ctrl+C)
+                threading.Thread(target=lambda: (time.sleep(0.4), os._exit(0)), daemon=True).start()
+                return True, "panel shutting down"
             if action == "record_start":
                 return controller.record_start(q.get("map", [""])[0])
             if action == "record_mark":
