@@ -946,8 +946,15 @@ def serve_app(port=PORT):
         except Exception:
             pass
     webview.start(_front)                           # blocks until the window is closed
+    try:                                            # closing the window (X) must also stop the farm
+        import recovery                             # and release keys -- not just the Quit button
+        recovery.STOP.set()
+        import keyboard as _kb
+        _kb.safe_release_all()                      # never leave a key held after the window closes
+    except Exception:
+        pass
     import os
-    os._exit(0)                                     # window closed -> quit (daemon server thread dies)
+    os._exit(0)                                     # quit (daemon server thread dies with the process)
 
 
 if __name__ == "__main__":
