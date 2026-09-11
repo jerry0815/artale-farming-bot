@@ -935,6 +935,11 @@ def serve_app(port=PORT):
     except ImportError:
         print("[panel] pywebview not installed -> opening in a browser (pip install pywebview)")
         return serve(port=port, open_browser=True)
+    import os                                        # Start-farm focuses the GAME -> the panel goes to
+    os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",   # the background, where WebView2
+                          "--disable-background-timer-throttling "   # normally pauses JS timers -> the
+                          "--disable-renderer-backgrounding "        # panel would stop updating until
+                          "--disable-backgrounding-occluded-windows")  # refocused. These keep it live.
     try:                                            # per-monitor DPI aware BEFORE the window exists,
         import ctypes                               # so the WebView2 content is sized right on a
         ctypes.windll.shcore.SetProcessDpiAwareness(2)   # 4K/150% display (else the layout overflows
