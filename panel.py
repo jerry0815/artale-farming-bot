@@ -700,7 +700,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
  }
  async function snapLoop(){
    if(document.getElementById('dlive').checked) await snap();
-   setTimeout(snapLoop, 2000);
+   clearTimeout(_ts); _ts=setTimeout(snapLoop, 2000);
  }
  async function loadMaps(){
    const maps = await (await fetch('/maps')).json();
@@ -724,6 +724,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    const j = await (await fetch('/cmd?'+new URLSearchParams({action:'start',mode:'farm',map,char}))).json();
    if(!j.ok) alert(j.msg);
  }
+ let _tp, _tl, _ts;                        // poll timer handles -> re-kickable, never doubled
  async function poll(){
    try{
      const s = await (await fetch('/status')).json();
@@ -747,7 +748,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      es.textContent = rec ? ('● recording — '+hms(s.run_secs)) : 'not recording';
      es.style.color = rec ? '#7fdd7f' : '#9a9';
    }catch(e){}
-   setTimeout(poll, 500);
+   clearTimeout(_tp); _tp=setTimeout(poll, 500);
  }
  let logCursor=0;
  function logClass(s){ s=s.replace(/^\d\d:\d\d:\d\d\.\d\d\d /,'');   // drop timestamp prefix
@@ -765,7 +766,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      }
      logCursor=j.next;
    }catch(e){}
-   setTimeout(pollLog, 1200);
+   clearTimeout(_tl); _tl=setTimeout(pollLog, 1200);
  }
  async function startExp(){
    const label = document.getElementById('explabel').value || 'human';
@@ -793,6 +794,10 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    }catch(e){}
  }
  loadMaps(); loadChars(); poll(); snapLoop(); pollLog(); loadExpSessions();
+ // If the window was hidden/minimized at load (WebView2 freezes the page), the poll loops may
+ // not have started or got throttled -> re-kick them the moment it becomes visible. clearTimeout
+ // in each loop makes re-calling safe (no parallel chains).
+ document.addEventListener('visibilitychange', () => { if(!document.hidden){ poll(); pollLog(); snapLoop(); } });
 </script></body></html>"""
 
 
