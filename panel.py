@@ -935,10 +935,17 @@ def serve_app(port=PORT):
     except ImportError:
         print("[panel] pywebview not installed -> opening in a browser (pip install pywebview)")
         return serve(port=port, open_browser=True)
+    try:                                            # per-monitor DPI aware BEFORE the window exists,
+        import ctypes                               # so the WebView2 content is sized right on a
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)   # 4K/150% display (else the layout overflows
+    except Exception:                               # the window and the right column/log is clipped)
+        try: ctypes.windll.user32.SetProcessDPIAware()
+        except Exception: pass
     threading.Thread(target=lambda: serve(port=port), daemon=True).start()   # server off the main thread
     _wait_port(port)                                # ...pywebview must own the main thread below
     win = webview.create_window("Maple Control Panel", f"http://localhost:{port}",
-                                width=1200, height=820)
+                                width=1280, height=860)   # DPI-aware above -> this LOGICAL size
+    #                                             fits the whole layout incl. the right-hand log pane
 
     def _front():                                   # ensure the window is shown/foreground, not left
         try:                                        # minimized in the taskbar (some launch show-states)
