@@ -932,9 +932,15 @@ def serve_app(port=PORT):
         return serve(port=port, open_browser=True)
     threading.Thread(target=lambda: serve(port=port), daemon=True).start()   # server off the main thread
     _wait_port(port)                                # ...pywebview must own the main thread below
-    webview.create_window("Maple Control Panel", f"http://localhost:{port}",
-                          width=1200, height=820)
-    webview.start()                                 # blocks until the window is closed
+    win = webview.create_window("Maple Control Panel", f"http://localhost:{port}",
+                                width=1200, height=820)
+
+    def _front():                                   # ensure the window is shown/foreground, not left
+        try:                                        # minimized in the taskbar (some launch show-states)
+            win.restore()
+        except Exception:
+            pass
+    webview.start(_front)                           # blocks until the window is closed
     import os
     os._exit(0)                                     # window closed -> quit (daemon server thread dies)
 
