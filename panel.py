@@ -1,6 +1,10 @@
-"""Local web control panel for the farming bot (stdlib http.server, no deps).
+"""Local web control panel for the farming bot (stdlib http.server).
 
-Run:   python panel.py            # then open http://localhost:8080
+Run:   python panel.py            # headless server -> open http://localhost:8080 yourself
+       python panel.py --open     # server + open the page in your default browser
+       python panel.py --app      # server + a NATIVE window (pywebview/WebView2, no browser)
+The desktop shortcut uses `pythonw panel.py --app` (native window, no console). --app needs
+`pip install pywebview` (WebView2 ships with Windows); without it, --app falls back to a browser.
 Controls: Start (farm) / Pause / Stop, Recover, Watch-only (passive lie-check
 loop), and Record route (map name + node marks from the browser). Live status +
 a big green/red lie-check banner, polled from recovery.STATUS.
@@ -902,6 +906,42 @@ def serve(port=PORT, open_browser=False):
             lis.stop()
 
 
+def _wait_port(port, timeout=40):
+    """Block until the panel's socket is accepting connections (so the native window doesn't load
+    before the slow torch/ultralytics import finishes binding). True if up, False on timeout."""
+    import socket
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                return True
+        except OSError:
+            time.sleep(0.2)
+    return False
+
+
+def serve_app(port=PORT):
+    """Run the panel in a NATIVE window (pywebview / WebView2) instead of a browser tab: the HTTP
+    server runs on a background thread and a standalone app window points at it. Closing the
+    window -- or the in-UI Quit (which os._exit's the whole process) -- ends everything. Falls
+    back to a browser tab if pywebview isn't installed."""
+    try:
+        import webview
+    except ImportError:
+        print("[panel] pywebview not installed -> opening in a browser (pip install pywebview)")
+        return serve(port=port, open_browser=True)
+    threading.Thread(target=lambda: serve(port=port), daemon=True).start()   # server off the main thread
+    _wait_port(port)                                # ...pywebview must own the main thread below
+    webview.create_window("Maple Control Panel", f"http://localhost:{port}",
+                          width=1200, height=820)
+    webview.start()                                 # blocks until the window is closed
+    import os
+    os._exit(0)                                     # window closed -> quit (daemon server thread dies)
+
+
 if __name__ == "__main__":
     import sys
-    serve(open_browser="--open" in sys.argv)
+    if "--app" in sys.argv:
+        serve_app()                                 # native standalone window
+    else:
+        serve(open_browser="--open" in sys.argv)    # browser tab (--open) or headless server
