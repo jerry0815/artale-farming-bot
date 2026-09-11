@@ -2,9 +2,10 @@
 
 Run:   python panel.py            # headless server -> open http://localhost:8080 yourself
        python panel.py --open     # server + open the page in your default browser
-       python panel.py --app      # server + a NATIVE window (pywebview/WebView2, no browser)
-The desktop shortcut uses `pythonw panel.py --app` (native window, no console). --app needs
-`pip install pywebview` (WebView2 ships with Windows); without it, --app falls back to a browser.
+       python panel.py --app      # server + a chromeless standalone window (Edge/Chrome --app)
+The desktop shortcut uses `pythonw panel.py --app`: a no-tabs/no-address-bar window in a SEPARATE
+browser process, so its UI stays smooth while this process runs the CPU-heavy farm loop (an
+in-process webview got starved). Falls back to the default browser if Edge/Chrome isn't found.
 Controls: Start (farm) / Pause / Stop, Recover, Watch-only (passive lie-check
 loop), and Record route (map name + node marks from the browser). Live status +
 a big green/red lie-check banner, polled from recovery.STATUS.
@@ -926,47 +927,45 @@ def _wait_port(port, timeout=40):
 
 
 def serve_app(port=PORT):
-    """Run the panel in a NATIVE window (pywebview / WebView2) instead of a browser tab: the HTTP
-    server runs on a background thread and a standalone app window points at it. Closing the
-    window -- or the in-UI Quit (which os._exit's the whole process) -- ends everything. Falls
-    back to a browser tab if pywebview isn't installed."""
-    try:
-        import webview
-    except ImportError:
-        print("[panel] pywebview not installed -> opening in a browser (pip install pywebview)")
+    """Run the panel in a chromeless standalone window via Edge/Chrome --app mode. The browser is
+    a SEPARATE process, so its UI stays smooth even while THIS process runs the CPU-heavy farm loop
+    -- an in-process native webview (pywebview) got GIL-starved by the farm and showed a busy
+    cursor. The server + farm run on a background thread here; the main thread waits on the app
+    window and, when it closes, stops the farm (releasing keys) and exits. Falls back to the
+    default browser if neither Edge nor Chrome is found."""
+    import os
+    import subprocess
+    import tempfile
+    exe = next((c for c in [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ] if os.path.exists(c)), None)
+    if not exe:
+        print("[panel] Edge/Chrome not found -> opening in the default browser")
         return serve(port=port, open_browser=True)
-    import os                                        # Start-farm focuses the GAME -> the panel goes to
-    os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",   # the background, where WebView2
-                          "--disable-background-timer-throttling "   # normally pauses JS timers -> the
-                          "--disable-renderer-backgrounding "        # panel would stop updating until
-                          "--disable-backgrounding-occluded-windows")  # refocused. These keep it live.
-    try:                                            # per-monitor DPI aware BEFORE the window exists,
-        import ctypes                               # so the WebView2 content is sized right on a
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)   # 4K/150% display (else the layout overflows
-    except Exception:                               # the window and the right column/log is clipped)
-        try: ctypes.windll.user32.SetProcessDPIAware()
-        except Exception: pass
-    threading.Thread(target=lambda: serve(port=port), daemon=True).start()   # server off the main thread
-    _wait_port(port)                                # ...pywebview must own the main thread below
-    win = webview.create_window("Maple Control Panel", f"http://localhost:{port}",
-                                width=1280, height=860)   # DPI-aware above -> this LOGICAL size
-    #                                             fits the whole layout incl. the right-hand log pane
-
-    def _front():                                   # ensure the window is shown/foreground, not left
-        try:                                        # minimized in the taskbar (some launch show-states)
-            win.restore()
-        except Exception:
-            pass
-    webview.start(_front)                           # blocks until the window is closed
-    try:                                            # closing the window (X) must also stop the farm
-        import recovery                             # and release keys -- not just the Quit button
+    threading.Thread(target=lambda: serve(port=port), daemon=True).start()   # server + farm here
+    if not _wait_port(port):
+        print("[panel] server did not come up in time")
+    userdir = os.path.join(tempfile.gettempdir(), "maple_panel_app")   # dedicated profile -> its OWN
+    #                                             window/instance, so proc.wait() tracks it closing
+    args = [exe, f"--app=http://localhost:{port}", f"--user-data-dir={userdir}",
+            "--window-size=1280,900", "--no-first-run", "--no-default-browser-check",
+            "--disable-background-timer-throttling",       # keep the panel updating while the game is
+            "--disable-renderer-backgrounding",            # focused (Chromium otherwise throttles a
+            "--disable-backgrounding-occluded-windows"]    # backgrounded window's JS timers)
+    print(f"[panel] app window (Edge/Chrome --app) -> http://localhost:{port}")
+    proc = subprocess.Popen(args)
+    proc.wait()                                     # block until the user closes the app window
+    try:                                            # closed -> stop the farm + release keys (never
+        import recovery                             # leave a key held), then exit
         recovery.STOP.set()
         import keyboard as _kb
-        _kb.safe_release_all()                      # never leave a key held after the window closes
+        _kb.safe_release_all()
     except Exception:
         pass
-    import os
-    os._exit(0)                                     # quit (daemon server thread dies with the process)
+    os._exit(0)                                     # daemon server+farm thread dies with the process
 
 
 if __name__ == "__main__":
