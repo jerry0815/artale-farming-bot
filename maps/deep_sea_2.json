@@ -53,7 +53,7 @@
   "attack_range_note": "fire in place within this px; beyond it she WALKS closer. Set to 250 -- the earlier not-killing-from-far was a FACING bug (she attacked the wrong side), now fixed (face_settle + fire-stall), so the skill reaches far and she can fire without over-walking. If she stalls firing at large dx without a fire-stall recovery, the true reach is smaller -- lower this.",
   "approach_ease_margin": 0,
   "approach_ease_note": "0 = disable the tap-and-stop ease-in (it caused small stepping near a mob). With the wide attack_range 190 there's no tight target to overshoot, so walk continuously straight into range. Raise it only if a tighter range is reintroduced and she coasts past.",
-  "same_platform_band": 110,
+  "same_platform_band": 85,
   "approach_step": 0,
   "deplete_reads": 4,
   "stall_limit": 8,
