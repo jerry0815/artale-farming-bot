@@ -204,6 +204,15 @@
   "node_arrive_jumps": {},
   "buff_interval_secs": 300,
   "platform_half": 60,
+  "node_bounds": {
+    "P6": [56, 142],
+    "P5": [89, 102],
+    "P4": [71, 92],
+    "P3": [71, 92],
+    "P2": [123, 154],
+    "P1": [67, 90]
+  },
+  "node_bounds_note": "[left_x, right_x] minimap-x walk limits per platform (the approach edge-guard fires here -> she fires in place at the edge instead of walking off). Seeded from routes/deep_sea_2.capture.jsonl (main x-cluster per y-band, 2026-08-31 play). Without these every node used center+-platform_half(60), whose left bound for P2 (center x139) was 79 -- below P3's own x(83) -- so she walked LEFT off P2 chasing a locked off-platform fishhouse and fell to P3 in a loop. P2 left nudged to 123 (edge ~121 +2 for the ~12px/beat walk overshoot); it's the fall-critical one -- raise it if she still drops, lower it if she can't reach P2's left mobs. Others are conservative (where she was seen standing safely); a too-tight bound just makes her fire in place at the edge. VERIFY LIVE that each covers the real platform.",
   "map_box": [
     30,
     200,

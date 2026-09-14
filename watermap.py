@@ -102,6 +102,20 @@ def swim_tol(cfg):
     return (tol_x, s.get("tol_y", 3))
 
 
+def node_bounds(cfg, node, center_x, half):
+    """(left_x, right_x) minimap-x walk limits for `node`. If node_bounds maps this
+    node to [left, right] (its recorded platform edges), use those; otherwise fall
+    back to the symmetric center +/- half window (platform_half). The approach-walk
+    edge-guard fires at these limits so she fires in place at the edge instead of
+    walking off -- a right-column node like P2 needs a tighter left edge than the
+    global half or she walks off it onto the platform below."""
+    ov = cfg.get("node_bounds", {})
+    if node in ov:
+        lo, hi = ov[node]
+        return (int(lo), int(hi))
+    return (center_x - half, center_x + half)
+
+
 def node_swim_tol(cfg, node, base):
     """`base` swim_tol with tol_y_up (the ABOVE band) overridden for `node` when
     node_tol_y_up_override sets it. Tightening tol_y_up on a stacked pin (P4) forces her to

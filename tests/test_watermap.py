@@ -74,6 +74,16 @@ def test_swim_tol_defaults():
     assert watermap.swim_tol({"minimap": {}}) == (3, 3)
 
 
+def test_node_bounds_override():
+    cfg = {"node_bounds": {"P2": [121, 154]}}
+    # overridden node uses its recorded left/right minimap-x edges (not the +-half window)
+    assert watermap.node_bounds(cfg, "P2", 139, 60) == (121, 154)
+    # a node without an override falls back to center +- half
+    assert watermap.node_bounds(cfg, "P1", 81, 60) == (21, 141)
+    # no override map at all -> center +- half
+    assert watermap.node_bounds({}, "P2", 139, 60) == (79, 199)
+
+
 def test_node_swim_tol_override():
     base = (10, 6, 16)
     cfg = {"node_tol_y_up_override": {"P4": 8}}
