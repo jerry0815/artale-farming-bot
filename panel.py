@@ -481,6 +481,35 @@ def normalize_buffs(cfg):
     return []
 
 
+def apply_buffs(cfg, groups):
+    """Return a copy of cfg with buff_groups set from `groups` and the simple-schema
+    keys removed. Preserves every other field and key order (assumes groups already
+    validated)."""
+    out = dict(cfg)
+    out["buff_groups"] = [{"keys": list(g["keys"]), "interval_secs": int(g["interval_secs"])}
+                          for g in groups]
+    out.pop("buff_keys", None)
+    out.pop("buff_interval_secs", None)
+    return out
+
+
+def validate_groups(groups):
+    """(ok, msg) for a posted buff group list. Empty list is valid (clears buffs)."""
+    if not isinstance(groups, list):
+        return False, "groups must be a list"
+    for g in groups:
+        keys = g.get("keys") if isinstance(g, dict) else None
+        if not isinstance(keys, list) or not [k for k in keys if str(k).strip()]:
+            return False, "a buff row has no keys"
+        try:
+            iv = int(g.get("interval_secs"))
+        except (TypeError, ValueError):
+            return False, "interval must be a whole number of seconds"
+        if iv <= 0:
+            return False, "interval must be > 0"
+    return True, "ok"
+
+
 def _status_dict(controller):
     import recovery, time
     st = dict(recovery.STATUS)
