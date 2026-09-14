@@ -891,6 +891,27 @@ def make_handler(controller):
                 return self._send(200, json.dumps(list_maps()))
             if parsed.path == "/chars":
                 return self._send(200, json.dumps(list_chars()))
+            if parsed.path in ("/buffs", "/buffs_save"):
+                import os
+                file = q.get("file", [None])[0]
+                allowed = [m["path"] for m in list_maps()] + list(list_chars())
+                _ok_path = file and os.path.normpath(file) in {os.path.normpath(p) for p in allowed}
+                if parsed.path == "/buffs":
+                    if not _ok_path:
+                        return self._send(200, json.dumps({"ok": False, "msg": "not a config file"}))
+                    try:
+                        with open(file, encoding="utf-8") as fh:
+                            cfg = json.load(fh)
+                        return self._send(200, json.dumps(
+                            {"ok": True, "file": file, "groups": normalize_buffs(cfg)}))
+                    except Exception as e:
+                        return self._send(200, json.dumps({"ok": False, "msg": str(e)}))
+                try:
+                    groups = json.loads(q.get("groups", ["[]"])[0])
+                except Exception as e:
+                    return self._send(200, json.dumps({"ok": False, "msg": f"bad groups: {e}"}))
+                ok, msg = save_buffs(file, groups, allowed)
+                return self._send(200, json.dumps({"ok": ok, "msg": msg}))
             if parsed.path == "/exp_sessions":
                 import recovery
                 return self._send(200, json.dumps(recovery.read_exp_sessions()))
