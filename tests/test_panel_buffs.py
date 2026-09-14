@@ -1,3 +1,5 @@
+import json
+
 import panel
 
 
@@ -49,3 +51,30 @@ def test_validate_groups():
     assert panel.validate_groups([{"keys": ["a"], "interval_secs": 0}])[0] is False
     assert panel.validate_groups([{"keys": ["a"], "interval_secs": "x"}])[0] is False
     assert panel.validate_groups("nope")[0] is False
+
+
+def test_save_buffs_writes_and_preserves(tmp_path):
+    p = tmp_path / "archer1.json"
+    p.write_text(json.dumps({"name": "archer1", "buff_keys": ["a"],
+                             "buff_interval_secs": 300, "note": "弓神"}), encoding="utf-8")
+    ok, msg = panel.save_buffs(str(p), [{"keys": ["a", "3"], "interval_secs": 300}],
+                               allowed_paths=[str(p)])
+    assert ok, msg
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data["buff_groups"] == [{"keys": ["a", "3"], "interval_secs": 300}]
+    assert "buff_keys" not in data and data["note"] == "弓神"     # preserved, unescaped
+    assert "\\u" not in p.read_text(encoding="utf-8")                     # CJK not escaped on disk
+
+
+def test_save_buffs_rejects_unlisted_file(tmp_path):
+    p = tmp_path / "evil.json"
+    p.write_text("{}", encoding="utf-8")
+    ok, msg = panel.save_buffs(str(p), [{"keys": ["a"], "interval_secs": 300}], allowed_paths=[])
+    assert ok is False and "config" in msg
+
+
+def test_save_buffs_rejects_bad_groups(tmp_path):
+    p = tmp_path / "m.json"
+    p.write_text("{}", encoding="utf-8")
+    ok, msg = panel.save_buffs(str(p), [{"keys": [], "interval_secs": 300}], allowed_paths=[str(p)])
+    assert ok is False

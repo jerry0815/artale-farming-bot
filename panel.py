@@ -510,6 +510,27 @@ def validate_groups(groups):
     return True, "ok"
 
 
+def save_buffs(file, groups, allowed_paths):
+    """Whitelist `file` against allowed_paths, validate `groups`, then read-modify-write
+    the config's buffs. (ok, msg)."""
+    import os
+    norm = os.path.normpath(file or "")
+    if norm not in {os.path.normpath(p) for p in allowed_paths}:
+        return False, f"not a config file: {file}"
+    if not os.path.isfile(norm):
+        return False, f"missing config: {file}"
+    ok, msg = validate_groups(groups)
+    if not ok:
+        return False, msg
+    with open(norm, encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    cfg = apply_buffs(cfg, groups)
+    with open(norm, "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+    return True, f"saved buffs to {file}"
+
+
 def _status_dict(controller):
     import recovery, time
     st = dict(recovery.STATUS)
