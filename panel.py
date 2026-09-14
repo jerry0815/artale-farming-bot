@@ -467,6 +467,20 @@ def list_chars(chars_dir="chars"):
     return sorted(glob(os.path.join(chars_dir, "*.json")))
 
 
+def normalize_buffs(cfg):
+    """Collapse either buff schema into a list of {keys, interval_secs}. The map form
+    is `buff_groups` (per-group interval); the character form is `buff_keys` +
+    `buff_interval_secs` (one interval). Empty list if the config declares no buffs."""
+    groups = cfg.get("buff_groups")
+    if groups:
+        return [{"keys": list(g.get("keys", [])),
+                 "interval_secs": int(g.get("interval_secs", 300))} for g in groups]
+    keys = cfg.get("buff_keys")
+    if keys:
+        return [{"keys": list(keys), "interval_secs": int(cfg.get("buff_interval_secs", 300))}]
+    return []
+
+
 def _status_dict(controller):
     import recovery, time
     st = dict(recovery.STATUS)
