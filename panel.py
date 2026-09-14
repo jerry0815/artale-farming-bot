@@ -645,6 +645,16 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      </div>
      <div id=tstat style="font-family:ui-monospace,monospace;font-size:12px;margin:6px 0;color:#9ad">idle &middot; output goes to the Log below</div>
    </fieldset>
+   <fieldset><legend>Buffs (edits the selected character, else the map)</legend>
+     <div id=bufffile class=sub style="font-family:ui-monospace,monospace">–</div>
+     <div id=buffrows></div>
+     <div class=row style="margin-top:6px">
+       <button onclick="addBuffRow()">＋ Add buff</button>
+       <button class=go onclick="saveBuffs()">💾 Save buffs</button>
+       <button onclick="loadBuffs()">↻</button>
+     </div>
+     <div id=buffstat class=sub></div>
+   </fieldset>
  </div>
 
  <div id=tab-exp class="pane hidden">
@@ -782,6 +792,40 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      const o=document.createElement('option'); o.value=p; o.textContent=name; sel.appendChild(o);
    }
  }
+ function buffTarget(){ return document.getElementById('charsel').value || document.getElementById('mapsel').value; }
+ function addBuffRow(keys, mins){
+   const d=document.createElement('div'); d.className='row buffrow';
+   d.innerHTML='keys <input class=bkeys placeholder="a,j" style="width:120px"> every '
+     +'<input class=bmin type=number min=1 step=1 style="width:60px"> min '
+     +'<button onclick="this.parentNode.remove()">✕</button>';
+   d.querySelector('.bkeys').value=(keys||[]).join(',');
+   d.querySelector('.bmin').value=(mins!=null?mins:5);
+   document.getElementById('buffrows').appendChild(d);
+ }
+ async function loadBuffs(){
+   const rows=document.getElementById('buffrows'); rows.innerHTML='';
+   document.getElementById('buffstat').textContent='';
+   const file=buffTarget();
+   if(!file){ document.getElementById('bufffile').textContent='(select a map or character first)'; return; }
+   const j=await (await fetch('/buffs?'+new URLSearchParams({file}))).json();
+   if(!j.ok){ document.getElementById('bufffile').textContent='error: '+j.msg; return; }
+   document.getElementById('bufffile').textContent='editing → '+j.file;
+   for(const g of j.groups){ addBuffRow(g.keys, Math.round(g.interval_secs/60)); }
+   if(!j.groups.length){ addBuffRow([], 5); }
+ }
+ async function saveBuffs(){
+   const file=buffTarget();
+   if(!file){ alert('select a map or character first'); return; }
+   const groups=[];
+   for(const r of document.querySelectorAll('#buffrows .buffrow')){
+     const keys=r.querySelector('.bkeys').value.split(',').map(s=>s.trim()).filter(Boolean);
+     const mins=parseFloat(r.querySelector('.bmin').value);
+     if(!keys.length || !(mins>0)) continue;
+     groups.push({keys, interval_secs: Math.round(mins*60)});
+   }
+   const j=await (await fetch('/buffs_save?'+new URLSearchParams({file, groups: JSON.stringify(groups)}))).json();
+   const s=document.getElementById('buffstat'); s.textContent=j.msg; s.style.color=j.ok?'#7d7':'#f77';
+ }
  async function startFarm(){
    const map = document.getElementById('mapsel').value;
    if(!map){ alert('no map selected'); return; }
@@ -859,7 +903,10 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      }
    }catch(e){}
  }
- loadMaps(); loadChars(); poll(); snapLoop(); pollLog(); loadExpSessions();
+ Promise.all([loadMaps(), loadChars()]).then(loadBuffs);   // buffs follow the initial map/char list
+ document.getElementById('mapsel').addEventListener('change', loadBuffs);
+ document.getElementById('charsel').addEventListener('change', loadBuffs);
+ poll(); snapLoop(); pollLog(); loadExpSessions();
  // If the window was hidden/minimized at load (WebView2 freezes the page), the poll loops may
  // not have started or got throttled -> re-kick them the moment it becomes visible. clearTimeout
  // in each loop makes re-calling safe (no parallel chains).
