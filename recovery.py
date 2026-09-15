@@ -1943,6 +1943,19 @@ def walk_shoot(node_mm_x, seconds, detect_fn, attack_key='c', half=60, tol=(3, 3
         kb.safe_release_all()
 
 
+def same_platform_mobs(dets, pfeet, band):
+    """Detections whose feet (box bottom) are within `band` px of the player's feet,
+    as (cx, feet, cls, score). A det is (score,x,y,w,h) or (score,x,y,w,h,cls); the
+    class (or None) and the score are carried through for per-mob skill + confidence gating."""
+    out = []
+    for d in dets:
+        _s, mx, my, mw, mh = d[:5]
+        feet = my + mh
+        if abs(feet - pfeet) <= band:
+            out.append((mx + mw // 2, feet, d[5] if len(d) > 5 else None, _s))
+    return out
+
+
 def approach_shoot(seconds, detect_fn, anchor,
                    attack_range=110, band=70, step=0.14, attack_key='c',
                    deplete_reads=4, stall_limit=8, verbose=True, label="",
@@ -2094,18 +2107,8 @@ def approach_shoot(seconds, detect_fn, anchor,
             # wider band actually reaches mobs above AND below her feet.
             strip = (0, max(0, pfeet - band - 40), W, min(H, pfeet + band // 2 + 40))
 
-            def same_platform(dets):
-                # A detection is (score,x,y,w,h) or (score,x,y,w,h,cls_name) -> carry the class
-                # (or None) through so the attack key can be chosen per mob. `d[:5]` handles both.
-                out = []
-                for d in dets:
-                    _s, mx, my, mw, mh = d[:5]
-                    if abs((my + mh) - pfeet) <= band:
-                        out.append((mx + mw // 2, my + mh, d[5] if len(d) > 5 else None))
-                return out
-
             dets = _shared_dets if _shared_dets is not None else detect_fn(f, strip)
-            same = same_platform(dets)
+            same = same_platform_mobs(dets, pfeet, band)
             STATUS["count"] = len(same)                    # live same-platform mob count for the panel
             if dbg_on():                                   # full per-frame trace (file only)
                 _md = [(round(d[0], 2), d[1] + d[3] // 2, d[2] + d[4]) for d in dets]
@@ -2165,7 +2168,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                     # re-appears/dies, else she thrashes back and forth across the platform.
                     tx, _tfy = pri_lock_pos; tcls = priority_class; holding = True
                 else:
-                    tx, _tfy, tcls = cand
+                    tx, _tfy, tcls, _ = cand
                     pri_lock_pos = (tx, _tfy); pri_miss = 0
             elif (priority_class and pri_lock_pos is not None and pri_miss < priority_lock_grace):
                 # Priority target BLINKED OUT (a bone fish swam through / our own AoE VFX) -- not
@@ -2178,7 +2181,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                 tx, _tfy = pri_lock_pos; tcls = priority_class; holding = True
             else:
                 pri_lock_pos = None                        # no lock (or gave up) -> nearest same-platform
-                tx, _tfy, tcls = min(same, key=lambda m: abs(m[0] - px))
+                tx, _tfy, tcls, _ = min(same, key=lambda m: abs(m[0] - px))
             # TARGET trace (file only): why she picked this target, and flag SWITCHES so target
             # changes are diagnosable. mode=lock (fishhouse, nearest the lock), hold (occluded
             # fishhouse), nearest (goby / no fishhouse). fh=candidate fishhouse x's.

@@ -529,3 +529,17 @@ def test_focus_ok_or_bail_bails_and_releases_on_focus_loss(monkeypatch):
     ok = recovery.focus_ok_or_bail(check=lambda: False, refocus=lambda: refocused.append(1))
     assert ok is False                                 # lost focus -> bail
     assert released == [1] and refocused == [1]        # released keys AND tried to refocus
+
+
+def test_same_platform_mobs_carries_score_and_class():
+    # feet = y+h; band around pfeet. (score,x,y,w,h,cls)
+    dets = [(0.9, 100, 700, 40, 60, "fishhouse"),   # feet=760, cx=120
+            (0.5, 900, 700, 20, 30, "goby"),         # feet=730, cx=910
+            (0.8, 300, 200, 40, 60, "fishhouse")]    # feet=260 -> off-band, dropped
+    out = recovery.same_platform_mobs(dets, pfeet=755, band=60)
+    assert out == [(120, 760, "fishhouse", 0.9), (910, 730, "goby", 0.5)]
+
+
+def test_same_platform_mobs_no_class_field():
+    out = recovery.same_platform_mobs([(0.7, 100, 700, 40, 60)], pfeet=755, band=60)
+    assert out == [(120, 760, None, 0.7)]
