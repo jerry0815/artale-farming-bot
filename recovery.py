@@ -2087,6 +2087,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                 anchor.push(_pbox)                        # ...its player box feeds the anchor (falls
                 #                                            back to nametag when None, as before)
             p = anchor.locate(f)                          # HP-bar/name-tag anchor
+            _pfound = p is not None                       # DEBUG: real anchor lock vs assume/miss this beat
             if _yolo_primary is not None and not _yolo_primary.last_had_box:
                 # TRUE recall failure this beat: YOLO returned no class-2 box (regardless of whether
                 # the nametag then covered it). Dump it (throttled) to build a real retrain set --
@@ -2108,6 +2109,9 @@ def approach_shoot(seconds, detect_fn, anchor,
                 if not rooted:                            # she was WALKING (moving): her last pos is
                     # already stale -- faking it overshoots the mob and trips the stall guard. Stop
                     # and wait a beat for the bar to re-appear (no skill VFX while walking, so brief).
+                    if dbg_on():                          # DEBUG: skipped beat (no target selection this frame)
+                        dbg(f"[app {label}] SKIP player-lost mid-walk "
+                            f"(lock={None if pri_lock_pos is None else int(pri_lock_pos[0])} miss={pri_miss})")
                     log("player lost mid-walk -> stop, wait for re-lock")
                     stop_walk(); time.sleep(0.03); continue
                 # Rooted: the attack SKILL's VFX hides the bar but also holds her still -- she hasn't
@@ -2133,7 +2137,8 @@ def approach_shoot(seconds, detect_fn, anchor,
             STATUS["count"] = len(same)                    # live same-platform mob count for the panel
             if dbg_on():                                   # full per-frame trace (file only)
                 _md = [(round(d[0], 2), d[1] + d[3] // 2, d[2] + d[4]) for d in dets]
-                dbg(f"[app {label}] player=({px},{pfeet}) band={band} "
+                dbg(f"[app {label}] player=({px},{pfeet}) found={_pfound} "
+                    f"lock={None if pri_lock_pos is None else int(pri_lock_pos[0])} miss={pri_miss} band={band} "
                     f"dets(score,cx,feet)={_md} same_platform={[(m[0], m[2]) for m in same]}")
             # DEATH-TRIGGERED post-kill hold: if the fishhouse we were just hitting is GONE now
             # (killed -- reliable at ~0.99 recall), blanket its spot for priority_hold_hits to catch
@@ -2201,6 +2206,9 @@ def approach_shoot(seconds, detect_fn, anchor,
                 # and the goby it spawned become the target.
                 tx, _tfy = pri_lock_pos; tcls = priority_class; holding = True
             else:
+                if pri_lock_pos is not None and dbg_on():   # DEBUG: trace the lock clearing (the flip source)
+                    dbg(f"[lock {label}] RESET {int(pri_lock_pos[0])}->None "
+                        f"(pri_empty={not pri}, miss={pri_miss}/{priority_lock_grace}, found={_pfound})")
                 pri_lock_pos = None                        # no lock (or gave up) -> nearest same-platform
                 tx, _tfy, tcls, _ = min(same, key=lambda m: abs(m[0] - px))
             # TARGET trace (file only): why she picked this target, and flag SWITCHES so target
