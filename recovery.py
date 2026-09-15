@@ -1956,6 +1956,25 @@ def same_platform_mobs(dets, pfeet, band):
     return out
 
 
+def trustworthy_same(same, px, priority_class, low_conf_range, acquire_conf):
+    """Filter same-platform mobs by distance-gated confidence: a priority_class mob that is
+    FAR from the player (|cx-px| > low_conf_range) AND below acquire_conf (or scoreless) is
+    dropped -- so weak far phantoms aren't targeted -- while a CLOSE one is kept at the low
+    detector floor (she's on top of it, killing it). Non-priority mobs pass through. When
+    acquire_conf is None the gate is off and `same` is returned unchanged."""
+    if acquire_conf is None:
+        return same
+    out = []
+    for m in same:
+        cx, cls = m[0], m[2]
+        score = m[3] if len(m) > 3 else None
+        if cls == priority_class and abs(cx - px) > low_conf_range and not (
+                score is not None and score >= acquire_conf):
+            continue
+        out.append(m)
+    return out
+
+
 def approach_shoot(seconds, detect_fn, anchor,
                    attack_range=110, band=70, step=0.14, attack_key='c',
                    deplete_reads=4, stall_limit=8, verbose=True, label="",

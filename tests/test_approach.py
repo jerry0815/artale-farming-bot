@@ -543,3 +543,28 @@ def test_same_platform_mobs_carries_score_and_class():
 def test_same_platform_mobs_no_class_field():
     out = recovery.same_platform_mobs([(0.7, 100, 700, 40, 60)], pfeet=755, band=60)
     assert out == [(120, 760, None, 0.7)]
+
+
+def test_trustworthy_same_drops_far_weak_priority():
+    px = 744
+    same = [
+        (899, 760, "fishhouse", 0.59),   # 155px away, weak -> FAR + weak -> drop
+        (450, 760, "fishhouse", 0.97),   # 294px away, strong -> kept
+        (760, 760, "fishhouse", 0.40),   # 16px away -> CLOSE -> kept at low conf
+        (1200, 760, "goby", 0.30),       # non-priority -> always kept
+    ]
+    out = recovery.trustworthy_same(same, px, "fishhouse", low_conf_range=120, acquire_conf=0.6)
+    assert (899, 760, "fishhouse", 0.59) not in out
+    assert (450, 760, "fishhouse", 0.97) in out
+    assert (760, 760, "fishhouse", 0.40) in out
+    assert (1200, 760, "goby", 0.30) in out
+
+
+def test_trustworthy_same_disabled_when_no_acquire_conf():
+    same = [(899, 760, "fishhouse", 0.59)]
+    assert recovery.trustworthy_same(same, 744, "fishhouse", 120, None) == same
+
+
+def test_trustworthy_same_missing_score_far_dropped():
+    same = [(899, 760, "fishhouse", None)]   # far, no score -> treated as below bar -> drop
+    assert recovery.trustworthy_same(same, 744, "fishhouse", 120, 0.6) == []
