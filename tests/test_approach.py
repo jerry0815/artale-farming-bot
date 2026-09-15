@@ -565,6 +565,13 @@ def test_trustworthy_same_disabled_when_no_acquire_conf():
     assert recovery.trustworthy_same(same, 744, "fishhouse", 120, None) == same
 
 
+def test_trustworthy_same_noop_when_no_priority_class():
+    # When priority_class is None, the gate is off (no-op) -> same returned unchanged
+    # This guards against None-class detectors wrongly dropping items via None==None.
+    same = [(899, 760, None, 0.4)]
+    assert recovery.trustworthy_same(same, 744, None, 120, 0.6) == same
+
+
 def test_trustworthy_same_missing_score_far_dropped():
     same = [(899, 760, "fishhouse", None)]   # far, no score -> treated as below bar -> drop
     assert recovery.trustworthy_same(same, 744, "fishhouse", 120, 0.6) == []
