@@ -53,7 +53,11 @@
   "attack_range_note": "fire in place within this px; beyond it she WALKS closer. Set to 250 -- the earlier not-killing-from-far was a FACING bug (she attacked the wrong side), now fixed (face_settle + fire-stall), so the skill reaches far and she can fire without over-walking. If she stalls firing at large dx without a fire-stall recovery, the true reach is smaller -- lower this.",
   "approach_ease_margin": 0,
   "approach_ease_note": "0 = disable the tap-and-stop ease-in (it caused small stepping near a mob). With the wide attack_range 190 there's no tight target to overshoot, so walk continuously straight into range. Raise it only if a tighter range is reintroduced and she coasts past.",
-  "same_platform_band": 85,
+  "same_platform_band": 60,
+  "same_platform_band_note": "screen-px |mob_feet - player_feet| to count a mob as on THIS platform. 85 leaked: P1<->P2 are only ~81px apart on screen (their 17px minimap gap is the map's smallest), so on P1 she locked a P2 fishhouse 81px BELOW her (feet 838 vs 757), walked to P1's right edge and fired in place at an unreachable mob (23:51 run). 60 sits below the 81px P1-P2 gap yet above the on-platform spread (P6's own mobs reach ~+60), so it rejects the cross-platform mob in BOTH directions while keeping real ones. Symmetric; VERIFY LIVE -- if P3/P6 (crowded) start depleting early (real far mobs skipped) raise it, toward 70; if a cross-platform lock still happens lower it. An asymmetric down-only tolerance is the next lever if one number can't cover every pair.",
+  "low_conf_range": 120,
+  "priority_acquire_conf": 0.6,
+  "conf_gate_note": "Distance-gated confidence: a fishhouse FARTHER than low_conf_range(120 screen px) from the player must clear priority_acquire_conf(0.6) or it's ignored; CLOSER ones are kept at the fishhouse_conf(0.3) floor (she's point-blank killing it, VFX dims it). Stops locking/firing at weak far phantoms (the P1 wrong-direction bug: a 0.59 fishhouse 155px away beat the real 0.97 one). Raise low_conf_range or lower priority_acquire_conf if a real far fishhouse gets skipped (real ones read ~0.9+); remove priority_acquire_conf to disable.",
   "approach_step": 0,
   "deplete_reads": 4,
   "stall_limit": 8,
@@ -62,6 +66,7 @@
   ],
   "buff_groups": [
     { "keys": ["d"], "interval_secs": 300 },
+    { "keys": ["3"], "interval_secs": 300 },
     { "keys": ["g"], "interval_secs": 900 }
   ],
   "player": {

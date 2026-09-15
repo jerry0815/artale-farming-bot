@@ -1982,7 +1982,8 @@ def approach_shoot(seconds, detect_fn, anchor,
                    attack_keys=None, priority_class=None, priority_range=None,
                    priority_hold_hits=0, priority_lock_grace=0, fall_confirm=2, ease_margin=45,
                    continuous_attack=False, attack_dwell=0.25, face_deadzone=15,
-                   face_settle=0.2, fire_stall_limit=5, lock_switch_px=70, combined=None,
+                   face_settle=0.2, fire_stall_limit=5, lock_switch_px=70,
+                   low_conf_range=250, priority_acquire_conf=None, combined=None,
                    lost_limit=12, collect_misses=False, fail_dump_interval=3.0):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
@@ -2128,6 +2129,7 @@ def approach_shoot(seconds, detect_fn, anchor,
 
             dets = _shared_dets if _shared_dets is not None else detect_fn(f, strip)
             same = same_platform_mobs(dets, pfeet, band)
+            same = trustworthy_same(same, px, priority_class, low_conf_range, priority_acquire_conf)
             STATUS["count"] = len(same)                    # live same-platform mob count for the panel
             if dbg_on():                                   # full per-frame trace (file only)
                 _md = [(round(d[0], 2), d[1] + d[3] // 2, d[2] + d[4]) for d in dets]
@@ -3104,6 +3106,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     face_settle=float(map_cfg.get("face_settle_secs", 0.2)),
                                     fire_stall_limit=int(map_cfg.get("fire_stall_limit", 5)),
                                     lock_switch_px=int(map_cfg.get("lock_switch_px", 70)),
+                                    low_conf_range=int(map_cfg.get("low_conf_range", 250)),
+                                    priority_acquire_conf=map_cfg.get("priority_acquire_conf"),
                                     collect_misses=bool(map_cfg.get("collect_miss_frames", False)),
                                     fail_dump_interval=float(map_cfg.get("yolo_fail_dump_interval", 3.0)),
                                     combined=_combined)
