@@ -84,6 +84,13 @@ def test_node_bounds_override():
     assert watermap.node_bounds({}, "P2", 139, 60) == (79, 199)
 
 
+def test_node_band_override():
+    cfg = {"node_same_platform_band": {"P1": 85}}
+    assert watermap.node_band(cfg, "P1", 75) == 85       # P1 loosened for its "player higher than mob" case
+    assert watermap.node_band(cfg, "P6", 75) == 75       # other nodes keep the global band
+    assert watermap.node_band({}, "P1", 75) == 75        # no override map -> global
+
+
 def test_node_swim_tol_override():
     base = (10, 6, 16)
     cfg = {"node_tol_y_up_override": {"P4": 8}}

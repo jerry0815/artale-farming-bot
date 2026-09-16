@@ -55,6 +55,8 @@
   "approach_ease_margin": 0,
   "approach_ease_note": "0 = disable the tap-and-stop ease-in (it caused small stepping near a mob). With the wide attack_range 190 there's no tight target to overshoot, so walk continuously straight into range. Raise it only if a tighter range is reintroduced and she coasts past.",
   "same_platform_band": 75,
+  "node_same_platform_band": { "P1": 85 },
+  "node_same_platform_band_note": "per-node override of same_platform_band. P1=85: on P1 she sometimes stands HIGHER than the fishhouse, so its feet read ~60-76px below hers (vs ~7 elsewhere); the global 75 skipped those (measured: a real 60-76 cluster on P1). 85 keeps P1's own mobs through that, and still sits ~at the P2 gap (~81) -- any occasional P2 leak is harmless now (node_bounds edge-guard + distance-gate stop her walking off / chasing it). Other nodes stay at the global 75.",
   "same_platform_band_note": "screen-px |mob_feet - player_feet| to count a mob as on THIS platform. Must thread two failure modes: below ~81 (the P1<->P2 screen gap -- 85 leaked, she locked a P2 fishhouse 81px below her while on P1) and ABOVE ~70 (while she's still SINKING onto a node the HP-bar anchor reads her feet ~90px high, so P1's own fishhouse looks ~69-70px away -- 60 rejected it and she depleted+skipped P1 during the ~0.7s settle; once seated the delta is ~9px). 75 sits between: >70 keeps P1's mob through the settle, <81 still rejects the P2 cross-platform mob. VERIFY LIVE -- raise toward 80 if P1 still skips during settle; lower toward 70 if a P2 mob leaks onto P1. Root cause is the settle-transient foot read; a post-arrival settle delay before counting depletion is the more robust fix if the band can't cover both.",
   "low_conf_range": 120,
   "priority_acquire_conf": 0.6,

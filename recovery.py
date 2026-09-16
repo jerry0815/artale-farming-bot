@@ -3095,7 +3095,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
             if approach:
                 _ncx = centers[node][0]                    # keep her on THIS platform (minimap)
                 ok = approach_shoot(_r.uniform(*stand_secs), detect_fn, node_anchor,
-                                    attack_range=_arange, band=_aband, step=_astep,
+                                    attack_range=_arange,
+                                    band=watermap.node_band(map_cfg, node, _aband), step=_astep,
                                     attack_key=attack_key, deplete_reads=_adeplete,
                                     stall_limit=_astall, label=node,
                                     mm_bounds=watermap.node_bounds(map_cfg, node, _ncx, _phalf),

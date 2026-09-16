@@ -116,6 +116,14 @@ def node_bounds(cfg, node, center_x, half):
     return (center_x - half, center_x + half)
 
 
+def node_band(cfg, node, base):
+    """Per-node same-platform screen-y band: cfg['node_same_platform_band'][node] if set,
+    else the global `base`. Lets a node whose geometry puts mobs further from the player's
+    feet (e.g. P1, where she sometimes stands higher than the mob) use a looser band without
+    loosening every platform (which would leak cross-platform mobs)."""
+    return int(cfg.get("node_same_platform_band", {}).get(node, base))
+
+
 def node_swim_tol(cfg, node, base):
     """`base` swim_tol with tol_y_up (the ABOVE band) overridden for `node` when
     node_tol_y_up_override sets it. Tightening tol_y_up on a stacked pin (P4) forces her to
