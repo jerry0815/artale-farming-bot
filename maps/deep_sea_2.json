@@ -251,5 +251,6 @@
   "swim_jump_gap": 0.03,
   "debug_log": true,
   "stacked_drift_secs": 0.3,
-  "fishhouse_conf": 0.3
+  "fishhouse_conf": 0.45,
+  "fishhouse_conf_note": "per-class detection floor for fishhouses (below mob_conf 0.5 so a fishhouse dimmed by attack VFX isn't lost mid-kill). Raised 0.3->0.45 to drop weak false-positive boxes (the model boxing bone-fish/scenery as a fishhouse ~0.4). Watch that a real fishhouse she's actively killing doesn't drop out under VFX -- if she starts giving up mid-kill, lower back toward 0.35."
 }
