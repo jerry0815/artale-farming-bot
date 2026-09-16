@@ -21,12 +21,11 @@
   "rotation": "sweep",
   "reset_node": "RIGHT",
   "detector": "mob_yolo",
-  "shared_detect": true,
+  "shared_detect": false,
   "shared_detect_note": "ONE yolo_detect per approach beat gives both mobs + the player box (pushed to the anchor), instead of a separate mob pass + anchor pass -- ~halves hot-loop YOLO cost. Only applies with detector=mob_yolo + anchor=yolo_player. Set false to revert to the two-pass path.",
   "mob_model": "models/mob_yolo.pt",
   "mob_conf": 0.5,
-  "mob_imgsz": 640,
-  "mob_imgsz_note": "YOLO inference size -- the main latency driver. 640 is the original low-latency value; was bumped to 960 for small-goby recall but that ~doubled per-pass cost and felt too slow. Back to 640 (with shared_detect on, one 640 pass/beat). Raise toward 768/960 if goby recall suffers; that's the speed<->recall knob.",
+  "mob_imgsz": 960,
   "mob_template_dir": "assets/mob/deep_sea_2",
   "mob_template_limit": 6,
   "fish_species": [
@@ -52,30 +51,18 @@
   "priority_class": "fishhouse",
   "priority_hold_hits": 1,
   "priority_lock_grace": 2,
-  "priority_lock_grace_note": "in-range beats to keep firing a locked fishhouse's last spot before giving it up. Tried 5 to curb P6 fishhouse-hopping; it did NOT stop the hopping (the lock still flips to the px-nearest fishhouse -- a lock-stability bug, not grace) and it lengthened firing-into-empty after a kill. Reverted to 2 pending the lock-stability fix (debug_log now traces pri_lock_pos RESET and player-found per beat).",
   "priority_note": "priority_class=null DISABLES fishhouse-first targeting -> she targets the nearest same-platform mob (original behavior); the lock, occlusion-hold and post-kill hold are all gated on priority_class so they're off too. Set priority_class='fishhouse' to re-enable (then priority_hold_hits / priority_lock_grace / priority_range apply).",
-  "attack_range": 200,
-  "attack_range_note": "fire in place within this px; beyond it she WALKS closer. 250 fired from a bit too far; 200 closes in more before firing (better kills / less firing at distance). Lower further if she still shoots from too far; raise back toward 250 if she over-walks / steps into mobs.",
+  "attack_range": 250,
+  "attack_range_note": "fire in place within this px; beyond it she WALKS closer. Set to 250 -- the earlier not-killing-from-far was a FACING bug (she attacked the wrong side), now fixed (face_settle + fire-stall), so the skill reaches far and she can fire without over-walking. If she stalls firing at large dx without a fire-stall recovery, the true reach is smaller -- lower this.",
   "approach_ease_margin": 0,
   "approach_ease_note": "0 = disable the tap-and-stop ease-in (it caused small stepping near a mob). With the wide attack_range 190 there's no tight target to overshoot, so walk continuously straight into range. Raise it only if a tighter range is reintroduced and she coasts past.",
-  "same_platform_band": 75,
-  "node_same_platform_band": {
-    "P1": 85
-  },
-  "node_same_platform_band_note": "per-node override of same_platform_band. P1=85: on P1 she sometimes stands HIGHER than the fishhouse, so its feet read ~60-76px below hers (vs ~7 elsewhere); the global 75 skipped those (measured: a real 60-76 cluster on P1). 85 keeps P1's own mobs through that, and still sits ~at the P2 gap (~81) -- any occasional P2 leak is harmless now (node_bounds edge-guard + distance-gate stop her walking off / chasing it). Other nodes stay at the global 75.",
-  "same_platform_band_note": "screen-px |mob_feet - player_feet| to count a mob as on THIS platform. Must thread two failure modes: below ~81 (the P1<->P2 screen gap -- 85 leaked, she locked a P2 fishhouse 81px below her while on P1) and ABOVE ~70 (while she's still SINKING onto a node the HP-bar anchor reads her feet ~90px high, so P1's own fishhouse looks ~69-70px away -- 60 rejected it and she depleted+skipped P1 during the ~0.7s settle; once seated the delta is ~9px). 75 sits between: >70 keeps P1's mob through the settle, <81 still rejects the P2 cross-platform mob. VERIFY LIVE -- raise toward 80 if P1 still skips during settle; lower toward 70 if a P2 mob leaks onto P1. Root cause is the settle-transient foot read; a post-arrival settle delay before counting depletion is the more robust fix if the band can't cover both.",
-  "anchor_settle_px": 20,
-  "anchor_settle_nodes": ["P2"],
-  "anchor_settle_nodes_note": "limit the anchor-settle gate to these nodes (omit the key to gate every node). P2 is where the arrival foot-jump flips membership toward the P1 mob above-left ('goes left in air'); the other platforms don't need it and the gate just added arrival latency there. Add a node here if it shows the same arrival wrong-lock.",
-  "anchor_settle_max_secs": 1.0,
-  "anchor_settle_max_note": "cap on the anchor-settle wait -- the arrival latency the player feels (she waits this long before locking/detecting on a crowded platform, where the anchor never settles). Lowered 2.0->1.0 to cut that lag. A clean arrival SINK isn't fully settled in 1s so she may lock a touch early, but the deplete-freeze during the wait still prevents the skip. Lower further (toward 0.5) for even less arrival lag at the cost of occasionally locking before grounded; raise back toward 2.0 if arrival wrong-locks/skips (P2-left, P1/P6) return.",
-  "anchor_settle_note": "while NO lock is held, wait until the last 3 player feet-y reads span <= this before targeting -- the anchor is mid-settle (arrival SINK, e.g. 472->497->671->...->715) or knocked, and its feet read is unreliable, which flips same-platform membership (real mob drops out, a mob on the platform above/below reads in-band). She'd otherwise lock the wrong one and fire it IN THE AIR mid-sink (P2 'hits left'), and the empty reads skip the platform (P1/P6). 20: a settled stand spans ~2-5px, mid-sink 3-read windows span 25+, so she only locks once grounded (~pfeet 715). A single 2-read/40px check let a mid-sink plateau (472->497) slip through -- hence the 3-read window. Skipped beats also freeze the deplete counter. Raise if she's slow to start after landing; lower if she still fires before grounding. Remove to disable.",
-  "low_conf_range": 120,
-  "priority_acquire_conf": 0.6,
-  "conf_gate_note": "Distance-gated confidence: a fishhouse FARTHER than low_conf_range(120 screen px) from the player must clear priority_acquire_conf(0.6) or it's ignored; CLOSER ones are kept at the fishhouse_conf(0.3) floor (she's point-blank killing it, VFX dims it). Stops locking/firing at weak far phantoms (the P1 wrong-direction bug: a 0.59 fishhouse 155px away beat the real 0.97 one). Raise low_conf_range or lower priority_acquire_conf if a real far fishhouse gets skipped (real ones read ~0.9+); remove priority_acquire_conf to disable.",
+  "same_platform_band": 85,
   "approach_step": 0,
   "deplete_reads": 4,
   "stall_limit": 8,
+  "buff_keys": [
+    "d"
+  ],
   "buff_groups": [
     {
       "keys": [
@@ -239,36 +226,9 @@
     "P4": 8
   },
   "node_tol_y_up_note": "P4 only: default tol_y_up=16 lets her 'arrive' anywhere across the ~22px stacked band (so the lift often didn't take). 8 tightens the ABOVE band so she must actually rise near the lifted target to seat -- makes the lift consistent. Too tight -> she bobs; raise if she can't seat.",
-  "node_arrive_jumps": { "P4": 2 },
-  "node_arrive_jumps_note": "extra straight-up hops right after seating, to firm a landing on a narrow/pin platform. P4=2: P5->P4 she reaches P4's y but doesn't stick (stacked pin below P3) and slides back to P5 in a re-seat loop; 2 hops plant her on P4. Straight up (not the P4->P3 stacked drift), so she lands back on P4. Lower to 1 if she overshoots toward P3; raise if she still falls back to P5.",
+  "node_arrive_jumps": {},
+  "buff_interval_secs": 300,
   "platform_half": 60,
-  "node_bounds": {
-    "P6": [
-      56,
-      142
-    ],
-    "P5": [
-      89,
-      102
-    ],
-    "P4": [
-      71,
-      92
-    ],
-    "P3": [
-      71,
-      92
-    ],
-    "P2": [
-      123,
-      154
-    ],
-    "P1": [
-      67,
-      90
-    ]
-  },
-  "node_bounds_note": "[left_x, right_x] minimap-x walk limits per platform (the approach edge-guard fires here -> she fires in place at the edge instead of walking off). Seeded from routes/deep_sea_2.capture.jsonl (main x-cluster per y-band, 2026-08-31 play). Without these every node used center+-platform_half(60), whose left bound for P2 (center x139) was 79 -- below P3's own x(83) -- so she walked LEFT off P2 chasing a locked off-platform fishhouse and fell to P3 in a loop. P2 left nudged to 123 (edge ~121 +2 for the ~12px/beat walk overshoot); it's the fall-critical one -- raise it if she still drops, lower it if she can't reach P2's left mobs. Others are conservative (where she was seen standing safely); a too-tight bound just makes her fire in place at the edge. VERIFY LIVE that each covers the real platform.",
   "map_box": [
     30,
     200,
@@ -304,6 +264,5 @@
   "swim_jump_gap": 0.03,
   "debug_log": true,
   "stacked_drift_secs": 0.3,
-  "fishhouse_conf": 0.45,
-  "fishhouse_conf_note": "per-class detection floor for fishhouses (below mob_conf 0.5 so a fishhouse dimmed by attack VFX isn't lost mid-kill). Raised 0.3->0.45 to drop weak false-positive boxes (the model boxing bone-fish/scenery as a fishhouse ~0.4). Watch that a real fishhouse she's actively killing doesn't drop out under VFX -- if she starts giving up mid-kill, lower back toward 0.35."
+  "fishhouse_conf": 0.3
 }

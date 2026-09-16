@@ -1943,38 +1943,6 @@ def walk_shoot(node_mm_x, seconds, detect_fn, attack_key='c', half=60, tol=(3, 3
         kb.safe_release_all()
 
 
-def same_platform_mobs(dets, pfeet, band):
-    """Detections whose feet (box bottom) are within `band` px of the player's feet,
-    as (cx, feet, cls, score). A det is (score,x,y,w,h) or (score,x,y,w,h,cls); the
-    class (or None) and the score are carried through for per-mob skill + confidence gating."""
-    out = []
-    for d in dets:
-        _s, mx, my, mw, mh = d[:5]
-        feet = my + mh
-        if abs(feet - pfeet) <= band:
-            out.append((mx + mw // 2, feet, d[5] if len(d) > 5 else None, _s))
-    return out
-
-
-def trustworthy_same(same, px, priority_class, low_conf_range, acquire_conf):
-    """Filter same-platform mobs by distance-gated confidence: a priority_class mob that is
-    FAR from the player (|cx-px| > low_conf_range) AND below acquire_conf (or scoreless) is
-    dropped -- so weak far phantoms aren't targeted -- while a CLOSE one is kept at the low
-    detector floor (she's on top of it, killing it). Non-priority mobs pass through. When
-    acquire_conf is None the gate is off and `same` is returned unchanged."""
-    if acquire_conf is None or priority_class is None:
-        return same
-    out = []
-    for m in same:
-        cx, cls = m[0], m[2]
-        score = m[3] if len(m) > 3 else None
-        if cls == priority_class and abs(cx - px) > low_conf_range and not (
-                score is not None and score >= acquire_conf):
-            continue
-        out.append(m)
-    return out
-
-
 def approach_shoot(seconds, detect_fn, anchor,
                    attack_range=110, band=70, step=0.14, attack_key='c',
                    deplete_reads=4, stall_limit=8, verbose=True, label="",
@@ -1982,9 +1950,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                    attack_keys=None, priority_class=None, priority_range=None,
                    priority_hold_hits=0, priority_lock_grace=0, fall_confirm=2, ease_margin=45,
                    continuous_attack=False, attack_dwell=0.25, face_deadzone=15,
-                   face_settle=0.2, fire_stall_limit=5, lock_switch_px=70,
-                   low_conf_range=120, priority_acquire_conf=None, anchor_settle_px=None,
-                   anchor_settle_max=2.0, combined=None,
+                   face_settle=0.2, fire_stall_limit=5, lock_switch_px=70, combined=None,
                    lost_limit=12, collect_misses=False, fail_dump_interval=3.0):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
@@ -2002,8 +1968,6 @@ def approach_shoot(seconds, detect_fn, anchor,
     best_absdx = None       # closest we've gotten to the current target (net-progress stall)
     no_improve = 0
     last_player = None      # sticky anchor: lock onto the bar nearest last frame's player
-    _pfeet_hist = []        # recent player feet-y reads -> detect an unsettled (still-sinking) anchor
-    _settle_since = None    # when the anchor-settle wait began -> cap it (crowded jitter never settles)
     _lost = 0               # consecutive beats the anchor found NOTHING -> re-seat past lost_limit
     # Miss-frame collection is OFF by default (set collect_miss_frames in the map to gather a
     # retrain batch). When off, skip the yolo-fail dump entirely -- no anchor resolution, no writes.
@@ -2090,7 +2054,6 @@ def approach_shoot(seconds, detect_fn, anchor,
                 anchor.push(_pbox)                        # ...its player box feeds the anchor (falls
                 #                                            back to nametag when None, as before)
             p = anchor.locate(f)                          # HP-bar/name-tag anchor
-            _pfound = p is not None                       # DEBUG: real anchor lock vs assume/miss this beat
             if _yolo_primary is not None and not _yolo_primary.last_had_box:
                 # TRUE recall failure this beat: YOLO returned no class-2 box (regardless of whether
                 # the nametag then covered it). Dump it (throttled) to build a real retrain set --
@@ -2112,9 +2075,6 @@ def approach_shoot(seconds, detect_fn, anchor,
                 if not rooted:                            # she was WALKING (moving): her last pos is
                     # already stale -- faking it overshoots the mob and trips the stall guard. Stop
                     # and wait a beat for the bar to re-appear (no skill VFX while walking, so brief).
-                    if dbg_on():                          # DEBUG: skipped beat (no target selection this frame)
-                        dbg(f"[app {label}] SKIP player-lost mid-walk "
-                            f"(lock={None if pri_lock_pos is None else int(pri_lock_pos[0])} miss={pri_miss})")
                     log("player lost mid-walk -> stop, wait for re-lock")
                     stop_walk(); time.sleep(0.03); continue
                 # Rooted: the attack SKILL's VFX hides the bar but also holds her still -- she hasn't
@@ -2127,31 +2087,6 @@ def approach_shoot(seconds, detect_fn, anchor,
             if getattr(anchor, "which", None):            # composite fell past the primary anchor
                 log(f"anchor fallback #{anchor.which} (nametag) located player at {p}")
             px, pfeet = p
-            # ANCHOR-SETTLE GATE: on arrival she SINKS onto the platform and the foot estimate climbs
-            # (e.g. 472->497->671->...->715); a knock jumps it too. On such an unsettled read same-
-            # platform membership flips (her real mob drops just out of band, a mob on the platform
-            # above/below reads in-band) and she'd lock the wrong one and fire it IN THE AIR mid-sink
-            # (P2 "hits left"), while the empty reads skip the platform (P1/P6). So when NO lock is
-            # held yet, wait until the last 3 feet-y reads span <= anchor_settle_px (she's grounded)
-            # before targeting -- skip the beat, which also freezes the deplete counter. A single
-            # 2-read check let a mid-sink plateau slip through; the window needs true rest. A HELD
-            # lock rides its own grace and is not gated. Disabled when anchor_settle_px is unset.
-            _pfeet_hist = (_pfeet_hist + [pfeet])[-3:]
-            _unsettled = (anchor_settle_px and pri_lock_pos is None and
-                          (len(_pfeet_hist) < 3 or max(_pfeet_hist) - min(_pfeet_hist) > anchor_settle_px))
-            if _unsettled:
-                if _settle_since is None:
-                    _settle_since = time.time()
-                if time.time() - _settle_since <= anchor_settle_max:   # inside the settle window -> wait
-                    if dbg_on():
-                        dbg(f"[app {label}] anchor unsettled pfeet~{_pfeet_hist} -> wait (no lock)")
-                    stop_walk(); time.sleep(0.05); continue
-                # CAP: a clean arrival sink settles fast; if it's still jumping after this long the
-                # anchor is just noisy (crowded platform), not sinking -> stop waiting and target anyway.
-                if dbg_on():
-                    dbg(f"[app {label}] anchor unsettled >{anchor_settle_max}s (crowded jitter) -> proceed")
-            else:
-                _settle_since = None
             # Scan the FULL platform-width strip at the player's y-band (YOLO is cheap on the
             # whole frame). Catches far mobs (P6's rightmost fishhouse) without any patrol.
             H, W = f.shape[:2]
@@ -2159,14 +2094,22 @@ def approach_shoot(seconds, detect_fn, anchor,
             # wider band actually reaches mobs above AND below her feet.
             strip = (0, max(0, pfeet - band - 40), W, min(H, pfeet + band // 2 + 40))
 
+            def same_platform(dets):
+                # A detection is (score,x,y,w,h) or (score,x,y,w,h,cls_name) -> carry the class
+                # (or None) through so the attack key can be chosen per mob. `d[:5]` handles both.
+                out = []
+                for d in dets:
+                    _s, mx, my, mw, mh = d[:5]
+                    if abs((my + mh) - pfeet) <= band:
+                        out.append((mx + mw // 2, my + mh, d[5] if len(d) > 5 else None))
+                return out
+
             dets = _shared_dets if _shared_dets is not None else detect_fn(f, strip)
-            same = same_platform_mobs(dets, pfeet, band)
-            same = trustworthy_same(same, px, priority_class, low_conf_range, priority_acquire_conf)
+            same = same_platform(dets)
             STATUS["count"] = len(same)                    # live same-platform mob count for the panel
             if dbg_on():                                   # full per-frame trace (file only)
                 _md = [(round(d[0], 2), d[1] + d[3] // 2, d[2] + d[4]) for d in dets]
-                dbg(f"[app {label}] player=({px},{pfeet}) found={_pfound} "
-                    f"lock={None if pri_lock_pos is None else int(pri_lock_pos[0])} miss={pri_miss} band={band} "
+                dbg(f"[app {label}] player=({px},{pfeet}) band={band} "
                     f"dets(score,cx,feet)={_md} same_platform={[(m[0], m[2]) for m in same]}")
             # DEATH-TRIGGERED post-kill hold: if the fishhouse we were just hitting is GONE now
             # (killed -- reliable at ~0.99 recall), blanket its spot for priority_hold_hits to catch
@@ -2222,7 +2165,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                     # re-appears/dies, else she thrashes back and forth across the platform.
                     tx, _tfy = pri_lock_pos; tcls = priority_class; holding = True
                 else:
-                    tx, _tfy, tcls, _ = cand
+                    tx, _tfy, tcls = cand
                     pri_lock_pos = (tx, _tfy); pri_miss = 0
             elif (priority_class and pri_lock_pos is not None and pri_miss < priority_lock_grace):
                 # Priority target BLINKED OUT (a bone fish swam through / our own AoE VFX) -- not
@@ -2234,11 +2177,8 @@ def approach_shoot(seconds, detect_fn, anchor,
                 # and the goby it spawned become the target.
                 tx, _tfy = pri_lock_pos; tcls = priority_class; holding = True
             else:
-                if pri_lock_pos is not None and dbg_on():   # DEBUG: trace the lock clearing (the flip source)
-                    dbg(f"[lock {label}] RESET {int(pri_lock_pos[0])}->None "
-                        f"(pri_empty={not pri}, miss={pri_miss}/{priority_lock_grace}, found={_pfound})")
                 pri_lock_pos = None                        # no lock (or gave up) -> nearest same-platform
-                tx, _tfy, tcls, _ = min(same, key=lambda m: abs(m[0] - px))
+                tx, _tfy, tcls = min(same, key=lambda m: abs(m[0] - px))
             # TARGET trace (file only): why she picked this target, and flag SWITCHES so target
             # changes are diagnosable. mode=lock (fishhouse, nearest the lock), hold (occluded
             # fishhouse), nearest (goby / no fishhouse). fh=candidate fishhouse x's.
@@ -3022,8 +2962,6 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
     # x-only (no jump) instead of a full swim_to that fights vertically off the floor.
     _x_align = set(map_cfg.get("x_align_nodes", []))
     _no_fall = set(map_cfg.get("no_fall_nodes", []))   # skip the minimap fall check on these nodes
-    _asn = map_cfg.get("anchor_settle_nodes")          # limit the anchor-settle gate to these nodes;
-    _settle_nodes = set(_asn) if _asn is not None else None   # None -> gate every node (back-compat)
     #                                                    (e.g. P3, where a bottom-edge phantom keeps
     #                                                    false-triggering re-seats)
     _arrive_retries = int(map_cfg.get("arrive_retries", 1))   # extra swim attempts if she didn't seat
@@ -3125,11 +3063,10 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
             if approach:
                 _ncx = centers[node][0]                    # keep her on THIS platform (minimap)
                 ok = approach_shoot(_r.uniform(*stand_secs), detect_fn, node_anchor,
-                                    attack_range=_arange,
-                                    band=watermap.node_band(map_cfg, node, _aband), step=_astep,
+                                    attack_range=_arange, band=_aband, step=_astep,
                                     attack_key=attack_key, deplete_reads=_adeplete,
                                     stall_limit=_astall, label=node,
-                                    mm_bounds=watermap.node_bounds(map_cfg, node, _ncx, _phalf),
+                                    mm_bounds=(_ncx - _phalf, _ncx + _phalf),
                                     mm_y=(None if node in _no_fall else cy),
                                     fall_margin=int(map_cfg.get("fall_margin", 22)),
                                     ease_margin=int(map_cfg.get("approach_ease_margin", 45)),
@@ -3145,11 +3082,6 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     face_settle=float(map_cfg.get("face_settle_secs", 0.2)),
                                     fire_stall_limit=int(map_cfg.get("fire_stall_limit", 5)),
                                     lock_switch_px=int(map_cfg.get("lock_switch_px", 70)),
-                                    low_conf_range=int(map_cfg.get("low_conf_range", 120)),
-                                    priority_acquire_conf=map_cfg.get("priority_acquire_conf"),
-                                    anchor_settle_px=(map_cfg.get("anchor_settle_px")
-                                        if (_settle_nodes is None or node in _settle_nodes) else None),
-                                    anchor_settle_max=float(map_cfg.get("anchor_settle_max_secs", 2.0)),
                                     collect_misses=bool(map_cfg.get("collect_miss_frames", False)),
                                     fail_dump_interval=float(map_cfg.get("yolo_fail_dump_interval", 3.0)),
                                     combined=_combined)
