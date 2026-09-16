@@ -357,7 +357,7 @@ def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, ro
         if cfg.get("goby_conf") is not None:
             _cc[1] = float(cfg["goby_conf"])
         dets = mob_detect.yolo_boxes(m, f, roi=roi, conf=conf, imgsz=int(cfg.get("mob_imgsz", 640)),
-                                     class_conf=_cc or None)
+                                     class_conf=_cc or None, with_class=True)
         best, mode, thr = {}, "mob_yolo", conf
     else:
         tmpls, mode = fish.templates_for(cfg, scale=scale)
@@ -372,9 +372,18 @@ def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, ro
     dbg = f.copy()
     if roi:
         cv2.rectangle(dbg, (roi[0], roi[1]), (roi[2], roi[3]), (0, 255, 255), 2)
-    for s, x, y, w, h in dets:
+    for d in dets:                                        # red mob boxes + big class/conf label
+        s, x, y, w, h = d[:5]
+        cls = d[5] if len(d) > 5 else ""
         cv2.rectangle(dbg, (x, y), (x + w, y + h), (0, 0, 255), 2)
-        cv2.putText(dbg, f"{s:.2f}", (x, max(y - 3, 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        # font 1.0/thick 2 so it survives the ~0.46x downscale to the 900px preview; dark bg for
+        # contrast on the busy underwater scene; class code makes a false box (e.g. FH on scenery) obvious.
+        _c = {"fishhouse": "FH", "goby": "GB"}.get(cls, (cls[:2] or "?").upper())
+        _lbl = f"{_c} {s:.2f}"
+        (_tw, _th), _ = cv2.getTextSize(_lbl, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
+        _ly = max(y, _th + 8)
+        cv2.rectangle(dbg, (x, _ly - _th - 8), (x + _tw + 8, _ly), (0, 0, 0), -1)
+        cv2.putText(dbg, _lbl, (x + 4, _ly - 5), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
     player_pos, anchor_mode = None, cfg.get("anchor", "hpbar")
     if anchor_mode == "yolo_player" and cfg.get("detector") == "mob_yolo":
         try:                                                 # class-2 player box = GREEN
