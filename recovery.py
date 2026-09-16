@@ -2002,7 +2002,7 @@ def approach_shoot(seconds, detect_fn, anchor,
     best_absdx = None       # closest we've gotten to the current target (net-progress stall)
     no_improve = 0
     last_player = None      # sticky anchor: lock onto the bar nearest last frame's player
-    prev_pfeet = None       # last beat's player feet-y -> detect an unsettled (jumping) anchor
+    _pfeet_hist = []        # recent player feet-y reads -> detect an unsettled (still-sinking) anchor
     _lost = 0               # consecutive beats the anchor found NOTHING -> re-seat past lost_limit
     # Miss-frame collection is OFF by default (set collect_miss_frames in the map to gather a
     # retrain batch). When off, skip the yolo-fail dump entirely -- no anchor resolution, no writes.
@@ -2126,19 +2126,21 @@ def approach_shoot(seconds, detect_fn, anchor,
             if getattr(anchor, "which", None):            # composite fell past the primary anchor
                 log(f"anchor fallback #{anchor.which} (nametag) located player at {p}")
             px, pfeet = p
-            # ANCHOR-SETTLE GATE: on arrival (sink) or a knock the foot estimate JUMPS, and
-            # same-platform membership flips -- her real mob (now dy just over the band) drops out
-            # while a mob on the platform above/below wrongly reads in-band. Acquiring a lock on that
-            # unsettled read sends her the wrong way (P2 "goes left" to a P1 mob) and the empty reads
-            # skip the platform (P1/P6). So when NO lock is held yet, don't target until pfeet is
-            # stable across two reads -- skip the beat (which also freezes the deplete counter). A
-            # HELD lock rides its own grace and is not gated. Disabled when anchor_settle_px is unset.
+            # ANCHOR-SETTLE GATE: on arrival she SINKS onto the platform and the foot estimate climbs
+            # (e.g. 472->497->671->...->715); a knock jumps it too. On such an unsettled read same-
+            # platform membership flips (her real mob drops just out of band, a mob on the platform
+            # above/below reads in-band) and she'd lock the wrong one and fire it IN THE AIR mid-sink
+            # (P2 "hits left"), while the empty reads skip the platform (P1/P6). So when NO lock is
+            # held yet, wait until the last 3 feet-y reads span <= anchor_settle_px (she's grounded)
+            # before targeting -- skip the beat, which also freezes the deplete counter. A single
+            # 2-read check let a mid-sink plateau slip through; the window needs true rest. A HELD
+            # lock rides its own grace and is not gated. Disabled when anchor_settle_px is unset.
+            _pfeet_hist = (_pfeet_hist + [pfeet])[-3:]
             if anchor_settle_px and pri_lock_pos is None and (
-                    prev_pfeet is None or abs(pfeet - prev_pfeet) > anchor_settle_px):
+                    len(_pfeet_hist) < 3 or max(_pfeet_hist) - min(_pfeet_hist) > anchor_settle_px):
                 if dbg_on():
-                    dbg(f"[app {label}] anchor unsettled pfeet {prev_pfeet}->{pfeet} -> wait (no lock)")
-                stop_walk(); prev_pfeet = pfeet; time.sleep(0.05); continue
-            prev_pfeet = pfeet
+                    dbg(f"[app {label}] anchor unsettled pfeet~{_pfeet_hist} -> wait (no lock)")
+                stop_walk(); time.sleep(0.05); continue
             # Scan the FULL platform-width strip at the player's y-band (YOLO is cheap on the
             # whole frame). Catches far mobs (P6's rightmost fishhouse) without any patrol.
             H, W = f.shape[:2]
