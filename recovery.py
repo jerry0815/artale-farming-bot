@@ -1984,7 +1984,7 @@ def approach_shoot(seconds, detect_fn, anchor,
                    continuous_attack=False, attack_dwell=0.25, face_deadzone=15,
                    face_settle=0.2, fire_stall_limit=5, lock_switch_px=70,
                    low_conf_range=120, priority_acquire_conf=None, anchor_settle_px=None,
-                   combined=None,
+                   anchor_settle_max=2.0, combined=None,
                    lost_limit=12, collect_misses=False, fail_dump_interval=3.0):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
@@ -2003,6 +2003,7 @@ def approach_shoot(seconds, detect_fn, anchor,
     no_improve = 0
     last_player = None      # sticky anchor: lock onto the bar nearest last frame's player
     _pfeet_hist = []        # recent player feet-y reads -> detect an unsettled (still-sinking) anchor
+    _settle_since = None    # when the anchor-settle wait began -> cap it (crowded jitter never settles)
     _lost = 0               # consecutive beats the anchor found NOTHING -> re-seat past lost_limit
     # Miss-frame collection is OFF by default (set collect_miss_frames in the map to gather a
     # retrain batch). When off, skip the yolo-fail dump entirely -- no anchor resolution, no writes.
@@ -2136,11 +2137,21 @@ def approach_shoot(seconds, detect_fn, anchor,
             # 2-read check let a mid-sink plateau slip through; the window needs true rest. A HELD
             # lock rides its own grace and is not gated. Disabled when anchor_settle_px is unset.
             _pfeet_hist = (_pfeet_hist + [pfeet])[-3:]
-            if anchor_settle_px and pri_lock_pos is None and (
-                    len(_pfeet_hist) < 3 or max(_pfeet_hist) - min(_pfeet_hist) > anchor_settle_px):
+            _unsettled = (anchor_settle_px and pri_lock_pos is None and
+                          (len(_pfeet_hist) < 3 or max(_pfeet_hist) - min(_pfeet_hist) > anchor_settle_px))
+            if _unsettled:
+                if _settle_since is None:
+                    _settle_since = time.time()
+                if time.time() - _settle_since <= anchor_settle_max:   # inside the settle window -> wait
+                    if dbg_on():
+                        dbg(f"[app {label}] anchor unsettled pfeet~{_pfeet_hist} -> wait (no lock)")
+                    stop_walk(); time.sleep(0.05); continue
+                # CAP: a clean arrival sink settles fast; if it's still jumping after this long the
+                # anchor is just noisy (crowded platform), not sinking -> stop waiting and target anyway.
                 if dbg_on():
-                    dbg(f"[app {label}] anchor unsettled pfeet~{_pfeet_hist} -> wait (no lock)")
-                stop_walk(); time.sleep(0.05); continue
+                    dbg(f"[app {label}] anchor unsettled >{anchor_settle_max}s (crowded jitter) -> proceed")
+            else:
+                _settle_since = None
             # Scan the FULL platform-width strip at the player's y-band (YOLO is cheap on the
             # whole frame). Catches far mobs (P6's rightmost fishhouse) without any patrol.
             H, W = f.shape[:2]
@@ -3135,6 +3146,7 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     low_conf_range=int(map_cfg.get("low_conf_range", 120)),
                                     priority_acquire_conf=map_cfg.get("priority_acquire_conf"),
                                     anchor_settle_px=map_cfg.get("anchor_settle_px"),
+                                    anchor_settle_max=float(map_cfg.get("anchor_settle_max_secs", 2.0)),
                                     collect_misses=bool(map_cfg.get("collect_miss_frames", False)),
                                     fail_dump_interval=float(map_cfg.get("yolo_fail_dump_interval", 3.0)),
                                     combined=_combined)
