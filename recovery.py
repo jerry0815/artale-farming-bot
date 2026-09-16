@@ -3022,6 +3022,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
     # x-only (no jump) instead of a full swim_to that fights vertically off the floor.
     _x_align = set(map_cfg.get("x_align_nodes", []))
     _no_fall = set(map_cfg.get("no_fall_nodes", []))   # skip the minimap fall check on these nodes
+    _asn = map_cfg.get("anchor_settle_nodes")          # limit the anchor-settle gate to these nodes;
+    _settle_nodes = set(_asn) if _asn is not None else None   # None -> gate every node (back-compat)
     #                                                    (e.g. P3, where a bottom-edge phantom keeps
     #                                                    false-triggering re-seats)
     _arrive_retries = int(map_cfg.get("arrive_retries", 1))   # extra swim attempts if she didn't seat
@@ -3145,7 +3147,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     lock_switch_px=int(map_cfg.get("lock_switch_px", 70)),
                                     low_conf_range=int(map_cfg.get("low_conf_range", 120)),
                                     priority_acquire_conf=map_cfg.get("priority_acquire_conf"),
-                                    anchor_settle_px=map_cfg.get("anchor_settle_px"),
+                                    anchor_settle_px=(map_cfg.get("anchor_settle_px")
+                                        if (_settle_nodes is None or node in _settle_nodes) else None),
                                     anchor_settle_max=float(map_cfg.get("anchor_settle_max_secs", 2.0)),
                                     collect_misses=bool(map_cfg.get("collect_miss_frames", False)),
                                     fail_dump_interval=float(map_cfg.get("yolo_fail_dump_interval", 3.0)),
