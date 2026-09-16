@@ -21,7 +21,7 @@
   "rotation": "sweep",
   "reset_node": "RIGHT",
   "detector": "mob_yolo",
-  "shared_detect": false,
+  "shared_detect": true,
   "shared_detect_note": "ONE yolo_detect per approach beat gives both mobs + the player box (pushed to the anchor), instead of a separate mob pass + anchor pass -- ~halves hot-loop YOLO cost. Only applies with detector=mob_yolo + anchor=yolo_player. Set false to revert to the two-pass path.",
   "mob_model": "models/mob_yolo.pt",
   "mob_conf": 0.5,
@@ -236,7 +236,8 @@
     "P4": 8
   },
   "node_tol_y_up_note": "P4 only: default tol_y_up=16 lets her 'arrive' anywhere across the ~22px stacked band (so the lift often didn't take). 8 tightens the ABOVE band so she must actually rise near the lifted target to seat -- makes the lift consistent. Too tight -> she bobs; raise if she can't seat.",
-  "node_arrive_jumps": {},
+  "node_arrive_jumps": { "P4": 2 },
+  "node_arrive_jumps_note": "extra straight-up hops right after seating, to firm a landing on a narrow/pin platform. P4=2: P5->P4 she reaches P4's y but doesn't stick (stacked pin below P3) and slides back to P5 in a re-seat loop; 2 hops plant her on P4. Straight up (not the P4->P3 stacked drift), so she lands back on P4. Lower to 1 if she overshoots toward P3; raise if she still falls back to P5.",
   "platform_half": 60,
   "node_bounds": {
     "P6": [
