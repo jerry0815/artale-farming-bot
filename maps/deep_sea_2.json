@@ -44,7 +44,10 @@
   "fire_stall_limit": 4,
   "continuous_note": "HOLD the attack key while in range (skill repeats on hold) and only release on a move/deplete/fell -- keeps her attacking through re-detects instead of the choppy burst gaps. attack_dwell_secs = pause between re-decisions while held.",
   "attack_key": "x",
-  "attack_keys": { "fishhouse": "x", "goby": "x" },
+  "attack_keys": {
+    "fishhouse": "x",
+    "goby": "x"
+  },
   "priority_class": "fishhouse",
   "priority_hold_hits": 1,
   "priority_lock_grace": 2,
@@ -55,22 +58,44 @@
   "approach_ease_margin": 0,
   "approach_ease_note": "0 = disable the tap-and-stop ease-in (it caused small stepping near a mob). With the wide attack_range 190 there's no tight target to overshoot, so walk continuously straight into range. Raise it only if a tighter range is reintroduced and she coasts past.",
   "same_platform_band": 75,
-  "node_same_platform_band": { "P1": 85 },
+  "node_same_platform_band": {
+    "P1": 85
+  },
   "node_same_platform_band_note": "per-node override of same_platform_band. P1=85: on P1 she sometimes stands HIGHER than the fishhouse, so its feet read ~60-76px below hers (vs ~7 elsewhere); the global 75 skipped those (measured: a real 60-76 cluster on P1). 85 keeps P1's own mobs through that, and still sits ~at the P2 gap (~81) -- any occasional P2 leak is harmless now (node_bounds edge-guard + distance-gate stop her walking off / chasing it). Other nodes stay at the global 75.",
   "same_platform_band_note": "screen-px |mob_feet - player_feet| to count a mob as on THIS platform. Must thread two failure modes: below ~81 (the P1<->P2 screen gap -- 85 leaked, she locked a P2 fishhouse 81px below her while on P1) and ABOVE ~70 (while she's still SINKING onto a node the HP-bar anchor reads her feet ~90px high, so P1's own fishhouse looks ~69-70px away -- 60 rejected it and she depleted+skipped P1 during the ~0.7s settle; once seated the delta is ~9px). 75 sits between: >70 keeps P1's mob through the settle, <81 still rejects the P2 cross-platform mob. VERIFY LIVE -- raise toward 80 if P1 still skips during settle; lower toward 70 if a P2 mob leaks onto P1. Root cause is the settle-transient foot read; a post-arrival settle delay before counting depletion is the more robust fix if the band can't cover both.",
+  "anchor_settle_px": 40,
+  "anchor_settle_note": "while NO lock is held, skip targeting on any beat where the player's feet-y jumped more than this from the last beat -- the anchor is mid-settle (arrival sink) or knocked, and its feet read is unreliable, which flips same-platform membership (real mob drops out, a mob on the platform above/below reads in-band). Measured on P2 arrival: pfeet jumped 485->623->689->713, so >40 gates the big sink jumps and she only locks once stable (~4th read). Fixes P2 'goes left to a P1 mob on arrival' and the P1/P6 arrival skips (the skipped beats also freeze the deplete counter). Raise if she's slow to start farming after landing; lower if she still locks a wrong-platform mob on arrival. Remove to disable.",
   "low_conf_range": 120,
   "priority_acquire_conf": 0.6,
   "conf_gate_note": "Distance-gated confidence: a fishhouse FARTHER than low_conf_range(120 screen px) from the player must clear priority_acquire_conf(0.6) or it's ignored; CLOSER ones are kept at the fishhouse_conf(0.3) floor (she's point-blank killing it, VFX dims it). Stops locking/firing at weak far phantoms (the P1 wrong-direction bug: a 0.59 fishhouse 155px away beat the real 0.97 one). Raise low_conf_range or lower priority_acquire_conf if a real far fishhouse gets skipped (real ones read ~0.9+); remove priority_acquire_conf to disable.",
   "approach_step": 0,
   "deplete_reads": 4,
   "stall_limit": 8,
-  "buff_keys": [
-    "d"
-  ],
   "buff_groups": [
-    { "keys": ["d"], "interval_secs": 300 },
-    { "keys": ["3"], "interval_secs": 300 },
-    { "keys": ["g"], "interval_secs": 900 }
+    {
+      "keys": [
+        "d"
+      ],
+      "interval_secs": 300
+    },
+    {
+      "keys": [
+        "3"
+      ],
+      "interval_secs": 300
+    },
+    {
+      "keys": [
+        "g"
+      ],
+      "interval_secs": 900
+    },
+    {
+      "keys": [
+        "1"
+      ],
+      "interval_secs": 300
+    }
   ],
   "player": {
     "foot_offset": 135
@@ -210,15 +235,32 @@
   },
   "node_tol_y_up_note": "P4 only: default tol_y_up=16 lets her 'arrive' anywhere across the ~22px stacked band (so the lift often didn't take). 8 tightens the ABOVE band so she must actually rise near the lifted target to seat -- makes the lift consistent. Too tight -> she bobs; raise if she can't seat.",
   "node_arrive_jumps": {},
-  "buff_interval_secs": 300,
   "platform_half": 60,
   "node_bounds": {
-    "P6": [56, 142],
-    "P5": [89, 102],
-    "P4": [71, 92],
-    "P3": [71, 92],
-    "P2": [123, 154],
-    "P1": [67, 90]
+    "P6": [
+      56,
+      142
+    ],
+    "P5": [
+      89,
+      102
+    ],
+    "P4": [
+      71,
+      92
+    ],
+    "P3": [
+      71,
+      92
+    ],
+    "P2": [
+      123,
+      154
+    ],
+    "P1": [
+      67,
+      90
+    ]
   },
   "node_bounds_note": "[left_x, right_x] minimap-x walk limits per platform (the approach edge-guard fires here -> she fires in place at the edge instead of walking off). Seeded from routes/deep_sea_2.capture.jsonl (main x-cluster per y-band, 2026-08-31 play). Without these every node used center+-platform_half(60), whose left bound for P2 (center x139) was 79 -- below P3's own x(83) -- so she walked LEFT off P2 chasing a locked off-platform fishhouse and fell to P3 in a loop. P2 left nudged to 123 (edge ~121 +2 for the ~12px/beat walk overshoot); it's the fall-critical one -- raise it if she still drops, lower it if she can't reach P2's left mobs. Others are conservative (where she was seen standing safely); a too-tight bound just makes her fire in place at the edge. VERIFY LIVE that each covers the real platform.",
   "map_box": [
@@ -236,7 +278,10 @@
   "nametag_fallback_disabled_note": "PURE HP BAR: nametag/title fallback removed on purpose -- it phantomed onto the nearby player (UwUsagi) during crowded P3/P6 bursts. The YOLO HP-bar class is now the ONLY anchor; a miss rides stale_grace + hold-last-position (she's rooted while attacking, when the bar is buried under damage numbers) and a sustained loss hits the LOST re-seat. To re-enable, restore a nametag_fallback block: {nametag_template, nametag_feet_offset, nametag_accept, title_template, title_feet_offset, title_accept}.",
   "free_market_escape": true,
   "free_market_after_secs": 20,
-  "free_market_button_xy": [1452, 1092],
+  "free_market_button_xy": [
+    1452,
+    1092
+  ],
   "free_market_note": "If another player enters and the alarm isn't silenced ('m') within free_market_after_secs, click the 自由市場 (Free Market) button to leave the map. button_xy = its center in the 1942x1136 capture frame; the live click point is the window box + this. Re-grab if the game resolution changes.",
   "collect_miss_frames": false,
   "collect_miss_frames_note": "OFF: don't dump player-miss frames to disk. The retrain (recovered 52% of held-out occlusion misses) is done, so collection is disabled to stop writing ~3MB frames every few seconds. Set true (optionally with yolo_fail_dump_interval, default 3.0s) to gather another batch into datasets/player_yolo_fail/ (+ LOST frames into datasets/player_misses/).",

@@ -1983,7 +1983,8 @@ def approach_shoot(seconds, detect_fn, anchor,
                    priority_hold_hits=0, priority_lock_grace=0, fall_confirm=2, ease_margin=45,
                    continuous_attack=False, attack_dwell=0.25, face_deadzone=15,
                    face_settle=0.2, fire_stall_limit=5, lock_switch_px=70,
-                   low_conf_range=120, priority_acquire_conf=None, combined=None,
+                   low_conf_range=120, priority_acquire_conf=None, anchor_settle_px=None,
+                   combined=None,
                    lost_limit=12, collect_misses=False, fail_dump_interval=3.0):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
@@ -2001,6 +2002,7 @@ def approach_shoot(seconds, detect_fn, anchor,
     best_absdx = None       # closest we've gotten to the current target (net-progress stall)
     no_improve = 0
     last_player = None      # sticky anchor: lock onto the bar nearest last frame's player
+    prev_pfeet = None       # last beat's player feet-y -> detect an unsettled (jumping) anchor
     _lost = 0               # consecutive beats the anchor found NOTHING -> re-seat past lost_limit
     # Miss-frame collection is OFF by default (set collect_miss_frames in the map to gather a
     # retrain batch). When off, skip the yolo-fail dump entirely -- no anchor resolution, no writes.
@@ -2124,6 +2126,19 @@ def approach_shoot(seconds, detect_fn, anchor,
             if getattr(anchor, "which", None):            # composite fell past the primary anchor
                 log(f"anchor fallback #{anchor.which} (nametag) located player at {p}")
             px, pfeet = p
+            # ANCHOR-SETTLE GATE: on arrival (sink) or a knock the foot estimate JUMPS, and
+            # same-platform membership flips -- her real mob (now dy just over the band) drops out
+            # while a mob on the platform above/below wrongly reads in-band. Acquiring a lock on that
+            # unsettled read sends her the wrong way (P2 "goes left" to a P1 mob) and the empty reads
+            # skip the platform (P1/P6). So when NO lock is held yet, don't target until pfeet is
+            # stable across two reads -- skip the beat (which also freezes the deplete counter). A
+            # HELD lock rides its own grace and is not gated. Disabled when anchor_settle_px is unset.
+            if anchor_settle_px and pri_lock_pos is None and (
+                    prev_pfeet is None or abs(pfeet - prev_pfeet) > anchor_settle_px):
+                if dbg_on():
+                    dbg(f"[app {label}] anchor unsettled pfeet {prev_pfeet}->{pfeet} -> wait (no lock)")
+                stop_walk(); prev_pfeet = pfeet; time.sleep(0.05); continue
+            prev_pfeet = pfeet
             # Scan the FULL platform-width strip at the player's y-band (YOLO is cheap on the
             # whole frame). Catches far mobs (P6's rightmost fishhouse) without any patrol.
             H, W = f.shape[:2]
@@ -3117,6 +3132,7 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                                     lock_switch_px=int(map_cfg.get("lock_switch_px", 70)),
                                     low_conf_range=int(map_cfg.get("low_conf_range", 120)),
                                     priority_acquire_conf=map_cfg.get("priority_acquire_conf"),
+                                    anchor_settle_px=map_cfg.get("anchor_settle_px"),
                                     collect_misses=bool(map_cfg.get("collect_miss_frames", False)),
                                     fail_dump_interval=float(map_cfg.get("yolo_fail_dump_interval", 3.0)),
                                     combined=_combined)
