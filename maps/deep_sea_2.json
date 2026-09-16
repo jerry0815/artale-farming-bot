@@ -25,7 +25,8 @@
   "shared_detect_note": "ONE yolo_detect per approach beat gives both mobs + the player box (pushed to the anchor), instead of a separate mob pass + anchor pass -- ~halves hot-loop YOLO cost. Only applies with detector=mob_yolo + anchor=yolo_player. Set false to revert to the two-pass path.",
   "mob_model": "models/mob_yolo.pt",
   "mob_conf": 0.5,
-  "mob_imgsz": 960,
+  "mob_imgsz": 640,
+  "mob_imgsz_note": "YOLO inference size -- the main latency driver. 640 is the original low-latency value; was bumped to 960 for small-goby recall but that ~doubled per-pass cost and felt too slow. Back to 640 (with shared_detect on, one 640 pass/beat). Raise toward 768/960 if goby recall suffers; that's the speed<->recall knob.",
   "mob_template_dir": "assets/mob/deep_sea_2",
   "mob_template_limit": 6,
   "fish_species": [
