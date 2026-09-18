@@ -1951,7 +1951,8 @@ def approach_shoot(seconds, detect_fn, anchor,
                    priority_hold_hits=0, priority_lock_grace=0, fall_confirm=2, ease_margin=45,
                    continuous_attack=False, attack_dwell=0.25, face_deadzone=15,
                    face_settle=0.2, fire_stall_limit=5, lock_switch_px=70, combined=None,
-                   lost_limit=12, collect_misses=False, fail_dump_interval=3.0):
+                   lost_limit=12, collect_misses=False, fail_dump_interval=3.0,
+                   band_up=None, band_down=None):
     """Close-range farming for a beat: repeatedly locate the player (HP-bar anchor) and
     the nearest SAME-PLATFORM mob (its box-bottom near the player's feet), walk toward it
     (facing it) and attack; fire in place once within `attack_range` px. Returns DEPLETED
@@ -1962,6 +1963,11 @@ def approach_shoot(seconds, detect_fn, anchor,
     frame, so 'which way to walk' is their x difference. `band` = how close a mob's feet
     must be to the player's feet (px) to count as the same platform."""
     import player as _player
+    # Asymmetric same-platform band: default both directions to the symmetric `band`, but a node
+    # can tighten one side (e.g. P2 caps `band_up` so mobs on the platform ABOVE -- P1 -- aren't
+    # picked up). `band_up` = max px a mob's feet may sit ABOVE her feet; `band_down` = below.
+    band_up = band if band_up is None else band_up
+    band_down = band if band_down is None else band_down
     t0 = time.time()
     empty_reads = 0
     nonempty_streak = 0     # consecutive frames WITH a same-platform mob (debounces deplete reset)
@@ -2092,15 +2098,17 @@ def approach_shoot(seconds, detect_fn, anchor,
             H, W = f.shape[:2]
             # scan a strip that spans the full same-platform band both ways (+margins), so a
             # wider band actually reaches mobs above AND below her feet.
-            strip = (0, max(0, pfeet - band - 40), W, min(H, pfeet + band // 2 + 40))
+            strip = (0, max(0, pfeet - max(band, band_up) - 40), W, min(H, pfeet + band_down // 2 + 40))
 
             def same_platform(dets):
                 # A detection is (score,x,y,w,h) or (score,x,y,w,h,cls_name) -> carry the class
                 # (or None) through so the attack key can be chosen per mob. `d[:5]` handles both.
+                # dy<0 = mob ABOVE her feet (upper platform); gate each side by its own band.
                 out = []
                 for d in dets:
                     _s, mx, my, mw, mh = d[:5]
-                    if abs((my + mh) - pfeet) <= band:
+                    dy = (my + mh) - pfeet
+                    if -band_up <= dy <= band_down:
                         out.append((mx + mw // 2, my + mh, d[5] if len(d) > 5 else None))
                 return out
 
@@ -2787,6 +2795,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
         import player as _p
         _arange = int(map_cfg.get("attack_range", 110))
         _aband = int(map_cfg.get("same_platform_band", 70))
+        _band_up = map_cfg.get("node_band_up", {})     # per-node cap on mobs ABOVE her (P2: drop P1)
+        _band_down = map_cfg.get("node_band_down", {})  # per-node cap on mobs BELOW her
         _astep = float(map_cfg.get("approach_step", 0.14))
         _adeplete = int(map_cfg.get("deplete_reads", 4))
         _astall = int(map_cfg.get("stall_limit", 8))
@@ -3064,6 +3074,7 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                 _ncx = centers[node][0]                    # keep her on THIS platform (minimap)
                 ok = approach_shoot(_r.uniform(*stand_secs), detect_fn, node_anchor,
                                     attack_range=_arange, band=_aband, step=_astep,
+                                    band_up=_band_up.get(node), band_down=_band_down.get(node),
                                     attack_key=attack_key, deplete_reads=_adeplete,
                                     stall_limit=_astall, label=node,
                                     mm_bounds=(_ncx - _phalf, _ncx + _phalf),

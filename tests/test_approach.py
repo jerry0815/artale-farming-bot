@@ -50,6 +50,31 @@ def test_off_platform_mob_ignored_then_depleted(monkeypatch):
                                    deplete_reads=2) is recovery.DEPLETED
 
 
+def test_band_up_excludes_mob_on_platform_above(monkeypatch):
+    # A mob 60px ABOVE her feet (bottom=440 vs feet 500) -- e.g. a P1 mob while she farms P2.
+    # The symmetric band (85) would admit it; band_up=35 must drop it -> platform reads empty.
+    mob = [(0.9, 780, 400, 40, 40)]                  # bottom=440 -> dy=-60
+    df, _, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 0])
+    assert recovery.approach_shoot(10, df, anc, band=85, band_up=35, verbose=False,
+                                   deplete_reads=2) is recovery.DEPLETED
+
+
+def test_band_up_default_keeps_mob_above(monkeypatch):
+    # Same mob, but WITHOUT band_up: the symmetric band (85) still admits it (dy=-60) -> not empty.
+    mob = [(0.9, 780, 400, 40, 40)]                  # bottom=440 -> dy=-60, cx=800 (in range)
+    df, _, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 999])
+    assert recovery.approach_shoot(10, df, anc, band=85, verbose=False,
+                                   deplete_reads=2) is True   # engaged, never DEPLETED
+
+
+def test_band_up_keeps_mob_below_via_band_down_default(monkeypatch):
+    # band_up tightens only the TOP; a mob BELOW her (dy=+60) still counts (band_down defaults to band).
+    mob = [(0.9, 780, 560, 40, 0)]                   # bottom=560 -> dy=+60, cx=800 (in range)
+    df, _, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 999])
+    assert recovery.approach_shoot(10, df, anc, band=85, band_up=35, verbose=False,
+                                   deplete_reads=2) is True   # below-band mob kept -> not DEPLETED
+
+
 class _DetectSeq:                                    # detector returning a scripted per-frame list
     def __init__(self, seq):
         self.seq, self.i = list(seq), 0
