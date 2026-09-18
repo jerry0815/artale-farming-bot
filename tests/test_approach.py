@@ -1,6 +1,6 @@
 """approach_shoot decision logic (fakes for capture/player/fish/keys; no game)."""
 import numpy as np
-import recovery
+import core
 import player
 from pynput.keyboard import Key
 
@@ -14,17 +14,17 @@ class _Anchor:                                        # stand-in for a player an
 
 
 def _setup(monkeypatch, mobs, ptuple, clock_vals):
-    monkeypatch.setattr(recovery, "capture", lambda: np.zeros((10, 10, 3), np.uint8))
-    monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
-    monkeypatch.setattr(recovery, "lie_check_full_tick", lambda *a, **k: None)
-    monkeypatch.setattr(recovery, "is_focused", lambda: True)   # tests run without the game focused
-    monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
+    monkeypatch.setattr(core, "capture", lambda: np.zeros((10, 10, 3), np.uint8))
+    monkeypatch.setattr(core, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(core, "lie_check_full_tick", lambda *a, **k: None)
+    monkeypatch.setattr(core, "is_focused", lambda: True)   # tests run without the game focused
+    monkeypatch.setattr(core.kb, "pause", False, raising=False)
     it = iter(clock_vals)
-    monkeypatch.setattr(recovery.time, "time", lambda: next(it, 10_000))
-    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
+    monkeypatch.setattr(core.time, "time", lambda: next(it, 10_000))
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
     pressed = []
-    monkeypatch.setattr(recovery.kb, "safe_press", lambda k: pressed.append(k))
-    monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(core.kb, "safe_press", lambda k: pressed.append(k))
+    monkeypatch.setattr(core.kb, "safe_release", lambda k: None)
     detect_fn = lambda f, roi: mobs
     return detect_fn, pressed, _Anchor(ptuple)
 
@@ -32,22 +32,47 @@ def _setup(monkeypatch, mobs, ptuple, clock_vals):
 def test_depleted_when_no_same_platform_mob(monkeypatch):
     # no mobs -> needs deplete_reads consecutive empty reads before DEPLETED (debounced)
     df, _, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0, 0, 0])
-    assert recovery.approach_shoot(10, df, anc, deplete_reads=2, verbose=False) is recovery.DEPLETED
+    assert core.approach_shoot(10, df, anc, deplete_reads=2, verbose=False) is core.DEPLETED
 
 
 def test_not_depleted_on_single_empty_frame(monkeypatch):
     # a single empty frame must NOT declare depleted (flaky detection guard)
     df, _, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0, 0, 999])
     # only one loop iteration (one empty read) then time runs out -> True, not DEPLETED
-    assert recovery.approach_shoot(10, df, anc, deplete_reads=4, verbose=False) is True
+    assert core.approach_shoot(10, df, anc, deplete_reads=4, verbose=False) is True
 
 
 def test_off_platform_mob_ignored_then_depleted(monkeypatch):
     # a mob far below the player's feet (different platform) -> not same-platform
     mob = [(0.7, 1200, 900, 60, 40)]                 # bottom=940 vs feet 500 -> |440|>band
     df, _, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 0])
-    assert recovery.approach_shoot(10, df, anc, band=70, verbose=False,
-                                   deplete_reads=2) is recovery.DEPLETED
+    assert core.approach_shoot(10, df, anc, band=70, verbose=False,
+                                   deplete_reads=2) is core.DEPLETED
+
+
+def test_band_up_excludes_mob_on_platform_above(monkeypatch):
+    # A mob 60px ABOVE her feet (bottom=440 vs feet 500) -- e.g. a P1 mob while she farms P2.
+    # The symmetric band (85) would admit it; band_up=35 must drop it -> platform reads empty.
+    mob = [(0.9, 780, 400, 40, 40)]                  # bottom=440 -> dy=-60
+    df, _, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 0])
+    assert core.approach_shoot(10, df, anc, band=85, band_up=35, verbose=False,
+                                   deplete_reads=2) is core.DEPLETED
+
+
+def test_band_up_default_keeps_mob_above(monkeypatch):
+    # Same mob, but WITHOUT band_up: the symmetric band (85) still admits it (dy=-60) -> not empty.
+    mob = [(0.9, 780, 400, 40, 40)]                  # bottom=440 -> dy=-60, cx=800 (in range)
+    df, _, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 999])
+    assert core.approach_shoot(10, df, anc, band=85, verbose=False,
+                                   deplete_reads=2) is True   # engaged, never DEPLETED
+
+
+def test_band_up_keeps_mob_below_via_band_down_default(monkeypatch):
+    # band_up tightens only the TOP; a mob BELOW her (dy=+60) still counts (band_down defaults to band).
+    mob = [(0.9, 780, 560, 40, 0)]                   # bottom=560 -> dy=+60, cx=800 (in range)
+    df, _, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 999])
+    assert core.approach_shoot(10, df, anc, band=85, band_up=35, verbose=False,
+                                   deplete_reads=2) is True   # below-band mob kept -> not DEPLETED
 
 
 class _DetectSeq:                                    # detector returning a scripted per-frame list
@@ -67,8 +92,8 @@ def test_lone_flaky_detection_does_not_reset_deplete(monkeypatch):
     df, _, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0] * 12)
     df = _DetectSeq([[], [mob], [], []])             # empty, ONE mob, empty, empty
     # empty(1) -> mob(streak=1, no reset) -> empty(2) -> empty(3) -> DEPLETED at reads=3
-    assert recovery.approach_shoot(10, df, anc, deplete_reads=3, attack_range=110,
-                                   verbose=False) is recovery.DEPLETED
+    assert core.approach_shoot(10, df, anc, deplete_reads=3, attack_range=110,
+                                   verbose=False) is core.DEPLETED
 
 
 def test_sustained_detection_resets_deplete(monkeypatch):
@@ -77,21 +102,21 @@ def test_sustained_detection_resets_deplete(monkeypatch):
     df, _, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0, 0, 0, 0, 999])
     df = _DetectSeq([[], [mob], [mob], []])          # empty(1) -> mob -> mob(streak=2 -> reset)
     # after reset only one trailing empty (reads=1 < 3) then time runs out -> True, not DEPLETED
-    assert recovery.approach_shoot(10, df, anc, deplete_reads=3, attack_range=110,
-                                   verbose=False) is not recovery.DEPLETED
+    assert core.approach_shoot(10, df, anc, deplete_reads=3, attack_range=110,
+                                   verbose=False) is not core.DEPLETED
 
 
 def test_walks_right_toward_far_mob(monkeypatch):
     mob = [(0.7, 1200, 480, 60, 40)]                 # cx=1230, bottom=520 ~ feet 500 -> same
     df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0])
-    recovery.approach_shoot(10, df, anc, attack_range=110, verbose=False)
+    core.approach_shoot(10, df, anc, attack_range=110, verbose=False)
     assert Key.right in pressed and 'c' not in pressed   # walk only (attack roots her)
 
 
 def test_walks_left_toward_far_mob(monkeypatch):
     mob = [(0.7, 100, 480, 60, 40)]                  # cx=130, far left of player 800
     df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0])
-    recovery.approach_shoot(10, df, anc, attack_range=110, verbose=False)
+    core.approach_shoot(10, df, anc, attack_range=110, verbose=False)
     assert Key.left in pressed and 'c' not in pressed    # walk only, no attack mid-approach
 
 
@@ -100,14 +125,14 @@ def test_ease_in_nudges_toward_near_target(monkeypatch):
     # direction, no fire) via the tap-release ease-in path instead of coasting past.
     mob = [(0.9, 910, 490, 40, 30)]                  # cx=930, dx=130: out of range 110, within +45
     df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0])
-    recovery.approach_shoot(10, df, anc, attack_range=110, ease_margin=45, verbose=False)
+    core.approach_shoot(10, df, anc, attack_range=110, ease_margin=45, verbose=False)
     assert Key.right in pressed and 'c' not in pressed   # eased toward it, did not fire
 
 
 def test_attacks_in_place_when_in_range(monkeypatch):
     mob = [(0.7, 800, 480, 60, 40)]                  # cx=830, dx=30 <= range 110
     df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0])
-    recovery.approach_shoot(10, df, anc, attack_range=110, verbose=False)
+    core.approach_shoot(10, df, anc, attack_range=110, verbose=False)
     assert 'c' in pressed                            # fires
 
 
@@ -116,7 +141,7 @@ def test_continuous_attack_holds_key_across_beats(monkeypatch):
     # not re-pressed 3x/beat like the burst. (safe_press only fires on a key change.)
     mob = [(0.9, 810, 490, 40, 30)]                   # in range dx~30
     df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 0, 999])
-    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+    core.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
                             continuous_attack=True, verbose=False)
     assert pressed.count("x") == 1                    # held across 2 beats, not 6 burst presses
 
@@ -128,7 +153,7 @@ def test_continuous_attack_reface_when_mob_switches_sides(monkeypatch):
     left = (0.9, 660, 490, 40, 30)                    # cx=680, dx~-120 (left)
     df, pressed, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0] * 8)
     df = _DetectSeq([[right], [left]])
-    recovery.approach_shoot(10, df, anc, attack_range=190, attack_key="x",
+    core.approach_shoot(10, df, anc, attack_range=190, attack_key="x",
                             continuous_attack=True, face_deadzone=15, verbose=False)
     assert Key.right in pressed and Key.left in pressed   # faced right, then re-faced left
 
@@ -137,14 +162,14 @@ def test_burst_attack_presses_each_hit(monkeypatch):
     # Default (burst) still presses per hit -> more than one 'x' in a beat.
     mob = [(0.9, 810, 490, 40, 30)]
     df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0])
-    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x", verbose=False)
+    core.approach_shoot(10, df, anc, attack_range=110, attack_key="x", verbose=False)
     assert pressed.count("x") >= 3                    # burst = several presses
 
 
 def test_blind_attack_when_anchor_lost(monkeypatch):
     mob = [(0.7, 800, 480, 60, 40)]
     df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=None, clock_vals=[0, 0])
-    recovery.approach_shoot(10, df, anc, verbose=False)
+    core.approach_shoot(10, df, anc, verbose=False)
     assert 'c' in pressed                            # no anchor -> still attacks
 
 
@@ -164,7 +189,7 @@ def test_assumes_last_position_when_rooted_and_bar_hidden(monkeypatch):
     mob = [(0.7, 800, 480, 60, 40)]                  # cx=830, dx=30 <= range -> in range, rooted
     df, pressed, _ = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0] * 8)
     anc = _AnchorSeq([(800, 500), None, None])        # lock (fires, roots), then bar hidden
-    recovery.approach_shoot(10, df, anc, attack_range=110, verbose=False)
+    core.approach_shoot(10, df, anc, attack_range=110, verbose=False)
     assert 'c' in pressed                            # kept firing from the assumed last pos
 
 
@@ -174,8 +199,8 @@ def test_lost_mid_walk_does_not_false_stall(monkeypatch):
     mob = [(0.7, 1200, 480, 60, 40)]                 # far right, out of range -> walking
     df, pressed, _ = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0] * 20)
     anc = _AnchorSeq([(800, 500)] + [None] * 15)      # lock once, then lost for many frames
-    r = recovery.approach_shoot(10, df, anc, attack_range=110, stall_limit=3, verbose=False)
-    assert r is not recovery.DEPLETED                # stopped & waited; no fabricated stall
+    r = core.approach_shoot(10, df, anc, attack_range=110, stall_limit=3, verbose=False)
+    assert r is not core.DEPLETED                # stopped & waited; no fabricated stall
     assert 'c' not in pressed                        # never blind-attacked (she was walking)
 
 
@@ -184,20 +209,20 @@ def test_minimap_bound_fires_in_place_at_platform_edge(monkeypatch):
     # must FIRE IN PLACE, not walk off the platform.
     import numpy as np
     mob = [(0.9, 1600, 480, 60, 40)]                 # cx=1630, dx large, out of range
-    monkeypatch.setattr(recovery, "capture", lambda: np.zeros((1000, 1600, 3), np.uint8))
-    monkeypatch.setattr(recovery, "lie_check_fast_tick", lambda *a, **k: None)
-    monkeypatch.setattr(recovery, "lie_check_full_tick", lambda *a, **k: None)
+    monkeypatch.setattr(core, "capture", lambda: np.zeros((1000, 1600, 3), np.uint8))
+    monkeypatch.setattr(core, "lie_check_fast_tick", lambda *a, **k: None)
+    monkeypatch.setattr(core, "lie_check_full_tick", lambda *a, **k: None)
     monkeypatch.setattr(player, "find_player", lambda f, cfg=None, near=None: (800, 500))
-    monkeypatch.setattr(recovery, "stable_char", lambda n=2: (180, 136))   # at right bound
-    monkeypatch.setattr(recovery, "is_focused", lambda: True)              # test runs without game focus
-    monkeypatch.setattr(recovery.kb, "pause", False, raising=False)
+    monkeypatch.setattr(core, "stable_char", lambda n=2: (180, 136))   # at right bound
+    monkeypatch.setattr(core, "is_focused", lambda: True)              # test runs without game focus
+    monkeypatch.setattr(core.kb, "pause", False, raising=False)
     presses = []
-    monkeypatch.setattr(recovery.kb, "safe_press", lambda k: presses.append(k))
-    monkeypatch.setattr(recovery.kb, "safe_release", lambda k: None)
-    monkeypatch.setattr(recovery.time, "sleep", lambda s: None)
+    monkeypatch.setattr(core.kb, "safe_press", lambda k: presses.append(k))
+    monkeypatch.setattr(core.kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
     it = iter([0, 0])
-    monkeypatch.setattr(recovery.time, "time", lambda: next(it, 10_000))
-    recovery.approach_shoot(10, lambda f, roi: mob, _Anchor((800, 500)), attack_range=90,
+    monkeypatch.setattr(core.time, "time", lambda: next(it, 10_000))
+    core.approach_shoot(10, lambda f, roi: mob, _Anchor((800, 500)), attack_range=90,
                             mm_bounds=(60, 180), verbose=False)
     assert Key.right not in presses      # did NOT walk off the platform
     assert 'c' in presses                # fired in place instead
@@ -208,11 +233,11 @@ def test_fall_off_platform_returns_FELL(monkeypatch):
     # make the fall check return FELL so the caller re-seats, instead of farming the platform below.
     df, _, anc = _setup(monkeypatch, mobs=[(0.9, 810, 500, 40, 30)], ptuple=(800, 500),
                         clock_vals=[0] * 8)
-    monkeypatch.setattr(recovery, "stable_char", lambda *a, **k: (100, 136))   # fell to y=136
-    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
-    out = recovery.approach_shoot(10, df, anc, mm_y=104, fall_margin=22, fall_confirm=2,
+    monkeypatch.setattr(core, "stable_char", lambda *a, **k: (100, 136))   # fell to y=136
+    monkeypatch.setattr(core.kb, "safe_release_all", lambda: None)
+    out = core.approach_shoot(10, df, anc, mm_y=104, fall_margin=22, fall_confirm=2,
                                   fall_check_every=0.0, verbose=False)
-    assert out is recovery.FELL
+    assert out is core.FELL
 
 
 def test_single_fall_read_debounced(monkeypatch):
@@ -220,11 +245,11 @@ def test_single_fall_read_debounced(monkeypatch):
     # otherwise one bad read costs a full re-seat (the P3 churn). Needs fall_confirm consecutive reads.
     df, _, anc = _setup(monkeypatch, mobs=[(0.9, 810, 500, 40, 30)], ptuple=(800, 500),
                         clock_vals=[0, 0, 999])                 # one fall check, then time out
-    monkeypatch.setattr(recovery, "stable_char", lambda *a, **k: (100, 368))   # phantom at map bottom
-    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
-    out = recovery.approach_shoot(10, df, anc, mm_y=136, fall_margin=22, fall_confirm=2,
+    monkeypatch.setattr(core, "stable_char", lambda *a, **k: (100, 368))   # phantom at map bottom
+    monkeypatch.setattr(core.kb, "safe_release_all", lambda: None)
+    out = core.approach_shoot(10, df, anc, mm_y=136, fall_margin=22, fall_confirm=2,
                                   fall_check_every=0.0, verbose=False)
-    assert out is not recovery.FELL                            # single read debounced -> no re-seat
+    assert out is not core.FELL                            # single read debounced -> no re-seat
 
 
 def test_fall_check_disabled_when_mm_y_none(monkeypatch):
@@ -232,27 +257,27 @@ def test_fall_check_disabled_when_mm_y_none(monkeypatch):
     # even a wildly out-of-band read never returns FELL.
     df, _, anc = _setup(monkeypatch, mobs=[(0.9, 810, 500, 40, 30)], ptuple=(800, 500),
                         clock_vals=[0, 0, 999])
-    monkeypatch.setattr(recovery, "stable_char", lambda *a, **k: (100, 368))   # bottom-edge phantom
-    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
-    out = recovery.approach_shoot(10, df, anc, mm_y=None, fall_check_every=0.0, verbose=False)
-    assert out is not recovery.FELL                            # no fall check -> never bails
+    monkeypatch.setattr(core, "stable_char", lambda *a, **k: (100, 368))   # bottom-edge phantom
+    monkeypatch.setattr(core.kb, "safe_release_all", lambda: None)
+    out = core.approach_shoot(10, df, anc, mm_y=None, fall_check_every=0.0, verbose=False)
+    assert out is not core.FELL                            # no fall check -> never bails
 
 
 def test_no_fall_when_on_platform(monkeypatch):
     # Still on the platform (y within the band): no FELL -- the fall check must not false-trigger.
     df, _, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0, 0, 999])
-    monkeypatch.setattr(recovery, "stable_char", lambda *a, **k: (100, 108))   # y within band of 104
-    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: None)
-    out = recovery.approach_shoot(10, df, anc, mm_y=104, fall_margin=22,
+    monkeypatch.setattr(core, "stable_char", lambda *a, **k: (100, 108))   # y within band of 104
+    monkeypatch.setattr(core.kb, "safe_release_all", lambda: None)
+    out = core.approach_shoot(10, df, anc, mm_y=104, fall_margin=22,
                                   fall_check_every=0.0, deplete_reads=4, verbose=False)
-    assert out is not recovery.FELL
+    assert out is not core.FELL
 
 
 def test_attack_key_selected_by_mob_class(monkeypatch):
     # A goby in range -> the burst uses the class-mapped key 'z', not the default 'c'.
     mob = [(0.9, 810, 490, 40, 30, "goby")]          # 6-tuple with class; feet=520 near feet 500
     df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 999])
-    recovery.approach_shoot(10, df, anc, attack_range=90, attack_key="c",
+    core.approach_shoot(10, df, anc, attack_range=90, attack_key="c",
                             attack_keys={"goby": "z"}, verbose=False)
     assert "z" in pressed and "c" not in pressed
 
@@ -261,7 +286,7 @@ def test_attack_key_falls_back_to_default_for_unmapped_class(monkeypatch):
     # A fishhouse (not in attack_keys) in range -> uses the default 'c'.
     mob = [(0.9, 810, 490, 40, 30, "fishhouse")]
     df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 999])
-    recovery.approach_shoot(10, df, anc, attack_range=90, attack_key="c",
+    core.approach_shoot(10, df, anc, attack_range=90, attack_key="c",
                             attack_keys={"goby": "z"}, verbose=False)
     assert "c" in pressed and "z" not in pressed
 
@@ -270,7 +295,7 @@ def test_5tuple_detector_uses_default_key(monkeypatch):
     # A plain 5-tuple detection (template detector, no class) still works -> default key.
     mob = [(0.9, 810, 490, 40, 30)]
     df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 999])
-    recovery.approach_shoot(10, df, anc, attack_range=90, attack_key="c", verbose=False)
+    core.approach_shoot(10, df, anc, attack_range=90, attack_key="c", verbose=False)
     assert "c" in pressed
 
 
@@ -281,7 +306,7 @@ def test_priority_class_targets_fishhouse_over_nearer_goby(monkeypatch):
     mobs = [(0.9, 830, 490, 40, 30, "goby"),          # cx=850, dx~50 in range
             (0.9, 1280, 490, 40, 30, "fishhouse")]    # cx=1300, dx~500 out of range
     df, pressed, anc = _setup(monkeypatch, mobs=mobs, ptuple=(800, 500), clock_vals=[0, 0])
-    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+    core.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
                             attack_keys={"goby": "x", "fishhouse": "x"},
                             priority_class="fishhouse", verbose=False)
     assert Key.right in pressed and "x" not in pressed   # walked toward fishhouse, didn't fire goby
@@ -291,7 +316,7 @@ def test_priority_class_falls_back_to_nearest_when_absent(monkeypatch):
     # No fishhouse present -> priority has nothing to prefer -> nearest goby, fire in place.
     mobs = [(0.9, 810, 490, 40, 30, "goby")]          # dx~30 in range
     df, pressed, anc = _setup(monkeypatch, mobs=mobs, ptuple=(800, 500), clock_vals=[0, 0, 999])
-    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+    core.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
                             attack_keys={"goby": "x", "fishhouse": "x"},
                             priority_class="fishhouse", verbose=False)
     assert "x" in pressed                              # fired the goby (no fishhouse to prefer)
@@ -303,7 +328,7 @@ def test_priority_range_closes_more_on_priority_target(monkeypatch):
     # spot where the 6 goby will spawn.
     mobs = [(0.9, 880, 490, 40, 30, "fishhouse")]     # cx=900, dx~100: < range 110 but > priority 60
     df, pressed, anc = _setup(monkeypatch, mobs=mobs, ptuple=(800, 500), clock_vals=[0, 0])
-    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+    core.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
                             attack_keys={"fishhouse": "x"}, priority_class="fishhouse",
                             priority_range=60, verbose=False)
     assert Key.right in pressed and "x" not in pressed   # closed in, did not fire from afar
@@ -315,7 +340,7 @@ def test_post_kill_hold_fires_when_fishhouse_dies(monkeypatch):
     fh = [(0.9, 795, 490, 40, 30, "fishhouse")]       # in range
     df, pressed, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0] * 8)
     df = _DetectSeq([fh, []])                          # hit the fishhouse, then it's gone (killed)
-    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+    core.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
                             attack_keys={"fishhouse": "x"}, priority_class="fishhouse",
                             priority_hold_hits=2, verbose=False)
     assert pressed.count("x") >= 5                     # burst(3) + post-kill hold(2)
@@ -326,7 +351,7 @@ def test_no_post_kill_hold_while_fishhouse_alive(monkeypatch):
     # complaint). Each in-range beat is exactly 3 hits; two beats = 6, not 3+hold.
     mob = [(0.9, 795, 490, 40, 30, "fishhouse")]
     df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 0, 999])
-    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+    core.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
                             attack_keys={"fishhouse": "x"}, priority_class="fishhouse",
                             priority_hold_hits=2, verbose=False)
     assert pressed.count("x") == 6                     # two bursts, no hold (fishhouse never died)
@@ -336,7 +361,7 @@ def test_no_priority_hold_for_nonpriority_target(monkeypatch):
     # A goby (not the priority class) in range -> only the normal 3-hit burst, no hold.
     mob = [(0.9, 810, 490, 40, 30, "goby")]
     df, pressed, anc = _setup(monkeypatch, mobs=mob, ptuple=(800, 500), clock_vals=[0, 0, 999])
-    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+    core.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
                             attack_keys={"goby": "x", "fishhouse": "x"},
                             priority_class="fishhouse", priority_hold_hits=3, verbose=False)
     assert pressed.count("x") <= 3                     # no post-kill hold on a goby
@@ -351,7 +376,7 @@ def test_priority_lock_holds_through_occlusion(monkeypatch):
     goby_far = (0.9, 1285, 490, 40, 30, "goby")       # cx=1305, dx~505 far -> a walk, not a fire
     df, pressed, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0] * 8)
     df = _DetectSeq([[fh, goby_far]] + [[goby_far]] * 7)
-    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+    core.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
                             attack_keys={"fishhouse": "x", "goby": "x"},
                             priority_class="fishhouse", priority_lock_grace=3, verbose=False)
     assert pressed.count("x") >= 9                     # kept firing through multiple occluded frames
@@ -364,7 +389,7 @@ def test_priority_lock_gives_up_after_grace(monkeypatch):
     goby_far = (0.9, 1285, 490, 40, 30, "goby")
     df, pressed, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0] * 8)
     df = _DetectSeq([[fh, goby_far]] + [[goby_far]] * 7)
-    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+    core.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
                             attack_keys={"fishhouse": "x", "goby": "x"},
                             priority_class="fishhouse", priority_lock_grace=1, verbose=False)
     assert pressed.count("x") == 6                     # engage + 1 hold, then walked (stopped firing)
@@ -380,7 +405,7 @@ def test_priority_locks_to_one_fishhouse_despite_anchor_jump(monkeypatch):
     df, pressed, _ = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0, 0, 0, 999])
     df = _DetectSeq([[A, B], [A, B]])
     anc = _AnchorSeq([(800, 500), (1390, 500)])       # frame 2: anchor jumps to near B
-    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+    core.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
                             attack_keys={"fishhouse": "x"}, priority_class="fishhouse",
                             priority_range=60, verbose=False)
     # frame 1 locks A (near, fires). frame 2 anchor jumps to B, but she stays on A -> walks LEFT
@@ -395,7 +420,7 @@ def test_priority_lock_survives_full_occlusion_no_deplete(monkeypatch):
     fh = (0.9, 795, 490, 40, 30, "fishhouse")
     df, pressed, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0] * 12)
     df = _DetectSeq([[fh], [], [], []])               # engage, then fully occluded reads
-    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+    core.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
                             attack_keys={"fishhouse": "x"}, priority_class="fishhouse",
                             priority_range=60, priority_lock_grace=3, deplete_reads=2, verbose=False)
     assert pressed.count("x") >= 9                     # kept firing through occlusion, not 3-then-deplete
@@ -409,7 +434,7 @@ def test_priority_lock_holds_through_other_fishhouse_blink(monkeypatch):
     B = (0.9, 1180, 490, 40, 30, "fishhouse")         # cx=1200 (far, ~930px away)
     df, pressed, anc = _setup(monkeypatch, mobs=[], ptuple=(300, 500), clock_vals=[0, 0, 0, 0, 999])
     df = _DetectSeq([[A], [B], [B]])                   # lock A, then only B visible (within grace)
-    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+    core.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
                             attack_keys={"fishhouse": "x"}, priority_class="fishhouse",
                             priority_lock_grace=3, lock_switch_px=70, verbose=False)
     # frame2: B is ~930px right of the A-lock -> hold A -> she walks LEFT toward A, not right to B
@@ -426,7 +451,7 @@ def test_priority_lock_not_burned_while_approaching(monkeypatch):
     goby_near = (0.9, 810, 490, 40, 30, "goby")       # dx~30 in range (the tempting switch)
     df, pressed, anc = _setup(monkeypatch, mobs=[], ptuple=(800, 500), clock_vals=[0] * 6)
     df = _DetectSeq([[fh_far, goby_near]] + [[goby_near]] * 5)
-    recovery.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
+    core.approach_shoot(10, df, anc, attack_range=110, attack_key="x",
                             attack_keys={"fishhouse": "x", "goby": "x"},
                             priority_class="fishhouse", priority_lock_grace=1,
                             stall_limit=8, verbose=False)
@@ -443,18 +468,18 @@ def test_returns_LOST_when_anchor_blind_and_collection_gated(monkeypatch):
             return None
 
     dumped = []
-    monkeypatch.setattr(recovery, "_dump_player_miss", lambda f, label="": dumped.append(label))
+    monkeypatch.setattr(core, "_dump_player_miss", lambda f, label="": dumped.append(label))
 
     # default (collect_misses=False): still returns LOST, but does NOT write a frame
     df, _p, _ = _setup(monkeypatch, mobs=[], ptuple=(0, 0), clock_vals=[0] * 40)
-    out = recovery.approach_shoot(10, df, _Blind(), lost_limit=3, verbose=False, label="P2")
-    assert out is recovery.LOST and dumped == []
+    out = core.approach_shoot(10, df, _Blind(), lost_limit=3, verbose=False, label="P2")
+    assert out is core.LOST and dumped == []
 
     # collect_misses=True: re-seat AND save the frame for labeling
     df2, _p2, _ = _setup(monkeypatch, mobs=[], ptuple=(0, 0), clock_vals=[0] * 40)
-    out2 = recovery.approach_shoot(10, df2, _Blind(), lost_limit=3, verbose=False, label="P2",
+    out2 = core.approach_shoot(10, df2, _Blind(), lost_limit=3, verbose=False, label="P2",
                                    collect_misses=True)
-    assert out2 is recovery.LOST and dumped == ["P2"]
+    assert out2 is core.LOST and dumped == ["P2"]
 
 
 def test_yolo_primary_anchor_resolves_from_composite_bare_or_none():
@@ -466,52 +491,52 @@ def test_yolo_primary_anchor_resolves_from_composite_bare_or_none():
     class _Nametag:
         last = (0, 0)
     y = _Yolo()
-    assert recovery._yolo_primary_anchor(y) is y                       # bare
-    assert recovery._yolo_primary_anchor(player.CompositeAnchor([y, _Nametag()])) is y   # wrapped
-    assert recovery._yolo_primary_anchor(player.CompositeAnchor([_Nametag()])) is None   # no yolo
+    assert core._yolo_primary_anchor(y) is y                       # bare
+    assert core._yolo_primary_anchor(player.CompositeAnchor([y, _Nametag()])) is y   # wrapped
+    assert core._yolo_primary_anchor(player.CompositeAnchor([_Nametag()])) is None   # no yolo
 
 
 def test_dump_yolo_fail_throttles_and_dedups(monkeypatch, tmp_path):
     # "Collect much more" = more VARIETY, not copies. Throttle spaces saves in time; the dedup
     # skips a frame near-identical to the last SAVED one (a stuck same-scene stretch).
     saved = []
-    monkeypatch.setattr(recovery.cv2, "imwrite", lambda p, f: saved.append(p) or True)
-    monkeypatch.setattr(recovery, "_YOLO_FAIL_DIR", str(tmp_path))
-    recovery._last_yolo_fail[0] = 0.0
-    recovery._last_fail_small[0] = None
+    monkeypatch.setattr(core.cv2, "imwrite", lambda p, f: saved.append(p) or True)
+    monkeypatch.setattr(core, "_YOLO_FAIL_DIR", str(tmp_path))
+    core._last_yolo_fail[0] = 0.0
+    core._last_fail_small[0] = None
     t = [1000.0]
-    monkeypatch.setattr(recovery.time, "time", lambda: t[0])
+    monkeypatch.setattr(core.time, "time", lambda: t[0])
     A = np.zeros((36, 64, 3), np.uint8)
     B = np.full((36, 64, 3), 255, np.uint8)
-    recovery._dump_yolo_fail(A, interval=3.0);  assert len(saved) == 1    # first -> save
+    core._dump_yolo_fail(A, interval=3.0);  assert len(saved) == 1    # first -> save
     t[0] += 1.0
-    recovery._dump_yolo_fail(A, interval=3.0);  assert len(saved) == 1    # within interval -> throttled
+    core._dump_yolo_fail(A, interval=3.0);  assert len(saved) == 1    # within interval -> throttled
     t[0] += 5.0
-    recovery._dump_yolo_fail(A, interval=3.0);  assert len(saved) == 1    # interval ok but identical -> dedup
+    core._dump_yolo_fail(A, interval=3.0);  assert len(saved) == 1    # interval ok but identical -> dedup
     t[0] += 5.0
-    recovery._dump_yolo_fail(B, interval=3.0);  assert len(saved) == 2    # different scene -> save
+    core._dump_yolo_fail(B, interval=3.0);  assert len(saved) == 2    # different scene -> save
 
 
 def test_ensure_game_focused_only_refocuses_when_lost(monkeypatch):
     # Guarantees keys land in the GAME: no-op when already focused; on focus loss it releases
     # keys, refocuses once, and reports whether the game came back.
     released = []
-    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: released.append(1))
+    monkeypatch.setattr(core.kb, "safe_release_all", lambda: released.append(1))
 
     # already focused -> no release, no refocus
     calls = {"refocus": 0}
-    ok = recovery.ensure_game_focused(check=lambda: True,
+    ok = core.ensure_game_focused(check=lambda: True,
                                       refocus=lambda: calls.__setitem__("refocus", calls["refocus"] + 1))
     assert ok is True and calls["refocus"] == 0 and released == []
 
     # lost then regained: releases keys, refocuses, returns True
     seq = iter([False, True])
-    ok2 = recovery.ensure_game_focused(check=lambda: next(seq),
+    ok2 = core.ensure_game_focused(check=lambda: next(seq),
                                        refocus=lambda: calls.__setitem__("refocus", calls["refocus"] + 1))
     assert ok2 is True and calls["refocus"] == 1 and released == [1]
 
     # still lost after refocus -> returns False (caller must not send keys)
-    ok3 = recovery.ensure_game_focused(check=lambda: False, refocus=lambda: None)
+    ok3 = core.ensure_game_focused(check=lambda: False, refocus=lambda: None)
     assert ok3 is False
 
 
@@ -519,13 +544,13 @@ def test_focus_ok_or_bail_bails_and_releases_on_focus_loss(monkeypatch):
     # The attack-loop guard: keep firing when focused; on focus loss release keys, refocus, and
     # return False so the loop bails (caller re-seats, re-presses held keys -- no key leak).
     released = []
-    monkeypatch.setattr(recovery.kb, "safe_release_all", lambda: released.append(1))
+    monkeypatch.setattr(core.kb, "safe_release_all", lambda: released.append(1))
     refocused = []
 
-    assert recovery.focus_ok_or_bail(check=lambda: True,
+    assert core.focus_ok_or_bail(check=lambda: True,
                                      refocus=lambda: refocused.append(1)) is True
     assert released == [] and refocused == []          # focused -> no-op, keep firing
 
-    ok = recovery.focus_ok_or_bail(check=lambda: False, refocus=lambda: refocused.append(1))
+    ok = core.focus_ok_or_bail(check=lambda: False, refocus=lambda: refocused.append(1))
     assert ok is False                                 # lost focus -> bail
     assert released == [1] and refocused == [1]        # released keys AND tried to refocus

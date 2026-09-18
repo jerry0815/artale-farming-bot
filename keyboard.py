@@ -37,8 +37,8 @@ def wait_with_pause(duration):
         time.sleep(0.01) # 檢查頻率
     return True # 表示等待完成
 
-f9_callback = None   # set by recovery.py to silence alarms on 'm' (was F9)
-f10_callback = None  # set by recovery.py to dump the current frame on F10
+f9_callback = None   # set by core.py to silence alarms on 'm' (was F9)
+f10_callback = None  # set by core.py to dump the current frame on F10
 
 
 def on_press(key):

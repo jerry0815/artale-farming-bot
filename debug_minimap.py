@@ -12,7 +12,7 @@ Usage:  python debug_minimap.py
 import time
 import cv2
 import numpy as np
-import recovery as R
+import core as R
 
 
 def _dump(mm, lo, hi, name):

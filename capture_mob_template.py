@@ -20,8 +20,8 @@ import cv2
 
 
 def capture():
-    import recovery
-    return recovery.capture()
+    import core
+    return core.capture()
 
 
 def _next_index(outdir, name):
@@ -68,7 +68,7 @@ def main():
     if saved:
         rel = outdir.replace(os.sep, "/")
         print(f'set in maps/{mp}.json:  "mob_template_dir": "{rel}"')
-        print("then preview in the panel or: python recovery.py fishcount --map maps/"
+        print("then preview in the panel or: python core.py fishcount --map maps/"
               f"{mp}.json --thr 0.6")
 
 

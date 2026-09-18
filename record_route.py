@@ -4,7 +4,7 @@ Logs (t,x,y) position samples + key down/up events + node marks to a
 `.capture.jsonl` while you play the map manually. Presses NO keys -- zero risk.
 `build_route.py` turns the capture into a route.json node-graph.
 
-CLI (via recovery.py):  python recovery.py record-route <map_name>
+CLI (via core.py):  python core.py record-route <map_name>
 Hotkeys while recording:  F10 = stop,  F9 = mark a node,  'n' = existing pause.
 
 See docs/superpowers/specs/2026-08-24-route-recorder-and-ui-design.md.
@@ -80,8 +80,8 @@ class RouteRecorder:
     def _resolve_get_xy(self):
         if self._get_xy is not None:
             return self._get_xy
-        import recovery
-        return recovery.get_character_full
+        import core
+        return core.get_character_full
 
     def _emit(self, rec):
         rec["t"] = round(_time.time() - self._t0, 3)
@@ -143,11 +143,11 @@ class RouteRecorder:
 
 def record_live(map_name, poll_hz=30):
     """Live recorder: wires a real pynput listener (F10 stop, F9 mark, key logging)
-    around the position poll, using recovery.get_character_full for positions and
+    around the position poll, using core.get_character_full for positions and
     keyboard.pause ('n') for pausing. Writes routes/<map_name>.capture.jsonl."""
     import os
     from pynput.keyboard import Key, Listener
-    import recovery
+    import core
     import keyboard as kb
 
     os.makedirs(OUT_DIR, exist_ok=True)
@@ -168,7 +168,7 @@ def record_live(map_name, poll_hz=30):
             state["stopped"] = True
             return False                       # stop the listener
         if key == Key.f9:
-            gx, gy = recovery.get_character_full()   # grab position AT the mark instant
+            gx, gy = core.get_character_full()   # grab position AT the mark instant
             state["marks"] += 1
             name = None
             try:
@@ -196,7 +196,7 @@ def record_live(map_name, poll_hz=30):
         period = 1.0 / poll_hz
         while not state["stopped"]:
             if not kb.pause:
-                x, y = recovery.get_character_full()
+                x, y = core.get_character_full()
                 if x is not None and x >= 0:
                     emit({"x": int(x), "y": int(y)})
             _time.sleep(period)

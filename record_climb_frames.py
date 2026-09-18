@@ -18,7 +18,7 @@ import cv2
 import numpy as np
 import mss
 from pynput.keyboard import Listener
-import recovery as R
+import core as R
 
 
 def robust_capture():

@@ -1,26 +1,26 @@
 """exp_record_loop: passive EXP recorder that logs a session on stop (no game)."""
-import recovery
+import core
 
 
 def test_exp_record_loop_appends_session_on_stop(monkeypatch):
     def fake_tracker(*a, **k):
         def tick():
-            recovery.STATUS["exp_total"] = 500
-            recovery.STATUS["exp_10min"] = 500
+            core.STATUS["exp_total"] = 500
+            core.STATUS["exp_10min"] = 500
         return tick
-    monkeypatch.setattr(recovery, "make_exp_tracker", fake_tracker)
-    monkeypatch.setattr(recovery, "lie_check_tick", lambda: None)
-    monkeypatch.setattr(recovery, "is_lie_check_active", lambda: False)
-    monkeypatch.setattr(recovery, "lie_check_silence", lambda: None)
+    monkeypatch.setattr(core, "make_exp_tracker", fake_tracker)
+    monkeypatch.setattr(core, "lie_check_tick", lambda: None)
+    monkeypatch.setattr(core, "is_lie_check_active", lambda: False)
+    monkeypatch.setattr(core, "lie_check_silence", lambda: None)
     t = {"v": 1000.0}
-    monkeypatch.setattr(recovery.time, "time", lambda: t["v"])
+    monkeypatch.setattr(core.time, "time", lambda: t["v"])
     saved = []
-    monkeypatch.setattr(recovery, "append_exp_session", lambda row, **k: saved.append(row))
+    monkeypatch.setattr(core, "append_exp_session", lambda row, **k: saved.append(row))
 
     def fake_sleep(s):
         t["v"] += 60                       # 60s session
-        recovery.STOP.set()                # stop after one iteration
-    recovery.exp_record_loop(label="human", sleep=fake_sleep)
+        core.STOP.set()                # stop after one iteration
+    core.exp_record_loop(label="human", sleep=fake_sleep)
 
     assert len(saved) == 1
     row = saved[0]
@@ -28,38 +28,38 @@ def test_exp_record_loop_appends_session_on_stop(monkeypatch):
     assert row["exp_gained"] == 500
     assert row["duration_s"] == 60
     assert row["exp_per_min"] == 500       # 500 gained over 1 minute
-    assert recovery.STATUS["state"] == "idle"
+    assert core.STATUS["state"] == "idle"
 
 
 def test_exp_record_loop_publishes_and_clears_started_at(monkeypatch):
-    monkeypatch.setattr(recovery, "make_exp_tracker", lambda *a, **k: (lambda: None))
-    monkeypatch.setattr(recovery, "lie_check_tick", lambda: None)
-    monkeypatch.setattr(recovery, "is_lie_check_active", lambda: False)
-    monkeypatch.setattr(recovery, "lie_check_silence", lambda: None)
-    monkeypatch.setattr(recovery, "append_exp_session", lambda row, **k: None)
+    monkeypatch.setattr(core, "make_exp_tracker", lambda *a, **k: (lambda: None))
+    monkeypatch.setattr(core, "lie_check_tick", lambda: None)
+    monkeypatch.setattr(core, "is_lie_check_active", lambda: False)
+    monkeypatch.setattr(core, "lie_check_silence", lambda: None)
+    monkeypatch.setattr(core, "append_exp_session", lambda row, **k: None)
     t = {"v": 1000.0}
-    monkeypatch.setattr(recovery.time, "time", lambda: t["v"])
+    monkeypatch.setattr(core.time, "time", lambda: t["v"])
     seen = []
 
     def fake_sleep(s):
-        seen.append(recovery.STATUS.get("exp_started_at"))   # captured mid-run
-        recovery.STOP.set()
-    recovery.exp_record_loop(label="human", sleep=fake_sleep)
+        seen.append(core.STATUS.get("exp_started_at"))   # captured mid-run
+        core.STOP.set()
+    core.exp_record_loop(label="human", sleep=fake_sleep)
 
     assert seen == [1000.0]                                   # set to t0 while recording
-    assert recovery.STATUS.get("exp_started_at") is None      # cleared on stop
+    assert core.STATUS.get("exp_started_at") is None      # cleared on stop
 
 
 def test_exp_record_loop_null_gain_when_no_exp(monkeypatch):
-    monkeypatch.setattr(recovery, "make_exp_tracker", lambda *a, **k: (lambda: None))
-    monkeypatch.setattr(recovery, "lie_check_tick", lambda: None)
-    monkeypatch.setattr(recovery, "is_lie_check_active", lambda: False)
-    monkeypatch.setattr(recovery, "lie_check_silence", lambda: None)
-    recovery.STATUS["exp_total"] = 0
+    monkeypatch.setattr(core, "make_exp_tracker", lambda *a, **k: (lambda: None))
+    monkeypatch.setattr(core, "lie_check_tick", lambda: None)
+    monkeypatch.setattr(core, "is_lie_check_active", lambda: False)
+    monkeypatch.setattr(core, "lie_check_silence", lambda: None)
+    core.STATUS["exp_total"] = 0
     t = {"v": 5.0}
-    monkeypatch.setattr(recovery.time, "time", lambda: t["v"])
+    monkeypatch.setattr(core.time, "time", lambda: t["v"])
     saved = []
-    monkeypatch.setattr(recovery, "append_exp_session", lambda row, **k: saved.append(row))
-    monkeypatch.setattr(recovery.STOP, "is_set", lambda: True)   # exit immediately
-    recovery.exp_record_loop(label="bot", sleep=lambda s: None)
+    monkeypatch.setattr(core, "append_exp_session", lambda row, **k: saved.append(row))
+    monkeypatch.setattr(core.STOP, "is_set", lambda: True)   # exit immediately
+    core.exp_record_loop(label="bot", sleep=lambda s: None)
     assert saved[0]["exp_gained"] is None and saved[0]["exp_per_min"] is None

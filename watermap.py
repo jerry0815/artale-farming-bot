@@ -4,7 +4,7 @@ Water maps (e.g. 水世界/深海峽谷2) have NO minimap scroll-pin -- the char
 reads true (x,y) directly -- and free 2D swimming instead of walk/rope/gravity. So
 navigation collapses to one idea: press the arrow keys toward a target minimap
 coordinate until you arrive. This module holds the pure pieces (import-safe, fully
-unit-testable); recovery.py wires the live key presses + screen reads.
+unit-testable); core.py wires the live key presses + screen reads.
 
 A map config JSON (maps/<name>.json):
   {
@@ -86,7 +86,7 @@ def load_map(path):
 
 
 def minimap_crop(cfg):
-    """(x, y, w, h) crop tuple for recovery.set_minimap, from a map config."""
+    """(x, y, w, h) crop tuple for core.set_minimap, from a map config."""
     m = cfg["minimap"]
     return (m["x"], m["y"], m["w"], m["h"])
 

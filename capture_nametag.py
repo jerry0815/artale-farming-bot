@@ -23,12 +23,12 @@ def main():
         return
     mp = sys.argv[1]
     kind = sys.argv[2] if len(sys.argv) > 2 else "nametag"    # 'nametag' or 'title'
-    import recovery
-    if not recovery.focus():
+    import core
+    if not core.focus():
         print("could not focus the game window"); return
     import time
     time.sleep(0.4)
-    f = recovery.capture()
+    f = core.capture()
     if f is None:
         print("no frame -- game window visible?"); return
     print(f"Drag a TIGHT box around your {kind} text only, then ENTER to save (C/ESC cancel).")

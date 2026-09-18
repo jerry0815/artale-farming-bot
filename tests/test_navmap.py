@@ -13,7 +13,7 @@ def test_classify_band_boundaries():
     assert navmap.classify_node(63, 132) == "BOTTOM_FARM"
 
 def test_classify_portal_recovery_entry_ledges():
-    # The two right-side entry ledges of the portal-bottom recovery chain. Both sit below
+    # The two right-side entry ledges of the portal-bottom core chain. Both sit below
     # the overlapping/scroll-pinned mid cluster, so they band cleanly.
     assert navmap.classify_node(153, 183) == "PORTAL_BOT"   # deep, by the portal
     assert navmap.classify_node(140, 149) == "LOWER_R"      # portal-rope landing
@@ -104,15 +104,15 @@ def test_travel_bails_when_lost():
     assert ok is False
 
 def test_every_edge_has_an_executor():
-    # only run if recovery.py's heavy deps are importable in this env
+    # only run if core.py's heavy deps are importable in this env
     try:
-        import recovery
+        import core
     except Exception as e:
         import pytest
-        pytest.skip(f"recovery not importable here: {e}")
+        pytest.skip(f"core not importable here: {e}")
     import navmap
     for e in navmap.EDGES:
-        assert (e["src"], e["dst"]) in recovery.EDGE_ACTIONS, (e["src"], e["dst"])
+        assert (e["src"], e["dst"]) in core.EDGE_ACTIONS, (e["src"], e["dst"])
 
 def test_next_farm_state_alternates_when_populated():
     import navmap

@@ -17,7 +17,7 @@ Annotated image -> debug_output/live_yolo.png:
 """
 import os, sys, time
 import cv2
-import recovery as R
+import core as R
 import monsters
 
 CONF = 0.35                     # lower to see more, raise to be stricter
