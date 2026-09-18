@@ -57,6 +57,10 @@
   "approach_ease_margin": 0,
   "approach_ease_note": "0 = disable the tap-and-stop ease-in (it caused small stepping near a mob). With the wide attack_range 190 there's no tight target to overshoot, so walk continuously straight into range. Raise it only if a tighter range is reintroduced and she coasts past.",
   "same_platform_band": 85,
+  "node_band_up": {
+    "P2": 35
+  },
+  "node_band_up_note": "Per-node cap (screen px) on how far ABOVE her feet a mob may sit and still count as same-platform. P2 only: default 85 reaches up into P1 (17px on the minimap, ~-40..-80px on screen) so she'd chase P1 mobs; 35 keeps P2's own mobs (measured dy -30..+25) and drops the P1 cluster. Down-side stays 85. Raise if P2 mobs get missed, lower if P1 still bleeds in.",
   "approach_step": 0,
   "deplete_reads": 4,
   "stall_limit": 8,
@@ -215,7 +219,7 @@
       "P3"
     ]
   ],
-  "stacked_jump_secs": 1.7,
+  "stacked_jump_secs": 1.5,
   "node_y_lift": 5,
   "node_lift_override": {
     "P4": 2,
@@ -226,7 +230,10 @@
     "P4": 8
   },
   "node_tol_y_up_note": "P4 only: default tol_y_up=16 lets her 'arrive' anywhere across the ~22px stacked band (so the lift often didn't take). 8 tightens the ABOVE band so she must actually rise near the lifted target to seat -- makes the lift consistent. Too tight -> she bobs; raise if she can't seat.",
-  "node_arrive_jumps": {},
+  "node_arrive_jumps": {
+    "P4": 2
+  },
+  "node_arrive_jumps_note": "P4: after swim_to confirms arrival at y=136, fire 2 more short hops to seat firmly on the pin (she was landing at 136 then sinking back to P5 ~1.2s later -- a marginal seat). 2 brief 0.12s hops lift her a few px and re-drop onto P4; well under the stacked_jump_secs needed to reach P3, so she won't over-rise. If she instead reads an immediate FELL right after arriving (airborne when farming starts), drop to 1.",
   "buff_interval_secs": 300,
   "platform_half": 60,
   "map_box": [
