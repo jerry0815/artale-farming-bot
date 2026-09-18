@@ -247,12 +247,12 @@ def _build_actions(controller_ref):
     def farm(map_path, char=None):
         """One farm entry: the selected map's `loop` field picks the loop -- 'nav' = the
         land dragon-nest loop (map geometry unused), else the water swim loop."""
-        import watermap, farm_water
+        import watermap, farm_water, farm_dragon
         def _go():
             kb.pause = False
             cfg = watermap.load_map(map_path) if map_path else {}
             if cfg.get("loop") == "nav":
-                core.farming_loop_nav(exp_check=None, enemy_check=_enemy_check, panic=_panic, cfg=cfg)
+                farm_dragon.farming_loop_nav(exp_check=None, enemy_check=_enemy_check, panic=_panic, cfg=cfg)
             else:
                 farm_water.farming_loop_water(map_path, char=char or None,
                                               enemy_check=_enemy_check, panic=_panic)
