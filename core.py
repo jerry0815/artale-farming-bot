@@ -2813,6 +2813,26 @@ if __name__ == "__main__":
                                           max_seconds=secs)
         finally:
             kb.safe_release_all(); lis.stop()
+    elif cmd == "sweep":
+        # General-map directional sweep. Requires --map maps/<name>.json. Optional secs.
+        if not _map_path:
+            print("usage: python core.py sweep [secs] --map maps/<name>.json"); sys.exit(1)
+        secs = int(sys.argv[2]) if len(sys.argv) > 2 else None
+        def _enemy_check(): return len(get_enemy()) > 0
+        def _panic():
+            kb.safe_release_all()
+            print("[safety] trigger -> releasing keys and PAUSING. 'n' to resume.")
+            kb.pause = True
+        lis = Listener(on_press=kb.on_press); lis.start()
+        if secs is None:
+            kb.pause = True
+            print("SWEEP RUN ready. Switch to the game and press 'n' to start / pause.")
+        try:
+            import farm_general
+            farm_general.farming_loop_general(_map_path, enemy_check=_enemy_check, panic=_panic,
+                                              max_seconds=secs)
+        finally:
+            kb.safe_release_all(); lis.stop()
     else:
         print("usage: python core.py <cmd>")
         print("  run:   runnav          full production farming run ('n' to start/pause)")

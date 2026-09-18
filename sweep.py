@@ -58,3 +58,32 @@ def decide(mob_xs, px, heading, attack_range, gather=None, cd_ok=False, aoe_max=
     if n_here >= 1:
         return FIRE
     return WALK
+
+
+def apply_action(action, heading, keys, kb, sleep=lambda s: None,
+                 burst=3, attack_dwell=0.2, face_gap=0.03, pull_settle=0.1):
+    """Translate a decide() action into key presses via the injected `kb` (dependency-injected
+    so this stays pure/testable -- no core import). Returns the heading for the NEXT beat
+    (flipped on ADVANCE so a route with no explicit segments ping-pongs the platform).
+
+    keys: {"attack","dash","right","left"} -- the attack key (water loop's attack_key), the
+    push/gather key ('z'), and the two facing keys (core.Key.right/left live). The loop owns
+    the gather cooldown: it passes cd_ok into decide(), and resets its timer after a GATHER.
+    """
+    face = keys["right"] if heading > 0 else keys["left"]
+    if action == ADVANCE:
+        kb.safe_release_all()
+        return -heading
+    if action == WALK:                                   # continuous travel toward heading
+        kb.safe_release(keys["left"] if heading > 0 else keys["right"])
+        kb.safe_press(face)
+        return heading
+    # FIRE or GATHER: stop walking, face the heading, act in place.
+    kb.safe_release(keys["right"]); kb.safe_release(keys["left"])
+    kb.safe_press(face); sleep(face_gap); kb.safe_release(face)
+    if action == GATHER:
+        kb.safe_press(keys["dash"]); sleep(face_gap); kb.safe_release(keys["dash"])
+        sleep(pull_settle)                               # let the pull group them before the AoE
+    for _ in range(burst):
+        kb.safe_press(keys["attack"]); sleep(attack_dwell); kb.safe_release(keys["attack"])
+    return heading

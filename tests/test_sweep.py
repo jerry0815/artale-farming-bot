@@ -67,6 +67,55 @@ def test_path_scoop_counts_mobs_along_the_dash_path():
                         gather=G, cd_ok=True) == sweep.GATHER
 
 
+class _FakeKB:
+    def __init__(self):
+        self.events = []
+    def safe_press(self, k): self.events.append(("press", k))
+    def safe_release(self, k): self.events.append(("release", k))
+    def safe_release_all(self): self.events.append(("release_all", None))
+
+
+KEYS = {"attack": "c", "dash": "z", "right": "R", "left": "L"}
+
+
+def _presses(kb):
+    return [k for e, k in kb.events if e == "press"]
+
+
+def test_walk_holds_heading_direction():
+    kb = _FakeKB()
+    h = sweep.apply_action(sweep.WALK, 1, KEYS, kb)
+    assert ("press", "R") in kb.events and h == 1
+
+
+def test_walk_left_presses_left_key():
+    kb = _FakeKB()
+    sweep.apply_action(sweep.WALK, -1, KEYS, kb)
+    assert ("press", "L") in kb.events
+
+
+def test_fire_bursts_attack_but_never_dashes():
+    kb = _FakeKB()
+    sweep.apply_action(sweep.FIRE, 1, KEYS, kb)
+    p = _presses(kb)
+    assert "c" in p and "z" not in p
+
+
+def test_gather_pushes_with_dash_then_attacks():
+    kb = _FakeKB()
+    sweep.apply_action(sweep.GATHER, 1, KEYS, kb)
+    p = _presses(kb)
+    assert "z" in p and "c" in p
+    assert p.index("z") < p.index("c")          # push+group first, THEN the AoE
+
+
+def test_advance_flips_heading_and_fires_nothing():
+    kb = _FakeKB()
+    h = sweep.apply_action(sweep.ADVANCE, 1, KEYS, kb)
+    p = _presses(kb)
+    assert h == -1 and "c" not in p and "z" not in p
+
+
 def test_aoe_max_caps_gather_threshold():
     # gather min=10 but the AoE only hits 6 -> never wait past 6; 6 spread mobs -> GATHER
     g = {"grp": 90, "min": 10, "dash_gap": 50}
