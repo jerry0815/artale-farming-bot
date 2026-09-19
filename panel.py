@@ -801,7 +801,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    const sel = document.getElementById('charsel');
    sel.innerHTML = '<option value="">(map default)</option>';
    for(const p of chars){
-     const name = p.split(/[\\/]/).pop().replace(/\.json$/, '');
+     const name = p.split(/[\\/]/).pop().replace(/\\.json$/, '');
      const o=document.createElement('option'); o.value=p; o.textContent=name; sel.appendChild(o);
    }
  }
@@ -874,7 +874,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    clearTimeout(_tp); _tp=setTimeout(poll, 500);
  }
  let logCursor=0;
- function logClass(s){ s=s.replace(/^\d\d:\d\d:\d\d\.\d\d\d /,'');   // drop timestamp prefix
+ function logClass(s){ s=s.replace(/^\\d\\d:\\d\\d:\\d\\d\\.\\d\\d\\d /,'');   // drop timestamp prefix
    if(s.startsWith('[exp]'))return'exp'; if(s.startsWith('[approach'))return'app';
    if(s.startsWith('[water')||s.startsWith('[nav'))return'wtr'; return''; }
  async function pollLog(){
