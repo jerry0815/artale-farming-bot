@@ -82,3 +82,9 @@ datasets/player_yolo_fail/
 datasets/enemy_dots/
 datasets/lie_check/captures/
 datasets/lie_check/Screenshot*.png
+
+# Real mob-detection frames (collected via label_mobs.py; large & regenerable, labels tracked)
+datasets/mobs_real/images/
+datasets/mobs_real/train.txt
+datasets/mobs_real/val.txt
+datasets/mobs_real/*.cache
