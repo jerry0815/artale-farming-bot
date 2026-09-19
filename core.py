@@ -93,76 +93,7 @@ MAP_X_MIN, MAP_X_MAX = 60, 170
 MAP_Y_MIN, MAP_Y_MAX = 65, 175
 
 
-def _window_box():
-    """The game window's screen rect as an mss grab box, or None. Prefers pygetwindow;
-    falls back to the Win32 finder focus() uses (FindWindowW + GetWindowRect). Does NOT
-    require the window to sit fully inside one monitor -- a maximized / monitor-straddling
-    window used to make capture() return None (character read (-1,-1) -> recovery bailed)."""
-    win = gw.getWindowsWithTitle(TITLE)
-    if win:
-        w = win[0]
-        box = {"left": w.left, "top": w.top, "width": w.width, "height": w.height}
-    else:                                                # pygetwindow missed the title -> Win32
-        hwnd = ctypes.windll.user32.FindWindowW(None, TITLE)
-        if not hwnd:
-            return None
-        r = wintypes.RECT()
-        ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(r))
-        box = {"left": r.left, "top": r.top, "width": r.right - r.left, "height": r.bottom - r.top}
-    if box["width"] <= 0 or box["height"] <= 0:
-        return None
-    return box
-
-
 _sct_tls = threading.local()
-
-
-def _sct():
-    """One reusable mss handle PER THREAD. mss.mss() allocates (and its context-exit frees)
-    a Windows device context every call, so doing it per grab dominated capture cost; a
-    persistent handle skips that. Thread-local because mss is not thread-safe and the farming
-    loop and panel can grab concurrently -- each thread gets its own handle, lazily created."""
-    s = getattr(_sct_tls, "sct", None)
-    if s is None:
-        s = mss.mss()
-        _sct_tls.sct = s
-    return s
-
-
-def capture():
-    box = _window_box()
-    if box is None:
-        return None
-    shot = _sct().grab(box)
-    return cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
-
-
-def capture_pil_np():
-    """Capture returning (PIL RGB, np BGR) -- get_exp() needs the PIL image."""
-    box = _window_box()
-    if box is None:
-        return None, None
-    shot = _sct().grab(box)
-    pil = Image.frombytes("RGB", shot.size, shot.rgb)
-    return pil, cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
-
-
-def capture_minimap():
-    """Grab ONLY the minimap ROI (MM_X/Y/W/H) as BGR -- ~37x fewer pixels than capture() plus
-    it skips the full-frame cvtColor, so the hot position reads (stable_char does >=4 per read)
-    get much cheaper. Equivalent to _minimap(capture()) but grabs just the sub-box. Clamped to
-    the window rect so a smaller live window can't pull in neighbouring screen pixels (mirrors
-    _minimap's clamp). Returns None if the window is gone / the ROI falls outside it."""
-    box = _window_box()
-    if box is None:
-        return None
-    if MM_X >= box["width"] or MM_Y >= box["height"]:
-        return None
-    w = min(MM_W, box["width"] - MM_X)
-    h = min(MM_H, box["height"] - MM_Y)
-    region = {"left": box["left"] + MM_X, "top": box["top"] + MM_Y, "width": w, "height": h}
-    shot = _sct().grab(region)
-    return cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)
 
 
 # --- lie-check alarm: beep when a "needs a human" screen appears (captcha / curse) ---
@@ -2093,6 +2024,12 @@ kb.f10_callback = lambda: dump_frame("manual")   # F10 dumps the current frame f
 
 from char_config import (  # noqa: E402  (extracted; re-exported so core.<name> still works)
     load_char, apply_character, parse_buff_groups,
+)
+
+
+from capture import (  # noqa: E402  (extracted; re-exported so core.<name> still works)
+    _window_box, _sct, capture,
+    capture_pil_np, capture_minimap,
 )
 
 
