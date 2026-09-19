@@ -323,129 +323,9 @@ def make_active_timer():
     return tick, freeze
 
 
-def _minimap(np_img):
-    ey = min(MM_Y + MM_H, np_img.shape[0]); ex = min(MM_X + MM_W, np_img.shape[1])
-    return np_img[MM_Y:ey, MM_X:ex]
-
-
-def _char_color_from_mm(mm, near=None):
-    """Character (x,y) via COLOR (bright yellow blob) from a MINIMAP crop `mm`. Shared by
-    get_character_color / get_character_full so each does exactly one grab. (-1,-1) if none."""
-    hsv = cv2.cvtColor(mm, cv2.COLOR_BGR2HSV)
-    # tight to the real dot's signature (hue~29, sat~245, val~242). A translucent buff/
-    # heat-aura glow reads as lower saturation/value -> excluded. Size ~54px; keep 15-120.
-    mask = cv2.inRange(hsv, np.array([20, 165, 165]), np.array([36, 255, 255]))
-    num, labels, stats, cents = cv2.connectedComponentsWithStats(mask, 8)
-    blobs = [(int(cents[i][0]), int(cents[i][1]), int(stats[i][4]))
-             for i in range(1, num) if 15 <= stats[i][4] <= 120]
-    pick = _pick_char_blob(blobs, near)
-    if pick is None:
-        return -1, -1
-    return pick[0], pick[1]
-
-
-def get_character_color(np_img=None, near=None):
-    """Character (x,y) via COLOR (bright yellow blob) on the minimap. Far more robust than
-    template matching (which returns a phantom (122,188) at some spots). If `near`=(x,y) is
-    given and several yellow blobs exist, pick the closest (temporal continuity); else the
-    largest plausible blob. With no `np_img` grabs ONLY the minimap ROI (capture_minimap);
-    pass a full BGR frame to crop it instead (shared-frame callers). (-1,-1) if none."""
-    mm = _minimap(np_img) if np_img is not None else capture_minimap()
-    if mm is None:
-        return -1, -1
-    return _char_color_from_mm(mm, near=near)
-
-
-def _pick_char_blob(blobs, near=None):
-    """Choose the character dot among yellow blobs, rejecting buff-glow phantoms.
-    Prefer blobs inside the valid map box (MAP_X/Y_MIN/MAX); fall back to all blobs
-    only when NONE are in-box (e.g. a genuine deep fall) so recovery can still see
-    her. Within the candidates: nearest to `near` if given, else the largest."""
-    if not blobs:
-        return None
-    in_box = [b for b in blobs
-              if MAP_X_MIN <= b[0] <= MAP_X_MAX and MAP_Y_MIN <= b[1] <= MAP_Y_MAX]
-    cand = in_box or blobs
-    if near is not None and near[0] >= 0:
-        return min(cand, key=lambda b: (b[0]-near[0])**2 + (b[1]-near[1])**2)
-    return max(cand, key=lambda b: b[2])
-
-
-def get_character_full(np_img=None, near=None):
-    """Character (x, y) on the FULL minimap. Color first (robust), template as a fallback --
-    both read the SAME crop (one grab): the minimap ROI when no frame is passed, else the
-    supplied full frame cropped. (-1,-1) if neither finds it."""
-    mm = _minimap(np_img) if np_img is not None else capture_minimap()
-    if mm is None:
-        return -1, -1
-    x, y = _char_color_from_mm(mm, near=near)
-    if x >= 0:
-        return x, y
-    centers = detect_character_on_minimap(mm, templates_folder=CHAR_TPL, threshold=0.7)
-    if centers:
-        return centers[0][0], centers[0][1]
-    return -1, -1
-
-
 _SWIM_MAX_JUMP = 70   # px: a read leaping more than this from the last known pos is a phantom
                       # (a spurious yellow minimap blob), not real motion -- she can't cross that
                       # much of the ~200px-wide minimap between two ~40ms reads.
-
-
-def swim_read(near=None):
-    """FAST position read for swim TRAVEL (direction only): two quick samples ~20ms apart
-    instead of stable_char's four. If they agree (within 12px) return their midpoint; if one
-    is invalid return the other; if they disagree return the LATEST (freshest). ~2 captures
-    vs stable_char's 4 (+0.2s of pacing sleeps), so the swim loop decides direction ~2-3x
-    faster and the on-arrival settle freeze shrinks accordingly.
-
-    `near` = the last known position, threaded in by swim_to for temporal continuity: the reads
-    prefer the blob NEAREST it, and any sample leaping more than _SWIM_MAX_JUMP from it is dropped
-    as a phantom. Without this a lone spurious blob (e.g. a speck at the bottom of the water
-    minimap) could be returned as her position and FLIP the swim direction -- sending her off to a
-    map edge in a positive-feedback runaway (real dot lost -> only the phantom left). Landing was
-    already phantom-safe (settle needs CONSECUTIVE in-band reads); this makes DIRECTION safe too.
-    Without `near` it behaves exactly as before (largest plausible blob). stable_char stays the
-    default everywhere else."""
-    n = near if (near is not None and near[0] >= 0) else None
-    if n is None:
-        a = get_character_full()
-        time.sleep(0.02)
-        b = get_character_full()
-    else:
-        a = get_character_full(near=n)
-        time.sleep(0.02)
-        b = get_character_full(near=n)
-        def _far(p):
-            return p[0] >= 0 and (abs(p[0] - n[0]) > _SWIM_MAX_JUMP or abs(p[1] - n[1]) > _SWIM_MAX_JUMP)
-        if _far(a):
-            a = (-1, -1)
-        if _far(b):
-            b = (-1, -1)
-    if a[0] < 0:
-        return b
-    if b[0] < 0:
-        return a
-    if abs(a[0] - b[0]) <= 12 and abs(a[1] - b[1]) <= 12:
-        return ((a[0] + b[0]) // 2, (a[1] + b[1]) // 2)
-    return b
-
-
-def minimap_scroll(prev_crop, cur_crop, min_resp=0.4):
-    """Vertical scroll of the minimap TERRAIN between two full-minimap crops (from
-    `_minimap`), via phase correlation with the yellow dot masked out so only terrain
-    drives it. Returns (dy, resp): dy > 0 == the character ROSE (calibrated on a known
-    ascent); resp is the 0..1 correlation confidence. The minimap scrolls to keep the
-    character centered, so in the map's middle the dot is pinned (~95,136) while the
-    terrain scrolls -- this recovers climb progress the pinned dot cannot show."""
-    def _prep(mm):
-        hsv = cv2.cvtColor(mm, cv2.COLOR_BGR2HSV)
-        dot = cv2.inRange(hsv, np.array([18, 120, 120]), np.array([45, 255, 255]))
-        g = cv2.cvtColor(mm, cv2.COLOR_BGR2GRAY).astype(np.float32)
-        g[dot > 0] = 0                                    # drop the dot -> terrain only
-        return g * cv2.createHanningWindow((g.shape[1], g.shape[0]), cv2.CV_32F)
-    (_sx, sy), resp = cv2.phaseCorrelate(_prep(prev_crop), _prep(cur_crop))
-    return (sy if resp >= min_resp else 0.0), resp
 
 
 def is_farming(x, y):
@@ -1957,6 +1837,13 @@ from capture import (  # noqa: E402  (extracted; re-exported so core.<name> stil
 from focus_util import (  # noqa: E402  (extracted; re-exported so core.<name> still works)
     focus, is_focused, ensure_game_focused,
     focus_ok_or_bail, stable_char,
+)
+
+
+from charloc import (  # noqa: E402  (extracted; re-exported so core.<name> still works)
+    _minimap, _char_color_from_mm, get_character_color,
+    _pick_char_blob, get_character_full, swim_read,
+    minimap_scroll,
 )
 
 
