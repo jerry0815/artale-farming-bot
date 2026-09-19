@@ -199,63 +199,6 @@ if notify.notifier().enabled:
 _LIE_CAP_DIR = "datasets/lie_check/captures"
 
 
-def dump_frame(reason="manual", frame=None, tag=""):
-    """Save a FULL capture() frame to datasets/lie_check/captures/ for offline recall tuning.
-    F10 dumps the current frame on demand -- use it to grab a lie-check screen the detector
-    MISSED (the one case auto-dump can't see, since it only fires on a hit). The fast/full
-    ticks also call this when they fire, so real live-res positives accumulate for threshold
-    tuning. Reuses the passed `frame` when given (no extra grab). Never raises -- this rides
-    the safety path and must not crash the loop."""
-    try:
-        f = frame if frame is not None else capture()
-        if f is None or not hasattr(f, "shape"):
-            print("[dump] no frame (window gone?)")
-            return None
-        os.makedirs(_LIE_CAP_DIR, exist_ok=True)
-        ts = time.strftime("%Y%m%d_%H%M%S", time.localtime()) + f"_{int((time.time() % 1) * 1000):03d}"
-        safe_tag = "".join(c for c in tag if c.isalnum() or c in "-_.")
-        name = f"{ts}_{reason}" + (f"_{safe_tag}" if safe_tag else "") + ".png"
-        path = os.path.join(_LIE_CAP_DIR, name)
-        cv2.imwrite(path, f)
-        print(f"[dump] saved {path}  ({f.shape[1]}x{f.shape[0]})")
-        return path
-    except Exception as e:
-        print(f"[dump] failed: {e}")
-        return None
-
-
-def _hit_tag(hits):
-    """Compact filename tag from detection hits: names+scores, e.g. 'curse_lock0.85'."""
-    return "_".join(f"{n.replace('.png', '')}{s:.2f}" for n, s in hits)
-
-
-def lie_check_fast_tick(interval=0.8):
-    """Fast SAFETY scan (~40ms) on ONE capture at `interval` cadence, run in the hot loops:
-    BOTH the transparent-shape lie-check (captcha -> alarm) AND the another-player check
-    (red dot on the minimap -> alarm + auto-pause). They share this single tick so they run
-    at the same time and frequency -- neither can be missed while the other is checked."""
-    now = time.time()
-    if now - _last_fast_tick[0] < interval:
-        return
-    _last_fast_tick[0] = now
-    f = capture()
-    if f is None or not hasattr(f, "shape"):
-        return
-    if _lie_enabled:                                       # transparent-shape captcha -> alarm
-        hits = detect_lie_check(f, templates_folder=_LIE_DIR,
-                                template_filter=_FAST_TEMPLATES, work_width=520)
-        if _fast_alert.update(bool(hits)) and hits:
-            print(f"[lie-check] ⚠️ 透明圖形驗證 {[(n, round(s, 2)) for n, s in hits]} -- ALARM ('n' 暫停)")
-            notify.send("lie_check", f"⚠️ 透明圖形驗證 (captcha) detected {[n for n, _ in hits]} — needs a human ('n' 暫停)")
-            dump_frame("fast_auto", f, tag=_hit_tag(hits))
-    dots = _enemy_dots(f)                                  # another player -> alarm + pause
-    if dbg_on():
-        dbg(f"[enemy] scan -> {len(dots)} red dot(s)" + (f" at {dots}" if dots else ""))
-    if dots:
-        print("[water] another player -> ALARM + PAUSE ('m' silence, 'n' resume)")
-        notify.send("another_player", "⚠️ Another player entered the map — bot PAUSED ('m' silence, 'n' resume)")
-        enemy_alarm_on(); kb.safe_release_all(); kb.pause = True
-
 # Near-miss telemetry: the full check only auto-dumps on a HIT, so a MISSED curse/monster screen
 # (the exact failure we're chasing) leaves no trace. When a template lands in [floor, threshold)
 # -- close but not firing -- dump the frame so we can see WHY it missed (degraded live text vs a
@@ -264,45 +207,6 @@ def lie_check_fast_tick(interval=0.8):
 _NEAR_MISS_FLOOR = 0.72
 _NEAR_MISS_INTERVAL = 30.0
 _last_near_miss_dump = [0.0]
-
-
-def lie_check_full_tick(interval=1.5):
-    """Full check for the slower screens (curse / monster). Loop top only."""
-    if not _lie_enabled:
-        return
-    now = time.time()
-    if now - _last_full_tick[0] < interval:
-        return
-    _last_full_tick[0] = now
-    f = capture()
-    if f is None or not hasattr(f, "shape"):
-        return
-    # higher work_width keeps the curse banner/lock detail (fine 2-line text + icon)
-    # so they clear threshold on smaller live windows; per-template thresholds apply.
-    scores = {}
-    hits = detect_lie_check(f, templates_folder=_LIE_DIR, template_filter=_FULL_TEMPLATES,
-                            work_width=1000, scores=scores)
-    yolo = detect_lie_check_yolo(f, conf=0.80)           # [] when the model file is absent
-    #   conf 0.80: real popups score 0.978-0.991; worst false detection on normal frames was
-    #   0.701 (a minimap-crop debug image) -- 0.80 clears positives with headroom for degraded
-    #   live frames while staying above that floor. Recall-first, measured not guessed.
-    hits = hits + [(f"yolo:{cls}", cf) for cls, cf, _ in yolo]
-    if _full_alert.update(bool(hits)) and hits:
-        print(f"[lie-check] ⚠️ 需真人處理畫面 {[(n, round(s, 2)) for n, s in hits]} -- ALARM ('n' 暫停)")
-        notify.send("lie_check", f"⚠️ 需真人處理畫面 (curse/monster) {[n for n, _ in hits]} — needs a human ('n' 暫停)")
-        dump_frame("full_auto", f, tag=_hit_tag(hits))
-    elif not hits:                                        # near-miss capture (below threshold)
-        near = [(n, s) for n, s in scores.items() if s >= _NEAR_MISS_FLOOR]
-        if near and now - _last_near_miss_dump[0] >= _NEAR_MISS_INTERVAL:
-            _last_near_miss_dump[0] = now
-            near.sort(key=lambda x: -x[1])
-            print(f"[lie-check] near-miss (below threshold) {[(n, round(s, 2)) for n, s in near]} -- dumping frame")
-            dump_frame("near_miss", f, tag=_hit_tag(near))
-
-def lie_check_tick():
-    """Loop-top check: run both pipelines (fast covers transparent between states too)."""
-    lie_check_fast_tick()
-    lie_check_full_tick()
 
 
 # --- background safety monitor: the FULL check (curse/monster) is ~0.5s of template matching,
@@ -317,80 +221,10 @@ _safety_stop = threading.Event()
 _safety_thread = [None]
 
 
-def _safety_monitor_loop():
-    while not _safety_stop.is_set() and not STOP.is_set():
-        if not kb.pause:
-            try:
-                lie_check_full_tick()                  # self-throttled to 1.5s internally
-                STATUS["lie"] = is_lie_check_active()
-            except Exception as e:
-                print(f"[safety] monitor error: {e}")
-        try:
-            _maybe_escalate_to_free_market()           # OUTSIDE the pause gate: the enemy alarm fires
-        except Exception as e:                          # a pause, and the escape must run DURING it
-            print(f"[free-market] monitor error: {e}")
-        _safety_stop.wait(0.3)                          # poll ~3x/s; full_tick paces the real work
-
-
-def start_safety_monitor():
-    """Start the background FULL lie-check monitor (idempotent). Call at farm start."""
-    if not _lie_enabled:
-        return
-    t = _safety_thread[0]
-    if t is not None and t.is_alive():
-        return
-    _safety_stop.clear()
-    t = threading.Thread(target=_safety_monitor_loop, name="safety-monitor", daemon=True)
-    _safety_thread[0] = t
-    t.start()
-    print("[safety] background curse/monster monitor started (off the action loop)")
-
-
-def stop_safety_monitor():
-    """Stop the background monitor (idempotent). Call at every farm-loop exit."""
-    _safety_stop.set()
-    t = _safety_thread[0]
-    if t is not None and t.is_alive() and t is not threading.current_thread():
-        t.join(timeout=1.0)
-    _safety_thread[0] = None
-
-
-def lie_check_silence():
-    """Stop both alarms (e.g. when the bot pauses -- a human is present)."""
-    _fast_alert.update(False)
-    _full_alert.update(False)
-
-
-def is_lie_check_active():
-    """True while either lie-check alarm is sounding (a human is needed)."""
-    return bool(_fast_alert.alarm.active or _full_alert.alarm.active)
-
-
 # --- another-player alarm: a DISTINCT lower tone, sounds until 'm' acknowledges it ---
 _enemy_alarm = Alarm(freq=700, beep_ms=250, gap_ms=120)
 
 
-def enemy_alarm_on():
-    """Start the another-player alarm (keeps beeping until 'm' / silence)."""
-    _enemy_alarm.start()
-
-
-def enemy_alarm_silence():
-    _enemy_alarm.stop()
-
-
-def silence_all_alarms():
-    """'m': acknowledge -- stop every alarm (lie-check + another-player). Quiet when nothing
-    is sounding, so 'm' stays usable for other things (e.g. record-route node marks)."""
-    active = is_lie_check_active() or _enemy_alarm.active
-    lie_check_silence()
-    enemy_alarm_silence()
-    if active:
-        print("[alarm] silenced ('m')")
-
-
-kb.f9_callback = silence_all_alarms   # 'm' silences alarms wherever kb.on_press is the listener
-kb.f10_callback = lambda: dump_frame("manual")   # F10 dumps the current frame for offline recall tuning
 
 
 # --- auto-escape: if another player stays and the alarm is left un-acknowledged, click the
@@ -402,57 +236,6 @@ _FM_AFTER = [20.5]            # seconds the enemy alarm may sound UN-acked befor
 _FM_XY = [(1452, 1092)]      # 自由市場 button center in the capture frame (deep_sea_2, 1942x1136)
 _enemy_alarm_since = [None]   # when the enemy alarm began sounding continuously (None = quiet)
 _fm_clicked = [False]         # clicked this episode already -> don't re-click until it's silenced
-
-
-def _click_screen(x, y):
-    """Left-click at a PHYSICAL screen pixel. The process is DPI-aware at runtime, so these match
-    _window_box()/mss coords and SetCursorPos lands where the capture frame says."""
-    u = ctypes.windll.user32
-    u.SetCursorPos(int(x), int(y)); time.sleep(0.05)
-    u.mouse_event(0x0002, 0, 0, 0, 0)          # LEFTDOWN
-    time.sleep(0.03)
-    u.mouse_event(0x0004, 0, 0, 0, 0)          # LEFTUP
-
-
-def click_free_market():
-    """Focus the game and click 自由市場 to leave the map. Screen point = window box + the button's
-    frame offset (recomputed live). One click -- it opens/teleports directly."""
-    box = _window_box()
-    if box is None:
-        print("[free-market] game window not found -> cannot click"); return
-    fx, fy = _FM_XY[0]
-    sx, sy = box["left"] + fx, box["top"] + fy
-    print(f"[free-market] enemy alarm un-acked {_FM_AFTER[0]:g}s -> click 自由市場 @ screen ({sx},{sy})")
-    try:
-        notify.send("another_player",
-                    f"⚠️ No response in {_FM_AFTER[0]:g}s — auto-clicking Free Market to leave the map")
-    except Exception:
-        pass
-    if not focus():
-        print("[free-market] could not focus game -> skip click"); return
-    _click_screen(sx, sy)
-    enemy_alarm_silence()                            # escaped the map -> the action is done, so stop
-    print("[free-market] clicked -> alarm silenced")  # the alarm (no human needed to ack it now)
-
-
-def _maybe_escalate_to_free_market():
-    """If the enemy alarm has sounded UN-acknowledged for _FM_AFTER seconds, click Free Market once.
-    Tracks the alarm's continuous-active time; silencing it ('m') drops _enemy_alarm.active and
-    resets here -- so pressing 'm' within the window cancels the escape. Runs from the safety
-    monitor thread (which keeps ticking while the bot is paused, i.e. exactly the enemy state)."""
-    if not _FM_ESCAPE[0] or not _enemy_alarm.active:
-        _enemy_alarm_since[0] = None
-        _fm_clicked[0] = False
-        return
-    now = time.time()
-    if _enemy_alarm_since[0] is None:
-        _enemy_alarm_since[0] = now
-    elif not _fm_clicked[0] and now - _enemy_alarm_since[0] >= _FM_AFTER[0]:
-        _fm_clicked[0] = True                        # click ONCE; won't repeat until silenced
-        try:
-            click_free_market()
-        except Exception as e:
-            print(f"[free-market] click failed: {e}")
 
 
 # --- shared status + cooperative stop, for the control UI (panel.py) --------------
@@ -573,11 +356,6 @@ def exp_record_loop(label="human", sleep=time.sleep):
 ENEMY_THRESHOLD = 0.75      # red-dot match threshold; per-map via set_enemy_threshold(cfg)
 
 
-def set_enemy_threshold(t):
-    global ENEMY_THRESHOLD
-    ENEMY_THRESHOLD = float(t)
-
-
 # --- enemy-dot shadow rollout: the TEMPLATE detector stays authoritative (drives the alarm);
 # the new HSV color detector (detect_red_dots_color) runs alongside in SHADOW so we can prove it
 # matches the template on REAL frames before switching. On any activity we log presence agreement
@@ -589,80 +367,6 @@ _ENEMY_SHADOW_LOG = "logs/enemy_dots_shadow.jsonl"     # one line per template/c
 _ENEMY_AGREE_DUMP_INTERVAL = 30.0    # both agree (player present or both quiet-with-one-firing): rarer dumps
 _ENEMY_DISAGREE_DUMP_INTERVAL = 10.0 # color-only or template-only: the interesting cases, dumped more often
 _enemy_shadow_state = {"agree": 0.0, "disagree": 0.0}  # last-dump wall-clock per category (throttle)
-
-
-def _dump_enemy_sample(frame, tag=""):
-    """Save a FULL frame to datasets/enemy_dots/samples/ for offline template-vs-color review.
-    Best-effort -- never raises (rides the safety path)."""
-    try:
-        os.makedirs(_ENEMY_SAMPLE_DIR, exist_ok=True)
-        ts = time.strftime("%Y%m%d_%H%M%S", time.localtime()) + f"_{int((time.time() % 1) * 1000):03d}"
-        safe = "".join(ch for ch in tag if ch.isalnum() or ch in "-_.")
-        path = os.path.join(_ENEMY_SAMPLE_DIR, f"{ts}_enemy_{safe}.png")
-        cv2.imwrite(path, frame)
-        return path
-    except Exception:
-        return None
-
-
-def _append_enemy_shadow_log(row):
-    """Append one shadow-comparison row (ts, template count, color count, agree) as JSON.
-    Best-effort -- never raises."""
-    try:
-        import json
-        os.makedirs(os.path.dirname(_ENEMY_SHADOW_LOG) or ".", exist_ok=True)
-        with open(_ENEMY_SHADOW_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
-
-def _enemy_shadow(frame, mm, template_dots):
-    """Double-check the color detector against the authoritative template result on this frame.
-    Logs every activity and dumps a sample (throttled) whenever either detector fires. Compares
-    at the PRESENCE level (len>0) -- the boolean the safety check actually uses. Never raises."""
-    try:
-        color_dots = detect_red_dots_color(mm)
-    except Exception:
-        return
-    t, c = len(template_dots), len(color_dots)
-    if t == 0 and c == 0:
-        return                                     # all-clear frame -> nothing to learn
-    agree = (t > 0) == (c > 0)
-    now = time.time()
-    _append_enemy_shadow_log({"ts": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
-                              "template": t, "color": c, "agree": agree})
-    key = "agree" if agree else "disagree"
-    interval = _ENEMY_AGREE_DUMP_INTERVAL if agree else _ENEMY_DISAGREE_DUMP_INTERVAL
-    if now - _enemy_shadow_state[key] >= interval:
-        _enemy_shadow_state[key] = now
-        _dump_enemy_sample(frame, f"t{t}_c{c}_{'agree' if agree else 'DISAGREE'}")
-
-
-def _enemy_dots(frame):
-    """Red dots (other players) in the minimap band of a captured BGR frame. TEMPLATE match is
-    authoritative (drives the another-player alarm); detect_red_dots_color runs in shadow to
-    validate the switch (see _enemy_shadow). Presence-only -> non-empty means escape."""
-    if frame is None:
-        return []
-    ey = min(MM_Y + MM_H, frame.shape[0]); ex = min(MM_X + MM_W, frame.shape[1])
-    mm = frame[MM_Y:ey, MM_X:ex]                  # FULL configured minimap band (lower platforms too)
-    try:
-        dots = detect_red_dots(mm, templates_folder="assets/minimap_other_character/",
-                               threshold=ENEMY_THRESHOLD)
-    except Exception:
-        return []
-    try:
-        _enemy_shadow(frame, mm, dots)            # shadow double-check: never affects the return
-    except Exception:
-        pass
-    return dots
-
-
-def get_enemy():
-    """Red dots (other players) on the minimap band. Non-empty -> escape. Standalone capture
-    (used by guard/panel); the hot-loop scan shares lie_check_fast_tick's frame."""
-    return _enemy_dots(capture())
 
 
 def make_active_timer():
@@ -2421,6 +2125,25 @@ from exp_tracking import (  # noqa: E402
     get_exp_number, get_exp, make_exp_tracker,
     append_exp_session, read_exp_sessions, _EXP_SESSIONS_PATH,
 )
+
+
+# The safety subsystem (lie-check scans, alarms, background monitor, free-market escape,
+# enemy-dot detection) lives in safety.py, extracted from here. All its STATE stays above
+# (alarms/alerts/timers/FM state/thread handles/ENEMY_THRESHOLD/minimap bounds); safety.py
+# reads it as core.<name>, so monkeypatch.setattr(core, ...) still binds. Re-exported so
+# callers/tests keep using core.<name>; safety references core only at call time (safe cycle).
+from safety import (  # noqa: E402
+    dump_frame, _hit_tag, lie_check_fast_tick,
+    lie_check_full_tick, lie_check_tick, _safety_monitor_loop,
+    start_safety_monitor, stop_safety_monitor, lie_check_silence,
+    is_lie_check_active, enemy_alarm_on, enemy_alarm_silence,
+    silence_all_alarms, _click_screen, click_free_market,
+    _maybe_escalate_to_free_market, set_enemy_threshold, _dump_enemy_sample,
+    _append_enemy_shadow_log, _enemy_shadow, _enemy_dots,
+    get_enemy,
+)
+kb.f9_callback = silence_all_alarms   # 'm' silences alarms wherever kb.on_press is the listener
+kb.f10_callback = lambda: dump_frame("manual")   # F10 dumps the current frame for offline recall tuning
 
 
 if __name__ == "__main__":
