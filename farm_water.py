@@ -200,18 +200,8 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
                   + (f" + title ({_fb_title_path})" if _fb_titlew is not None else ""))
         print(f"[water] approach ON: detector={detector} range={_arange} band={_aband}")
 
-    # Buff groups: each key set fires on its OWN interval, so e.g. 'd' every 5min and a slow buff
-    # 'G' every 15min run independently. Config: "buff_groups": [{"keys":["d"],"interval_secs":300},
-    # {"keys":["G"],"interval_secs":900}]. Back-compat: no buff_groups -> one group from buff_keys /
-    # buff_interval_secs (else the skill_interval range's low end).
-    _groups = map_cfg.get("buff_groups")
-    if _groups:
-        buff_groups = [(list(g.get("keys", [])), float(g.get("interval_secs", 300))) for g in _groups]
-    else:
-        _bk = map_cfg.get("buff_keys", [])
-        _bi = map_cfg.get("buff_interval_secs")
-        buff_groups = [(list(_bk), float(_bi) if _bi else float(skill_interval[0]))] if _bk else []
-    buff_groups = [(k, iv) for k, iv in buff_groups if k]      # drop empty key sets
+    # Buff groups: each key set fires on its OWN interval (see core.parse_buff_groups).
+    buff_groups = core.parse_buff_groups(map_cfg, skill_interval)
     # per-group next-cast time; each first fires ~5s in (staggered 1s so they don't collide)
     _next_buff = [core.time.time() + 5.0 + i for i in range(len(buff_groups))]
 

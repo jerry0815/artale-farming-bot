@@ -2494,6 +2494,22 @@ def apply_character(map_cfg, char_cfg):
     return merged
 
 
+def parse_buff_groups(map_cfg, skill_interval):
+    """Normalize a map config's buff spec into a list of (keys, interval_secs) tuples, each
+    group firing on its OWN interval (e.g. 'd' every 5min and a slow 'G' every 15min run
+    independently). Config form: "buff_groups": [{"keys":["d"],"interval_secs":300}, ...].
+    Back-compat: no buff_groups -> one group from buff_keys / buff_interval_secs (falling back
+    to the low end of `skill_interval` when no interval is given). Empty key sets are dropped."""
+    groups = map_cfg.get("buff_groups")
+    if groups:
+        buff_groups = [(list(g.get("keys", [])), float(g.get("interval_secs", 300))) for g in groups]
+    else:
+        bk = map_cfg.get("buff_keys", [])
+        bi = map_cfg.get("buff_interval_secs")
+        buff_groups = [(list(bk), float(bi) if bi else float(skill_interval[0]))] if bk else []
+    return [(k, iv) for k, iv in buff_groups if k]      # drop empty key sets
+
+
 def break_cycle(idle_seconds=30):
     """Full human-like break: down-jump off the left of the farming platform to the
     safe fallen platform (away from dragons), idle there, then recover back up.

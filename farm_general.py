@@ -68,14 +68,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     next_gather = [0.0]
 
     # Buffs -- same scheme as farm_water (each group on its own interval).
-    _groups = map_cfg.get("buff_groups")
-    if _groups:
-        buff_groups = [(list(g.get("keys", [])), float(g.get("interval_secs", 300))) for g in _groups]
-    else:
-        _bk = map_cfg.get("buff_keys", [])
-        _bi = map_cfg.get("buff_interval_secs")
-        buff_groups = [(list(_bk), float(_bi) if _bi else float(skill_interval[0]))] if _bk else []
-    buff_groups = [(k, iv) for k, iv in buff_groups if k]
+    buff_groups = core.parse_buff_groups(map_cfg, skill_interval)
     _next_buff = [core.time.time() + 5.0 + i for i in range(len(buff_groups))]
     _buff_settle = float(map_cfg.get("buff_settle_secs", 0.6))
     _buff_gap = float(map_cfg.get("buff_gap_secs", 0.7))
