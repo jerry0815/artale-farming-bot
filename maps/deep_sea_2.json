@@ -64,9 +64,6 @@
   "approach_step": 0,
   "deplete_reads": 4,
   "stall_limit": 8,
-  "buff_keys": [
-    "d"
-  ],
   "buff_groups": [
     {
       "keys": [
@@ -78,7 +75,7 @@
       "keys": [
         "3"
       ],
-      "interval_secs": 300
+      "interval_secs": 600
     },
     {
       "keys": [
@@ -90,7 +87,7 @@
       "keys": [
         "1"
       ],
-      "interval_secs": 300
+      "interval_secs": 600
     }
   ],
   "player": {
@@ -234,7 +231,6 @@
     "P4": 2
   },
   "node_arrive_jumps_note": "P4: after swim_to confirms arrival at y=136, fire 2 more short hops to seat firmly on the pin (she was landing at 136 then sinking back to P5 ~1.2s later -- a marginal seat). 2 brief 0.12s hops lift her a few px and re-drop onto P4; well under the stacked_jump_secs needed to reach P3, so she won't over-rise. If she instead reads an immediate FELL right after arriving (airborne when farming starts), drop to 1.",
-  "buff_interval_secs": 300,
   "platform_half": 60,
   "map_box": [
     30,
