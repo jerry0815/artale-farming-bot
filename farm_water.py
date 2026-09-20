@@ -467,7 +467,7 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
     core._enemy_alarm_since[0] = None; core._fm_clicked[0] = False              # fresh run
     if core._FM_ESCAPE[0]:
         print(f"[free-market] auto-escape ON: click 自由市場 if the enemy alarm is un-acked "
-              f"{_FM_AFTER[0]:g}s (button frame {_FM_XY[0]})")
+              f"{core._FM_AFTER[0]:g}s (button frame {core._FM_XY[0]})")
     core.start_safety_monitor()                            # curse/monster runs off the action loop
     if rotation == "sweep":
         print(f"[water] sweep {farm_nodes} then reset via {reset_node or '(bottom)'}")
