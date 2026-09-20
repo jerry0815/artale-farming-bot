@@ -1,6 +1,6 @@
 """READ-ONLY live minimap position readout. Sends NO key input, moves nothing.
 
-Shows the (x, y) the FARMING LOOP actually sees -- recovery.get_character_full (color-first,
+Shows the (x, y) the FARMING LOOP actually sees -- core.get_character_full (color-first,
 the SAME reader swim_to uses) -- with a running per-axis min/max so you can see read jitter.
 Stand where you want to measure (e.g. on P4) and watch each axis settle.
 
@@ -11,7 +11,7 @@ Usage:
 import sys
 import time
 
-import recovery
+import core
 
 
 def main():
@@ -21,7 +21,7 @@ def main():
     try:
         i = 0
         while n is None or i < n:
-            x, y = recovery.get_character_full()
+            x, y = core.get_character_full()
             i += 1
             if x >= 0:
                 xs.append(x); ys.append(y)

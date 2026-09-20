@@ -3,14 +3,14 @@
 The KenYu sprite set (bombing_fish_house / goby / bone_fish) ships as BGRA PNGs with a
 baked-in pure-green chroma-key background. We build a match mask by keying out the green,
 then masked-template-match each sprite in a screen ROI and NMS the hits to a count. This
-plugs into recovery.farming_loop_water as the depletion `count_fn` for maps whose
+plugs into core.farming_loop_water as the depletion `count_fn` for maps whose
 monsters the dragon YOLO model doesn't know.
 
 Everything here is pure/offline except that it operates on frames captured elsewhere;
 mask building, IoU/NMS, and counting are unit-tested with synthetic images.
 
 Scale, threshold, and ROI are MAP-SPECIFIC and need live tuning -- use
-`python recovery.py fishcount --map maps/<name>.json` to dial them in.
+`python core.py fishcount --map maps/<name>.json` to dial them in.
 """
 import glob
 import os

@@ -2,10 +2,10 @@
 
 Pure module (stdlib only): the graph, node classification, and path planning
 are testable with no live game. `travel()` takes injected locate/execute
-callables so it is testable too. recovery.py wires the real ones.
+callables so it is testable too. core.py wires the real ones.
 
-Node y-bands are in the minimap frame that recovery.get_character_color()
-returns (offset 20,171 -> ROPE_X=91). They mirror recovery.py constants.
+Node y-bands are in the minimap frame that core.get_character_color()
+returns (offset 20,171 -> ROPE_X=91). They mirror core.py constants.
 """
 
 NODES = ["TOP_FARM", "REST", "MID", "BOTTOM_FARM", "LOWER_R", "PORTAL_BOT", "LOWER_LEDGE"]
@@ -60,7 +60,7 @@ EDGES = [
     # NOTE: the R_C edges are logical "recover-macro" edges. Physically the bottom rope-
     # LADDER and the upper CHAIN are STACKED in the same minimap column (verified via synced
     # screen+minimap capture) with a vertical jump between them at the ladder top (~y124) --
-    # NOT a horizontal gap. recovery.climb_and_jump rides both by holding Up (bridging the
+    # NOT a horizontal gap. core.climb_and_jump rides both by holding Up (bridging the
     # gap with one jump if it stalls). The graph keeps a single BOTTOM_FARM->TOP_FARM edge (executed by
     # recover_to_farming) so navmap.travel needs no per-rope executor. Do not split it into
     # BOTTOM_FARM->MID without also adding an EDGE_ACTIONS executor for that hop.
@@ -82,7 +82,7 @@ def load_route(route_or_path):
 
     Backward compatible: if this is never called, the hand-tuned defaults above
     stay in force. Edge params (grab_x, land_y, dismount, target_x, ...) are
-    flattened onto each EDGES entry so recovery.execute_edge can read them, and
+    flattened onto each EDGES entry so core.execute_edge can read them, and
     the `kind` key is preserved for the data-driven dispatch."""
     global NODES, FARM_NODES, _BANDS, EDGES
     route = route_or_path

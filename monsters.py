@@ -257,12 +257,12 @@ if __name__ == "__main__":
     import sys
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "motion":
-        import recovery, time as _t
+        import core, time as _t
         secs = float(sys.argv[2]) if len(sys.argv) > 2 else 1.5
         frames = []
         t0 = _t.time()
         while _t.time() - t0 < secs:
-            f = recovery.capture()
+            f = core.capture()
             if f is not None:
                 frames.append(f)
         bg = background_plate(frames)
@@ -280,9 +280,9 @@ if __name__ == "__main__":
         cv2.imwrite("debug_output/dragons_motion.png", vis)
         print("wrote debug_output/dragons_motion.png")
     elif cmd == "test":
-        import recovery                          # live capture lives here
+        import core                          # live capture lives here
         tpls = load_templates()
-        frame = recovery.capture()
+        frame = core.capture()
         boxes = detect_dragons(frame, DEFAULT_ROI, tpls)
         print(f"templates={len(tpls)}  dragons detected={len(boxes)}  ROI={DEFAULT_ROI}")
         os.makedirs("debug_output", exist_ok=True)

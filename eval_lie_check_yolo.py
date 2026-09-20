@@ -148,7 +148,7 @@ def main():
         return lie_check_yolo.detect_lie_check_yolo(frame, conf=args.conf, imgsz=1280)
 
     def template_fn(frame):
-        # the FULL production template set (curse + monster), same as recovery._FULL_TEMPLATES
+        # the FULL production template set (curse + monster), same as core._FULL_TEMPLATES
         return detection.detect_lie_check(
             frame, templates_folder="assets/lie_check/",
             template_filter=["curse_banner.png", "curse_lock.png", "monster_instr.png",

@@ -175,7 +175,7 @@ def detect_red_dots_color(minimap_bgr, hsv_ranges=RED_HSV_RANGES,
     detect_red_dots (template). Presence-only: returns each qualifying blob's center
     [cx, cy]; the caller only checks whether the list is non-empty. Single-pass HSV
     threshold, much cheaper than the multi-template match. Mirrors
-    recovery._char_color_from_mm."""
+    core._char_color_from_mm."""
     if minimap_bgr is None or minimap_bgr.size == 0:
         return []
     hsv = cv2.cvtColor(minimap_bgr, cv2.COLOR_BGR2HSV)

@@ -6,7 +6,7 @@ Usage: python trail_log.py [seconds]   (default 20)
 Start it, then immediately do the manual recovery in-game.
 """
 import sys, time
-from recovery import get_character_color as pos   # robust color-based sensing
+from core import get_character_color as pos   # robust color-based sensing
 
 secs = float(sys.argv[1]) if len(sys.argv) > 1 else 20.0
 

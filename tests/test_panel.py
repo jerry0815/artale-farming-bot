@@ -42,14 +42,14 @@ def test_exp_record_start_stop():
 
 
 def test_status_dict_timer_during_exp_record(monkeypatch):
-    import recovery, time
-    recovery.STATUS.update(state="exp_record", exp_started_at=time.time() - 30,
+    import core, time
+    core.STATUS.update(state="exp_record", exp_started_at=time.time() - 30,
                            run_active_base=None, run_active_since=None)
     _, c = _make()
     st = panel._status_dict(c)
     assert 29 <= st["run_secs"] <= 31          # elapsed recording time is exposed
     # and it does NOT leak when idle with no start time
-    recovery.STATUS.update(state="idle", exp_started_at=None)
+    core.STATUS.update(state="idle", exp_started_at=None)
     assert panel._status_dict(c).get("run_secs") in (None, 0)
 
 

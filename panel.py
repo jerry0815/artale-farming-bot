@@ -8,7 +8,7 @@ browser process, so its UI stays smooth while this process runs the CPU-heavy fa
 in-process webview got starved). Falls back to the default browser if Edge/Chrome isn't found.
 Controls: Start (farm) / Pause / Stop, Recover, Watch-only (passive lie-check
 loop), and Record route (map name + node marks from the browser). Live status +
-a big green/red lie-check banner, polled from recovery.STATUS.
+a big green/red lie-check banner, polled from core.STATUS.
 
 The bot runs in a background thread; the panel sets keyboard.pause and reads the
 shared status, so the existing 'n' hotkey and all lie-check ticks keep working.
@@ -193,7 +193,7 @@ class Controller:
 # Real wiring (game side). Imported lazily so the Controller stays testable alone.
 # --------------------------------------------------------------------------------
 def _build_actions(controller_ref):
-    import recovery
+    import core
     import keyboard as kb
     import record_route
 
@@ -237,7 +237,7 @@ def _build_actions(controller_ref):
         return False, f"unknown step {step}"
 
     def _enemy_check():
-        return len(recovery.get_enemy()) > 0
+        return len(core.get_enemy()) > 0
 
     def _panic():
         kb.safe_release_all()
@@ -247,36 +247,40 @@ def _build_actions(controller_ref):
     def farm(map_path, char=None):
         """One farm entry: the selected map's `loop` field picks the loop -- 'nav' = the
         land dragon-nest loop (map geometry unused), else the water swim loop."""
-        import watermap
+        import watermap, farm_water, farm_dragon, farm_general
         def _go():
             kb.pause = False
             cfg = watermap.load_map(map_path) if map_path else {}
-            if cfg.get("loop") == "nav":
-                recovery.farming_loop_nav(exp_check=None, enemy_check=_enemy_check, panic=_panic, cfg=cfg)
+            loop = cfg.get("loop")
+            if loop == "nav":
+                farm_dragon.farming_loop_nav(exp_check=None, enemy_check=_enemy_check, panic=_panic, cfg=cfg)
+            elif loop == "sweep":
+                farm_general.farming_loop_general(map_path, char=char or None,
+                                                  enemy_check=_enemy_check, panic=_panic)
             else:
-                recovery.farming_loop_water(map_path, char=char or None,
-                                            enemy_check=_enemy_check, panic=_panic)
+                farm_water.farming_loop_water(map_path, char=char or None,
+                                              enemy_check=_enemy_check, panic=_panic)
         _run_bg(_go)
 
     def watch():
-        _run_bg(recovery.watch_loop)
+        _run_bg(core.watch_loop)
 
     def exp_record(label):
-        _run_bg(lambda: recovery.exp_record_loop(label))
+        _run_bg(lambda: core.exp_record_loop(label))
 
     def recover():
         def _go():
             try:
-                recovery.recover_to_farming()
+                core.recover_to_farming()
             finally:
                 controller_ref[0].finish()
-                recovery.STATUS["state"] = "idle"
-        recovery.STATUS["state"] = "recovering"
+                core.STATUS["state"] = "idle"
+        core.STATUS["state"] = "recovering"
         _run_bg(_go)
 
     def make_recorder(mapname):
         rec = record_route.RouteRecorder(mapname)
-        recovery.STATUS["state"] = "recording"
+        core.STATUS["state"] = "recording"
         rec.start()
         return rec
 
@@ -284,8 +288,8 @@ def _build_actions(controller_ref):
         kb.pause = not kb.pause
 
     def stop():
-        recovery.STOP.set()
-        recovery.lie_check_silence()
+        core.STOP.set()
+        core.lie_check_silence()
         kb.safe_release_all()
 
     return {"farm": farm, "watch": watch, "recover": recover, "train": train,
@@ -303,11 +307,11 @@ def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, ro
     import cv2
     import numpy as np
     import fish
-    import recovery
+    import core
     import watermap
     if kind == "dragon":                                      # dragon-nest count ROI preview
         import monsters
-        f = recovery.capture()
+        f = core.capture()
         if f is None:
             return {"ok": False, "msg": "no frame (is the game window visible / not minimized?)"}
         try:
@@ -341,7 +345,7 @@ def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, ro
         cfg = {**cfg, "fish_species": species}
     if per:
         cfg = {**cfg, "fish_per_species": per}
-    f = recovery.capture()
+    f = core.capture()
     if f is None:
         return {"ok": False, "msg": "no frame (is the game window visible / not minimized?)"}
     if roi is None and cfg.get("count_roi"):
@@ -541,8 +545,8 @@ def save_buffs(file, groups, allowed_paths):
 
 
 def _status_dict(controller):
-    import recovery, time
-    st = dict(recovery.STATUS)
+    import core, time
+    st = dict(core.STATUS)
     st["mode"] = controller.mode
     st["recorder_marks"] = controller.recorder.marks if controller.recorder else 0
     ba = st.get("buff_at")
@@ -797,7 +801,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    const sel = document.getElementById('charsel');
    sel.innerHTML = '<option value="">(map default)</option>';
    for(const p of chars){
-     const name = p.split(/[\\/]/).pop().replace(/\.json$/, '');
+     const name = p.split(/[\\/]/).pop().replace(/\\.json$/, '');
      const o=document.createElement('option'); o.value=p; o.textContent=name; sel.appendChild(o);
    }
  }
@@ -870,7 +874,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    clearTimeout(_tp); _tp=setTimeout(poll, 500);
  }
  let logCursor=0;
- function logClass(s){ s=s.replace(/^\d\d:\d\d:\d\d\.\d\d\d /,'');   // drop timestamp prefix
+ function logClass(s){ s=s.replace(/^\\d\\d:\\d\\d:\\d\\d\\.\\d\\d\\d /,'');   // drop timestamp prefix
    if(s.startsWith('[exp]'))return'exp'; if(s.startsWith('[approach'))return'app';
    if(s.startsWith('[water')||s.startsWith('[nav'))return'wtr'; return''; }
  async function pollLog(){
@@ -969,8 +973,8 @@ def make_handler(controller):
                 ok, msg = save_buffs(file, groups, allowed)
                 return self._send(200, json.dumps({"ok": ok, "msg": msg}))
             if parsed.path == "/exp_sessions":
-                import recovery
-                return self._send(200, json.dumps(recovery.read_exp_sessions()))
+                import core
+                return self._send(200, json.dumps(core.read_exp_sessions()))
             if parsed.path == "/detect":
                 mp = q.get("map", [None])[0] or None
                 scale = float(q["scale"][0]) if q.get("scale", [""])[0] else None
@@ -1101,8 +1105,8 @@ def serve_app(port=PORT):
     proc = subprocess.Popen(args)
     proc.wait()                                     # block until the user closes the app window
     try:                                            # closed -> stop the farm + release keys (never
-        import recovery                             # leave a key held), then exit
-        recovery.STOP.set()
+        import core                             # leave a key held), then exit
+        core.STOP.set()
         import keyboard as _kb
         _kb.safe_release_all()
     except Exception:

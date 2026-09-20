@@ -11,7 +11,7 @@ press 'n' to stop. Aim for ~200-400 frames.
 """
 import os, sys, time
 import cv2
-import recovery as R
+import core as R
 from pynput.keyboard import Listener
 
 

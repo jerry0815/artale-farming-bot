@@ -15,7 +15,7 @@ grow to cover.
 import time
 from pynput.keyboard import Listener
 import keyboard as kb
-import recovery as rec
+import core as rec
 
 # PROPOSED bands = navmap's current set with MID_R narrowed (150->142) and the two
 # new right-side nodes added. First match wins (same rule as navmap.classify_node).
