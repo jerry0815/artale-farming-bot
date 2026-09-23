@@ -298,6 +298,33 @@ boot();
 </script></body></html>"""
 
 
+_PALETTE = ["#ff3b3b", "#3bd23b", "#4aa3ff", "#ffd23f", "#c77dff", "#4dd0e1"]
+
+
+def _apply_cli(argv):
+    """--dir <path> retargets the dataset (images/ + labels/ under it); --classes a,b,c sets
+    the label classes (colors auto-assigned). Lets ONE labeler serve any map/class set, e.g.
+    `python label_mobs.py --dir datasets/flat_sweep --classes mob` for a single-class mob pass."""
+    global ROOT, IMG_DIR, LBL_DIR, CLASSES, COLORS
+    if "--dir" in argv:
+        ROOT = argv[argv.index("--dir") + 1]
+        IMG_DIR = os.path.join(ROOT, "images")
+        LBL_DIR = os.path.join(ROOT, "labels")
+    if "--classes" in argv:
+        CLASSES = [c for c in argv[argv.index("--classes") + 1].split(",") if c]
+        COLORS = [_PALETTE[i % len(_PALETTE)] for i in range(len(CLASSES))]
+    return ROOT, CLASSES
+
+
+def render_page():
+    """The labeler HTML with the live CLASSES/COLORS injected (JS list + the key-hint)."""
+    page = PAGE.replace(
+        'const CLASSES=["fishhouse","goby","player"], COLORS=["#ff3b3b","#3bd23b","#4aa3ff"];',
+        f'const CLASSES={json.dumps(CLASSES)}, COLORS={json.dumps(COLORS)};')
+    return page.replace("1=fishhouse 2=goby 3=player",
+                        " ".join(f"{i + 1}={c}" for i, c in enumerate(CLASSES)))
+
+
 def make_handler():
     class H(http.server.BaseHTTPRequestHandler):
         def _send(self, code, ctype, body):
@@ -312,7 +339,7 @@ def make_handler():
             u = urllib.parse.urlparse(self.path)
             q = urllib.parse.parse_qs(u.query)
             if u.path == "/":
-                self._send(200, "text/html; charset=utf-8", PAGE.encode())
+                self._send(200, "text/html; charset=utf-8", render_page().encode())
             elif u.path == "/api/frames":
                 self._send(200, "application/json", json.dumps(frames()).encode())
             elif u.path == "/api/label":
@@ -344,6 +371,7 @@ def make_handler():
 
 if __name__ == "__main__":
     import sys
+    _apply_cli(sys.argv)                              # --dir / --classes: per-map, configurable classes
     if "--grab-misses" in sys.argv:
         from ultralytics import YOLO
         model = YOLO("models/mob_yolo.pt")
