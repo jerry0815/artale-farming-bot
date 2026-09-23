@@ -1,0 +1,36 @@
+{
+  "loop": "sweep",
+  "_scaffold_note": "First general-sweep map. Player = generic HP-bar anchor (no character/template). Mobs = generic pooled model. Geometry values marked TODO_MEASURE need a live frame; sweep numbers are starting guesses to tune in-game.",
+
+  "detector": "mob_yolo",
+  "mob_model": "models/mob_generic.pt",
+  "mob_conf": 0.4,
+  "mob_imgsz": 640,
+
+  "anchor": "hpbar",
+  "player": {},
+  "_player_note": "Empty {} = default red-HP-bar detection (DEFAULTS in player.py). Add hue_lo / sat_val_lo / foot_offset / bar-geometry overrides here only if the anchor misgrabs on this map.",
+
+  "attack_key": "TODO_SET_AOE_KEY",
+  "attack_range": 200,
+  "aoe_max": 6,
+  "start_heading": 1,
+  "beat_gap": 0.05,
+
+  "gather": null,
+  "_gather_note": "Optional push/scoop skill. Set to {\"key\":\"z\",\"grp\":90,\"min\":3,\"dash_gap\":50,\"cooldown\":1.5} to enable path-scoop gathering; leave null for plain walk-and-kill.",
+
+  "sweep_bounds": null,
+  "_sweep_bounds_note": "TODO_MEASURE: [mm_x_lo, mm_x_hi] = minimap x of the platform's left/right ends, so she turns around at an edge instead of walking off. Read via python live_pos.py while standing at each end. null = no edge turnaround (relies on empty-ground ADVANCE only).",
+
+  "minimap": {"x": 20, "y": 171, "w": 210, "h": 400},
+  "_minimap_note": "TODO_MEASURE: minimap crop box (screen px). Copy from a similar map or measure on a flat_sweep frame.",
+
+  "map_box": [30, 200, 50, 250],
+  "_map_box_note": "TODO_MEASURE: valid character-dot box [x_min,x_max,y_min,y_max] on the minimap (rejects phantom reads).",
+
+  "enemy_threshold": 0.75,
+
+  "buff_groups": [],
+  "_buff_note": "Optional: [{\"keys\":[\"d\"],\"interval_secs\":300}, ...]. Empty = no buffs."
+}
