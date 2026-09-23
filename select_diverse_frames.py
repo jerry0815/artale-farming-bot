@@ -79,6 +79,34 @@ def main():
         fh.write("\n".join(os.path.basename(s) for s in sel) + "\n")
     print(f"[select] wrote {listing} ({len(sel)} names)")
 
+    # --prelabel <model.pt>: auto-label the selected frames that aren't already hand-labeled,
+    # so you only REVIEW them (fast) instead of drawing from scratch. Hand labels are preserved.
+    if "--prelabel" in sys.argv:
+        model_path = sys.argv[sys.argv.index("--prelabel") + 1]
+        from ultralytics import YOLO
+        model = YOLO(model_path)
+        lbl_dir = os.path.join(os.path.dirname(img_dir) or ".", "labels")
+        os.makedirs(lbl_dir, exist_ok=True)
+        conf = float(sys.argv[sys.argv.index("--conf") + 1]) if "--conf" in sys.argv else 0.4
+        pre = kept = 0
+        for s in sel:
+            base = os.path.splitext(os.path.basename(s))[0]
+            lp = os.path.join(lbl_dir, base + ".txt")
+            if os.path.exists(lp) and [ln for ln in open(lp, encoding="utf-8") if ln.strip()]:
+                kept += 1; continue                       # hand-labeled -> keep, don't overwrite
+            im = cv2.imread(s); H, W = im.shape[:2]
+            r = model.predict(im, imgsz=640, conf=conf, verbose=False)[0]
+            lines = []
+            for b in r.boxes:
+                x0, y0, x1, y1 = b.xyxy[0].tolist()
+                lines.append(f"0 {((x0 + x1) / 2) / W:.6f} {((y0 + y1) / 2) / H:.6f} "
+                             f"{(x1 - x0) / W:.6f} {(y1 - y0) / H:.6f}")
+            open(lp, "w", encoding="utf-8").write("\n".join(lines) + ("\n" if lines else ""))
+            pre += 1
+        print(f"[select] prelabeled {pre} frames with {model_path} ({kept} hand-labeled kept). "
+              f"Review: python label_mobs.py --dir {os.path.dirname(img_dir)} --classes mob "
+              f"--only {listing}")
+
     if out:
         os.makedirs(os.path.join(out, "images"), exist_ok=True)
         os.makedirs(os.path.join(out, "labels"), exist_ok=True)

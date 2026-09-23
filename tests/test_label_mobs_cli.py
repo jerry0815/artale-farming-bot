@@ -29,6 +29,16 @@ def test_render_page_injects_classes():
     assert 'const CLASSES=["mob"]' in p
 
 
+def test_apply_cli_only_filters_frames(tmp_path, monkeypatch):
+    lst = tmp_path / "diverse.txt"
+    lst.write_text("frame_0.png\nframe_2.png\n", encoding="utf-8")
+    label_mobs._apply_cli(["--only", str(lst)])
+    monkeypatch.setattr(label_mobs.glob, "glob",
+                        lambda p: ["a/frame_0.png", "a/frame_1.png", "a/frame_2.png"])
+    assert label_mobs.frames() == ["frame_0.png", "frame_2.png"]
+    label_mobs._ONLY_LIST = None                    # reset global for other tests
+
+
 def test_defaults_unchanged_without_flags():
     # reset to defaults, no flags -> original fish/goby/player set
     label_mobs._apply_cli(["--classes", "fishhouse,goby,player"])

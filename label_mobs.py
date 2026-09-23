@@ -38,10 +38,13 @@ PORT = 8001
 
 _ONLY_MULTI = False        # --only-multi-player: serve only frames with >1 player box (cleanup pass)
 _ONLY_MISSING = False       # --only-missing-player: serve only frames with 0 player boxes (add pass)
+_ONLY_LIST = None           # --only <listfile>: serve only these basenames (e.g. a diverse subset)
 
 
 def frames():
     names = sorted(os.path.basename(p) for p in glob.glob(os.path.join(IMG_DIR, "*.png")))
+    if _ONLY_LIST is not None:
+        names = [n for n in names if n in _ONLY_LIST]
     if _ONLY_MULTI or _ONLY_MISSING:
         pc = CLASSES.index("player")
         def _np(n):
@@ -314,7 +317,7 @@ def _apply_cli(argv):
     """--dir <path> retargets the dataset (images/ + labels/ under it); --classes a,b,c sets
     the label classes (colors auto-assigned). Lets ONE labeler serve any map/class set, e.g.
     `python label_mobs.py --dir datasets/flat_sweep --classes mob` for a single-class mob pass."""
-    global ROOT, IMG_DIR, LBL_DIR, CLASSES, COLORS
+    global ROOT, IMG_DIR, LBL_DIR, CLASSES, COLORS, _ONLY_LIST
     if "--dir" in argv:
         ROOT = argv[argv.index("--dir") + 1]
         IMG_DIR = os.path.join(ROOT, "images")
@@ -322,6 +325,9 @@ def _apply_cli(argv):
     if "--classes" in argv:
         CLASSES = [c for c in argv[argv.index("--classes") + 1].split(",") if c]
         COLORS = [_PALETTE[i % len(_PALETTE)] for i in range(len(CLASSES))]
+    if "--only" in argv:
+        with open(argv[argv.index("--only") + 1], encoding="utf-8") as fh:
+            _ONLY_LIST = {ln.strip() for ln in fh if ln.strip()}
     return ROOT, CLASSES
 
 
