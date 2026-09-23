@@ -88,3 +88,6 @@ datasets/mobs_real/images/
 datasets/mobs_real/train.txt
 datasets/mobs_real/val.txt
 datasets/mobs_real/*.cache
+
+# Generic pooled mob dataset (rebuild via build_generic_mob_dataset.py from tracked map labels)
+datasets/mob_generic/
