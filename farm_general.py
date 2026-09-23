@@ -17,6 +17,20 @@ import sweep
 import core
 
 
+def _player_x(anchor, frame, pbox, last_px):
+    """Player screen-x for this beat. With an HP-bar anchor (default, character-free), use its
+    sticky red-bar locate; else (yolo_player mode) use the model's class-2 box center. On a miss
+    ride last_px (None -> caller waits for a lock). Returns (px, updated_last)."""
+    if anchor is not None:
+        loc = anchor.locate(frame)
+        cx = loc[0] if loc is not None else None
+    else:
+        cx = (pbox[1] + pbox[3] // 2) if pbox is not None else None
+    if cx is not None:
+        return cx, cx
+    return last_px, last_px
+
+
 def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                          skill_interval=(240, 300), max_seconds=None):
     import random as _r  # noqa: F401  (kept for parity with the other loops' break jitter)
@@ -47,6 +61,16 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     _cconf = _cconf or None
     _pconf = float(map_cfg.get("yolo_player_conf", _mconf))
     _pmax = map_cfg.get("player_anchor_max_jump")
+
+    # Player anchor: default 'hpbar' = the generic red-HP-bar anchor (character/map-free, no
+    # template, no training). 'yolo_player' = the model's class-2 box (needs a player-class model).
+    _anchor = None
+    if map_cfg.get("anchor", "hpbar") == "hpbar":
+        import player as _pl
+        _anchor = _pl.HPBarAnchor(cfg=map_cfg.get("player"))
+        print("[sweep] anchor: hpbar (sticky, character-free)")
+    else:
+        print("[sweep] anchor: yolo_player (model class 2)")
 
     attack_range = int(map_cfg.get("attack_range", 200))
     aoe_max = int(map_cfg.get("aoe_max", 6))
@@ -132,11 +156,8 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             mobs, pbox = mob_detect.yolo_detect(_mm, frame, conf=_mconf, imgsz=_mimg,
                                                 class_conf=_cconf, near=last_px[0], max_jump=_pmax,
                                                 player_conf=_pconf)
-            if pbox is not None:
-                px = pbox[1] + pbox[3] // 2; last_px[0] = px
-            elif last_px[0] is not None:
-                px = last_px[0]                            # ride a brief player-detection miss
-            else:
+            px, last_px[0] = _player_x(_anchor, frame, pbox, last_px[0])
+            if px is None:
                 core.time.sleep(0.05); continue            # no player lock yet -> wait
             mob_xs = [m[1] + m[3] // 2 for m in mobs]       # center-x of each mob box
             core.STATUS["count"] = len(mob_xs)
