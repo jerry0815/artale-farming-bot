@@ -11,14 +11,15 @@
   "player": {},
   "_player_note": "Empty {} = default red-HP-bar detection (DEFAULTS in player.py). Add hue_lo / sat_val_lo / foot_offset / bar-geometry overrides here only if the anchor misgrabs on this map.",
 
-  "attack_key": "TODO_SET_AOE_KEY",
+  "attack_key": "x",
+  "_attack_key_note": "x = AoE attack (no cooldown).",
   "attack_range": 200,
   "aoe_max": 6,
   "start_heading": 1,
   "beat_gap": 0.05,
 
-  "gather": null,
-  "_gather_note": "Optional push/scoop skill. Set to {\"key\":\"z\",\"grp\":90,\"min\":3,\"dash_gap\":50,\"cooldown\":1.5} to enable path-scoop gathering; leave null for plain walk-and-kill.",
+  "gather": {"key": "z", "grp": 90, "min": 3, "dash_gap": 50, "cooldown": 1.0},
+  "_gather_note": "z = pull/scoop skill, 1s cooldown. grp/min/dash_gap are starting guesses: grp=how spread mobs must be to bother pulling, min=fewest mobs worth a pull, dash_gap=attack_range - dash reach. Tune live.",
 
   "sweep_bounds": null,
   "_sweep_bounds_note": "TODO_MEASURE: [mm_x_lo, mm_x_hi] = minimap x of the platform's left/right ends, so she turns around at an edge instead of walking off. Read via python live_pos.py while standing at each end. null = no edge turnaround (relies on empty-ground ADVANCE only).",
