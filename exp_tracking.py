@@ -10,6 +10,21 @@ import os
 import core
 
 
+def _dpi_offsets(ow, oh, rw=1920, rh=1080, wmax=40, hmax=80):
+    """Window-border offsets (wo, ho) to subtract from a capture before scaling the
+    1920x1080-referenced EXP crop. A DPI-scaled game window grabs a few px larger than
+    1920x1080 (window chrome): ~22x56 at 150% DPI, jittering a pixel or two between launches
+    (1942x1136, 1940x1135, ...). The border is exactly the overage above the reference, so
+    compute it directly and clamp -- instead of the old `ow % 10 == 0` proxy, which stripped
+    NO border when the width happened to be divisible by 10 (e.g. 1940), sliding the crop onto
+    the 'EXP' label so number+percent OCR fused into one unparseable digit run and EXP tracking
+    silently died. A genuinely different resolution (overage beyond the clamp, or smaller than
+    the reference) is scaled proportionally with no border stripped."""
+    wo = ow - rw if 0 < ow - rw <= wmax else 0
+    ho = oh - rh if 0 < oh - rh <= hmax else 0
+    return wo, ho
+
+
 def get_exp_number(exp_processor):
     """Absolute EXP number via OCR (or None). Unlike get_exp it does NOT run the delta /
     'reasonable gain' logic, so it never prints the anomaly warning -- the per-10-min
@@ -19,7 +34,7 @@ def get_exp_number(exp_processor):
     if pil_img is None:
         return None
     ow, oh = pil_img.width, pil_img.height
-    wo, ho = (0, 0) if ow % 10 == 0 else (22, 56)
+    wo, ho = _dpi_offsets(ow, oh)
     cw, ch = ow - wo, oh - ho
     rw, rh = 1920, 1080
     reg = (1028, 996, 1190, 1025)
@@ -49,7 +64,7 @@ def get_exp(exp_processor):
     if pil_img is None:
         return None
     ow, oh = pil_img.width, pil_img.height
-    wo, ho = (0, 0) if ow % 10 == 0 else (22, 56)
+    wo, ho = _dpi_offsets(ow, oh)
     cw, ch = ow - wo, oh - ho
     rw, rh = 1920, 1080
     reg = (1028, 996, 1190, 1025)
