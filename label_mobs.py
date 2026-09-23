@@ -239,12 +239,16 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>mob labeler</tit
  #active{font-weight:700}
 </style></head><body>
 <div id=bar>
- <button onclick="nav(-1)">&larr;</button><button onclick="nav(1)">&rarr;</button>
+ <button onclick="nav(-10)">-10</button><button onclick="nav(-1)">&larr;</button>
+ <button onclick="nav(1)">&rarr;</button><button onclick="nav(10)">+10</button>
+ <input id=jin type=number min=1 placeholder="#" style="width:64px"
+   onkeydown="if(event.key==='Enter'){jumpTo();event.stopPropagation();}">
+ <button onclick="jumpTo()">Go</button>
  <button onclick="save()">Save (S)</button>
  <span id=pos></span> <b id=cnt></b>
  <span>active: <span id=active></span></span>
  <span id=hint>drag = new box &middot; click box then 1/2 = set class &middot; Del = remove &middot;
-   1=fishhouse 2=goby 3=player &middot; arrows = prev/next</span>
+   1=fishhouse 2=goby 3=player &middot; arrows = prev/next &middot; Shift+arrow / PgUp-Dn = jump 10 &middot; type # + Go</span>
 </div>
 <div id=wrap><canvas id=cv></canvas></div>
 <script>
@@ -284,16 +288,21 @@ cv.onmouseup=e=>{ if(!drag)return; const x0=Math.min(drag.x0,drag.x1),y0=Math.mi
   w=Math.abs(drag.x1-drag.x0),h=Math.abs(drag.y1-drag.y0); drag=null;
   if(w>6&&h>6) boxes.push([active,(x0+w/2)/cv.width,(y0+h/2)/cv.height,w/cv.width,h/cv.height]); draw(); };
 document.onkeydown=e=>{
+  if(e.target && e.target.tagName==='INPUT') return;   // typing in the jump box, ignore shortcuts
   if(e.key==='Delete'||e.key==='Backspace'){ if(sel>=0){ boxes.splice(sel,1); sel=-1; draw(); e.preventDefault(); } }
   else if(e.key==='1'){ if(sel>=0){ boxes[sel][0]=0; draw(); } else setActive(0); }
   else if(e.key==='2'){ if(sel>=0){ boxes[sel][0]=1; draw(); } else setActive(1); }
   else if(e.key==='3'){ if(sel>=0){ boxes[sel][0]=2; draw(); } else setActive(2); }
-  else if(e.key==='ArrowRight') nav(1);
-  else if(e.key==='ArrowLeft') nav(-1);
+  else if(e.key==='ArrowRight') nav(e.shiftKey?10:1);
+  else if(e.key==='ArrowLeft') nav(e.shiftKey?-10:-1);
+  else if(e.key==='PageDown'){ nav(10); e.preventDefault(); }
+  else if(e.key==='PageUp'){ nav(-10); e.preventDefault(); }
   else if(e.key==='s'||e.key==='S') save(); };
 async function save(){ await fetch('/api/label?name='+files[idx],{method:'POST',
     headers:{'Content-Type':'application/json'},body:JSON.stringify(boxes)}); }
 async function nav(d){ await save(); idx=(idx+d+files.length)%files.length; load(); }
+async function jumpTo(){ const v=parseInt(document.getElementById('jin').value);
+  if(!isNaN(v)){ await save(); idx=Math.max(0,Math.min(files.length-1,v-1)); load(); } }
 boot();
 </script></body></html>"""
 
