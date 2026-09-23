@@ -24,11 +24,11 @@
   "sweep_bounds": null,
   "_sweep_bounds_note": "TODO_MEASURE: [mm_x_lo, mm_x_hi] = minimap x of the platform's left/right ends, so she turns around at an edge instead of walking off. Read via python live_pos.py while standing at each end. null = no edge turnaround (relies on empty-ground ADVANCE only).",
 
-  "minimap": {"x": 20, "y": 171, "w": 210, "h": 400},
-  "_minimap_note": "TODO_MEASURE: minimap crop box (screen px). Copy from a similar map or measure on a flat_sweep frame.",
+  "minimap": {"x": 15, "y": 185, "w": 400, "h": 150},
+  "_minimap_note": "PROVISIONAL (measured from a capture frame's 小地圖 content area). Refine live if the dot reads look off. Note: this map's minimap SCROLLS (very wide), so (x,y) is view-relative.",
 
-  "map_box": [30, 200, 50, 250],
-  "_map_box_note": "TODO_MEASURE: valid character-dot box [x_min,x_max,y_min,y_max] on the minimap (rejects phantom reads).",
+  "map_box": [5, 395, 5, 145],
+  "_map_box_note": "PROVISIONAL: permissive full-crop box so recording doesn't reject valid dots. Tighten after live observation.",
 
   "enemy_threshold": 0.75,
 

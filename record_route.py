@@ -150,6 +150,18 @@ def record_live(map_name, poll_hz=30):
     import core
     import keyboard as kb
 
+    # Use the map's own minimap crop (+ map_box) so the (x,y) trace is valid for THIS map,
+    # not the default deep-sea crop. Best-effort: keyboard logging works regardless.
+    map_path = map_name if os.path.exists(map_name) else os.path.join("maps", f"{map_name}.json")
+    try:
+        cfg = core.watermap.load_map(map_path)
+        core.set_minimap(*core.watermap.minimap_crop(cfg))
+        if cfg.get("map_box"):
+            core.set_map_box(*cfg["map_box"])
+        print(f"[record] loaded {map_path} minimap crop")
+    except Exception as e:
+        print(f"[record] no map config for '{map_name}' ({e}); using the default minimap crop")
+
     os.makedirs(OUT_DIR, exist_ok=True)
     out_path = os.path.join(OUT_DIR, f"{map_name}.capture.jsonl")
     fh = open(out_path, "w", encoding="utf-8")
