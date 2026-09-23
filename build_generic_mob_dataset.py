@@ -26,7 +26,13 @@ LBL = os.path.join(ROOT, "labels")
 SOURCES = [
     ("datasets/mobs_real/labels", "datasets/mobs_real/images", "real_"),
     ("datasets/dragons/labels", "datasets/dragons/images", "dragon_"),
+    ("datasets/flat_sweep/labels", "datasets/flat_sweep/images", "flat_"),
 ]
+
+# Empty label files are SKIPPED, not treated as negatives: in this project an empty label means
+# "frame navigated past, not labeled" (it usually still contains mobs), so including it would
+# teach the model those mobs are background. Only frames with >=1 box are used.
+SKIP_EMPTY = True
 
 
 def link(src, dst):
@@ -63,6 +69,8 @@ def main():
                 if len(p) != 5 or p[0] == "2":          # drop player -> HP-bar anchor handles it
                     continue
                 out.append(f"0 {p[1]} {p[2]} {p[3]} {p[4]}")   # any mob class -> mob(0)
+            if SKIP_EMPTY and not out:                  # unlabeled/navigated-past frame -> skip
+                continue
             stem = prefix + base.replace(prefix, "")
             open(os.path.join(LBL, stem + ".txt"), "w", encoding="utf-8").write(
                 "\n".join(out) + ("\n" if out else ""))
