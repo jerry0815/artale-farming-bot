@@ -17,18 +17,18 @@ import sweep
 import core
 
 
-def _player_x(anchor, frame, pbox, last_px):
-    """Player screen-x for this beat. With an HP-bar anchor (default, character-free), use its
-    sticky red-bar locate; else (yolo_player mode) use the model's class-2 box center. On a miss
-    ride last_px (None -> caller waits for a lock). Returns (px, updated_last)."""
+def _player_pos(anchor, frame, pbox, last):
+    """Player screen (x, feet_y) for this beat. With an HP-bar anchor (default, character-free),
+    use its sticky red-bar locate; else (yolo_player mode) the model's class-2 box: center x and
+    box bottom as feet. On a miss ride `last` (None -> caller waits for a lock).
+    Returns (pos, updated_last)."""
     if anchor is not None:
-        loc = anchor.locate(frame)
-        cx = loc[0] if loc is not None else None
+        pos = anchor.locate(frame)
     else:
-        cx = (pbox[1] + pbox[3] // 2) if pbox is not None else None
-    if cx is not None:
-        return cx, cx
-    return last_px, last_px
+        pos = (pbox[1] + pbox[3] // 2, pbox[2] + pbox[4]) if pbox is not None else None
+    if pos is not None:
+        return pos, pos
+    return last, last
 
 
 def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
@@ -73,6 +73,9 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         print("[sweep] anchor: yolo_player (model class 2)")
 
     attack_range = int(map_cfg.get("attack_range", 200))
+    _band = int(map_cfg.get("same_platform_band", 180))   # px: mob feet vs her feet (same level)
+    band_up = int(map_cfg.get("band_up", _band))           # how far ABOVE her feet still counts
+    band_down = int(map_cfg.get("band_down", _band))       # how far BELOW her feet still counts
     aoe_max = int(map_cfg.get("aoe_max", 6))
     heading = int(map_cfg.get("start_heading", 1))
     bounds = map_cfg.get("sweep_bounds")                   # [mm_x_lo, mm_x_hi] or None
@@ -190,12 +193,16 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             mobs, pbox = mob_detect.yolo_detect(_mm, frame, conf=_mconf, imgsz=_mimg,
                                                 class_conf=_cconf, near=last_px[0], max_jump=_pmax,
                                                 player_conf=_pconf)
-            px, last_px[0] = _player_x(_anchor, frame, pbox, last_px[0])
-            if px is None:
+            pos, last_px[0] = _player_pos(_anchor, frame, pbox, last_px[0])
+            if pos is None:
                 if route:                                  # no player lock: keep walking the segment
                     sweep.apply_action(sweep.WALK, heading, keys, core.kb, sleep=core.time.sleep)
                 core.time.sleep(0.05); continue            # no player lock yet -> wait
-            mob_xs = [m[1] + m[3] // 2 for m in mobs]       # center-x of each mob box
+            px, pfeet = pos
+            # decide() is x-only: keep only mobs on HER level (feet within the band), else a mob on
+            # the floor above/below that she can't hit pins her in FIRE forever.
+            mob_xs = sweep.same_platform([(m[1] + m[3] // 2, m[2] + m[4]) for m in mobs], pfeet,
+                                         band_up=band_up, band_down=band_down)
             core.STATUS["count"] = len(mob_xs)
             now = core.time.time()
             cd_ok = gcfg is not None and now >= next_gather[0]

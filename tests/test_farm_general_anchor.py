@@ -1,5 +1,6 @@
-"""farm_general player-x resolution: HP-bar anchor (default, character-free) with a fallback
-to the model's player box (yolo_player mode), riding last_px on a miss."""
+"""farm_general player-position resolution: HP-bar anchor (default, character-free) with a
+fallback to the model's player box (yolo_player mode), riding the last position on a miss.
+Returns (x, feet_y) -- feet_y feeds the same-platform filter."""
 import pytest
 
 farm_general = pytest.importorskip("farm_general")
@@ -12,31 +13,30 @@ class _StubAnchor:
         return self._loc
 
 
-def test_hpbar_anchor_hit_gives_its_x():
-    px, last = farm_general._player_x(_StubAnchor((432, 700)), frame=object(),
-                                      pbox=(0.9, 100, 50, 40, 80), last_px=None)
-    assert px == 432 and last == 432          # anchor wins over the model's player box
+def test_hpbar_anchor_hit_gives_its_position():
+    pos, last = farm_general._player_pos(_StubAnchor((432, 700)), frame=object(),
+                                         pbox=(0.9, 100, 50, 40, 80), last=None)
+    assert pos == (432, 700) and last == (432, 700)     # anchor wins over the model box
 
 
-def test_hpbar_anchor_miss_rides_last_px():
-    px, last = farm_general._player_x(_StubAnchor(None), frame=object(),
-                                      pbox=None, last_px=310)
-    assert px == 310 and last == 310
+def test_hpbar_anchor_miss_rides_last_position():
+    pos, last = farm_general._player_pos(_StubAnchor(None), frame=object(),
+                                         pbox=None, last=(310, 890))
+    assert pos == (310, 890) and last == (310, 890)
 
 
 def test_hpbar_anchor_miss_no_last_returns_none():
-    px, last = farm_general._player_x(_StubAnchor(None), frame=object(),
-                                      pbox=None, last_px=None)
-    assert px is None and last is None        # caller waits for a lock
+    pos, last = farm_general._player_pos(_StubAnchor(None), frame=object(), pbox=None, last=None)
+    assert pos is None and last is None                 # caller waits for a lock
 
 
-def test_yolo_mode_uses_pbox_center_when_no_anchor():
-    # anchor=None -> yolo_player mode: player from the model box center-x
-    px, last = farm_general._player_x(None, frame=object(),
-                                      pbox=(0.8, 200, 60, 40, 80), last_px=None)
-    assert px == 220 and last == 220          # 200 + 40//2
+def test_yolo_mode_uses_pbox_center_x_and_bottom_as_feet():
+    # anchor=None -> yolo_player mode: (x + w//2, y + h) of the model's player box
+    pos, last = farm_general._player_pos(None, frame=object(),
+                                         pbox=(0.8, 200, 60, 40, 80), last=None)
+    assert pos == (220, 140) and last == (220, 140)
 
 
-def test_yolo_mode_no_box_rides_last_px():
-    px, last = farm_general._player_x(None, frame=object(), pbox=None, last_px=150)
-    assert px == 150 and last == 150
+def test_yolo_mode_no_box_rides_last_position():
+    pos, last = farm_general._player_pos(None, frame=object(), pbox=None, last=(150, 890))
+    assert pos == (150, 890)

@@ -89,3 +89,24 @@ def test_transition_up_ignores_failed_minimap_reads():
     ok = sweep.route_transition("up", -1, -1, KEYS, kb, read_xy=_reader([(214, 106), (-1, -1)]),
                                 up_wait=0.3, poll=0.1)
     assert ok is False
+
+
+# --- same-platform filter: decide() is x-only, so mobs on another LEVEL must be dropped first ---
+
+def test_same_platform_drops_mobs_on_other_levels():
+    # (x, feet_y). Player feet at 890 (bottom floor). Upper-floor mobs sit ~630px higher.
+    mobs = [(838, 891), (946, 264), (1019, 266), (1250, 891)]
+    xs = sweep.same_platform(mobs, pfeet=890, band_up=180, band_down=180)
+    assert xs == [838, 1250]
+
+
+def test_upper_level_mob_in_x_range_no_longer_pins_her_in_fire():
+    # the live bug: only upper-floor mobs within 200px in x -> she FIREd forever
+    mobs = [(946, 264), (1019, 266)]
+    xs = sweep.same_platform(mobs, pfeet=890, band_up=180, band_down=180)
+    assert sweep.decide(xs, px=1012, heading=1, attack_range=200) == sweep.ADVANCE
+
+
+def test_same_platform_asymmetric_band():
+    mobs = [(100, 800), (120, 950)]            # 90 above, 60 below her feet (890)
+    assert sweep.same_platform(mobs, 890, band_up=50, band_down=100) == [120]

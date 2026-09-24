@@ -21,6 +21,14 @@ WALK = "WALK"         # a mob is ahead but out of range -> close on it (heading)
 GATHER = "GATHER"     # dash-scoop enough spread mobs into a clump, then AoE
 
 
+def same_platform(mobs, pfeet, band_up=180, band_down=180):
+    """decide() is x-only, so drop mobs on another LEVEL first. mobs: [(center_x, feet_y)];
+    pfeet: the player's feet y (screen). Keeps a mob whose feet sit within band_up ABOVE or
+    band_down BELOW her feet; returns their center-x list. Without this a mob on the floor above
+    (in x-range but unreachable) pins her in FIRE forever."""
+    return [x for x, fy in mobs if -band_up <= fy - pfeet <= band_down]
+
+
 def dash_reach(attack_range, gather):
     """Forward distance the gather skill scoops: dash + group_range. dash is given
     explicitly, else derived as attack_range - dash_gap (so tuning attack_range keeps
