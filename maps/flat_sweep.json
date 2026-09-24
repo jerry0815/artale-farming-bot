@@ -6,8 +6,12 @@
   "mob_conf": 0.4,
   "mob_imgsz": 640,
   "anchor": "hpbar",
-  "player": {},
-  "_player_note": "Empty {} = default red-HP-bar detection (DEFAULTS in player.py). Add hue_lo / sat_val_lo / foot_offset / bar-geometry overrides here only if the anchor misgrabs on this map.",
+  "player": {
+    "min_h": 6,
+    "max_h": 10,
+    "max_w": 72
+  },
+  "_player_note": "HP-bar anchor shape for this map: your floating HP bar is ~7-8px tall (width varies with HP%, ~43-56 seen). The default accepted any red blob 2-16px tall, so near the map ends (camera clamped, you off-center) it grabbed STOP-sign mob parts, the red medal banner under your name (12px), bin signs and mob HP bars (4px), and damage numbers. Checked on the 646 captured frames. Remaining weak spot: big damage numbers covering your bar mid-attack.",
   "attack_key": "x",
   "_attack_key_note": "x = AoE attack (no cooldown).",
   "attack_range": 200,
