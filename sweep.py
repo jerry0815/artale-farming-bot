@@ -87,3 +87,65 @@ def apply_action(action, heading, keys, kb, sleep=lambda s: None,
     for _ in range(burst):
         kb.safe_press(keys["attack"]); sleep(attack_dwell); kb.safe_release(keys["attack"])
     return heading
+
+
+# --- Route mode --------------------------------------------------------------------------
+# A route is an ordered, cyclic list of segments recorded from a human run
+# (build_sweep_route.py): {"dir": "right"|"left", "until_x": <minimap x>, "then": "up"|"jump"|null,
+# "attack": bool}. Heading is FIXED for the whole segment; the segment ends when the minimap x
+# reaches until_x, then its transition runs and the next segment starts.
+
+def seg_heading(seg):
+    return 1 if seg["dir"] == "right" else -1
+
+
+def seg_done(seg, mmx):
+    """True once the minimap x has reached the segment's until_x in its direction."""
+    return mmx >= seg["until_x"] if seg_heading(seg) > 0 else mmx <= seg["until_x"]
+
+
+def route_action(action):
+    """Inside a route segment, empty ground means keep walking the segment -- ADVANCE's
+    heading flip (the flat-map ping-pong) must never happen mid-route."""
+    return WALK if action == ADVANCE else action
+
+
+def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=lambda s: None,
+                     up_wait=2.5, poll=0.1, y_change=8, nudge=0.12, jump_gap=0.3):
+    """Run a segment's end-transition. Returns True when it (probably) worked.
+
+    "up":   stop and press up (portal/ladder). Confirmed when the minimap y moves by >= y_change
+            within up_wait; if not, nudge back a step (she may have overshot the portal) and
+            retry ONCE, then report failure (the loop just continues the next segment).
+    "jump": hold the next segment's direction and double-jump (the gap onto the next platform).
+    None:   nothing to do.
+    cur_heading: the segment just finished (portal-overshoot nudge goes against it);
+    next_heading: the segment about to start (the jump faces it).
+    keys: {"up","jump","right","left"}; read_xy() -> (minimap x, y)."""
+    if not then:
+        return True
+    kb.safe_release_all()
+    if then == "jump":
+        face = keys["right"] if next_heading > 0 else keys["left"]
+        kb.safe_press(face)
+        kb.safe_press(keys["jump"]); sleep(0.05); kb.safe_release(keys["jump"])
+        sleep(jump_gap)
+        kb.safe_press(keys["jump"]); sleep(0.05); kb.safe_release(keys["jump"])
+        sleep(jump_gap)
+        kb.safe_release(face)
+        return True
+    if then == "up":
+        y0 = read_xy()[1]
+        for attempt in range(2):
+            if attempt == 1:                      # overshot the portal? step back and retry once
+                back = keys["left"] if cur_heading > 0 else keys["right"]
+                kb.safe_press(back); sleep(nudge); kb.safe_release(back)
+            kb.safe_press(keys["up"]); sleep(0.25); kb.safe_release(keys["up"])
+            waited = 0.0
+            while waited < up_wait:
+                y = read_xy()[1]
+                if y is not None and y0 is not None and abs(y - y0) >= y_change:
+                    return True
+                sleep(poll); waited += poll
+        return False
+    raise ValueError(f"unknown route transition {then!r}")
