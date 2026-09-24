@@ -78,17 +78,10 @@
     },
     {
       "dir": "left",
-      "until_x": 216,
+      "until_x": 219,
       "then": "up",
       "attack": false,
       "y": 106
-    },
-    {
-      "dir": "left",
-      "until_x": 120,
-      "then": null,
-      "attack": false,
-      "y": 55
     },
     {
       "dir": "right",
@@ -106,7 +99,7 @@
     },
     {
       "dir": "left",
-      "until_x": 214,
+      "until_x": 219,
       "then": "up",
       "attack": true,
       "y": 106
@@ -119,7 +112,7 @@
       "y": 55
     }
   ],
-  "_route_note": "Recorded from a human run (routes/flat_sweep.capture.jsonl, cycle t 0.7-81.6s) via build_sweep_route.py. Start the character at bottom-left (minimap x~43) before farming. Tuned: segment 3 stops at 120 (recorded 107/94) to stay off the upper-left edge. Segment 4 ends in 'edge_jump': the minimap dot PINS at x=195 while the minimap scrolls, so she keeps walking right until she walks off the upper platform (minimap y drops), then air-jumps -- exactly what the recording shows in all 3 laps.",
+  "_route_note": "Recorded from a human run (routes/flat_sweep.capture.jsonl, cycle t 0.7-81.6s) via build_sweep_route.py, then hand-tuned. Start the character at bottom-left (minimap x~43). Segments 2 and 5 take the SAME bottom portal (lands upper x~135): UP at x=219 (recorded 216/214/212, moved right). After the 1st portal she heads straight right (the recorded upper-left detour to 107 is dropped); after the 2nd she goes left to 45 and drops to the start. Segment 3 ends in 'edge_jump': the minimap dot PINS at x=195 while the minimap scrolls, so past it she fights and steps on until she walks off the upper platform (minimap y drops), then air-jumps.",
   "same_platform_band": 180,
   "_band_note": "Only mobs whose feet are within this many screen px above/below her feet count (sweep decide is x-only). Levels here are ~600px apart, so 180 separates them. Without it she FIREd forever at upper-floor mobs in x-range. Override one side with band_up / band_down.",
   "push_edge_margin": 25,
