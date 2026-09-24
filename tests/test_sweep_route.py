@@ -218,3 +218,21 @@ def test_edge_jump_no_walk_off_still_jumps_and_reports_failure():
                                 poll=0.1, edge_wait=0.3)
     assert ok is False
     assert [k for e, k in kb.events if e == "press"].count("J") == 1
+
+
+# --- walk_to_edge in short steps: the pinned zone before the jump is still an attack zone, so the
+# loop walks a short step, re-checks mobs, and only jumps once she actually walks off the edge.
+
+def test_walk_to_edge_step_without_fall_releases_and_does_not_jump():
+    kb = _KB()
+    fell = sweep.walk_to_edge(1, KEYS, kb, read_xy=_reader([(195, 55)]), walk=0.3, poll=0.1)
+    assert fell is False
+    assert ("press", "J") not in kb.events                  # no edge yet -> never jump
+    assert kb.events[-1] == ("release", "R")                # stops so the loop can look for mobs
+
+
+def test_walk_to_edge_step_with_fall_jumps():
+    kb = _KB()
+    fell = sweep.walk_to_edge(1, KEYS, kb, read_xy=_reader([(195, 55), (195, 59)]),
+                              walk=0.3, poll=0.1)
+    assert fell is True and ("press", "J") in kb.events

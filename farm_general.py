@@ -168,6 +168,36 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             core.time.sleep(1); return "skip"
         return "ok"
 
+    edge_wait = float(map_cfg.get("edge_wait_secs", 6.0))  # max stepping time hunting the edge
+    edge_step_secs = float(map_cfg.get("edge_step_secs", 0.4))
+    zone_walk = [0.0]
+
+    def _advance(ok, mmx):
+        """Move to the next route segment (after its transition ran). Returns the new heading."""
+        if not ok:
+            print(f"[sweep] segment {seg_i[0] + 1}: '{route[seg_i[0]].get('then')}' at x={mmx} "
+                  f"not confirmed -- continuing")
+        seg_i[0] = (seg_i[0] + 1) % len(route)
+        nxt = route[seg_i[0]]
+        zone_walk[0] = 0.0
+        core.STATUS["node"] = f"seg{seg_i[0] + 1}"
+        print(f"[sweep] -> segment {seg_i[0] + 1}: {nxt['dir']} to x={nxt['until_x']}"
+              f"{' (travel)' if not nxt.get('attack', True) else ''}")
+        return sweep.seg_heading(nxt)
+
+    def edge_step(heading, mmx, mmy):
+        """One short step toward the edge_jump edge; on the walk-off it air-jumps and the route
+        advances. Fast single reads tracked near her (a fall gives ~0.2 s to react)."""
+        fell = sweep.walk_to_edge(heading, keys, core.kb,
+                                  read_xy=lambda: core.get_character_color(near=(mmx, mmy)),
+                                  sleep=core.time.sleep, walk=edge_step_secs, poll=0.03,
+                                  base=(mmx, mmy))
+        zone_walk[0] += edge_step_secs
+        if fell:
+            print(f"[sweep] segment {seg_i[0] + 1}: walked off the edge -> air-jump")
+            return _advance(True, mmx)
+        return heading
+
     print(f"[sweep] start: range={attack_range} aoe_max={aoe_max} heading={heading} "
           f"gather={('%s@%.1fs' % (keys['dash'], gather_cd)) if gcfg else 'off'} bounds={bounds}")
     try:
@@ -184,31 +214,35 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             if route:
                 seg = route[seg_i[0]]
                 mmx, _mmy = core.stable_char(2)
-                if mmx >= 0 and sweep.seg_done(seg, mmx):             # segment end -> transition
-                    nxt_i = (seg_i[0] + 1) % len(route)
-                    nxt = route[nxt_i]
+                done = mmx >= 0 and sweep.seg_done(seg, mmx)
+                # edge_jump segments: until_x is only where the minimap dot PINS (the minimap scrolls
+                # on), not the edge -- so past it she keeps fighting and walks on in short steps
+                # (edge_step) until she actually walks off, instead of one blind walk to the edge.
+                edge_zone = done and seg.get("then") == "edge_jump"
+                if done and not edge_zone:                            # segment end -> transition
+                    nxt = route[(seg_i[0] + 1) % len(route)]
                     print(f"[sweep] segment {seg_i[0] + 1} end at x={mmx} y={_mmy}")
-                    # edge_jump reacts to a walk-off fall (~0.2 s window): single fast minimap
-                    # reads tracked near her (drops phantoms); portals keep the robust stable read.
-                    edge = seg.get("then") == "edge_jump"
                     ok = sweep.route_transition(seg.get("then"), sweep.seg_heading(seg),
                                                 sweep.seg_heading(nxt), keys, core.kb,
-                                                read_xy=(lambda: core.get_character_color(
-                                                    near=(mmx, _mmy))) if edge
-                                                else (lambda: core.stable_char(2)),
-                                                poll=0.03 if edge else 0.1,
+                                                read_xy=lambda: core.stable_char(2),
                                                 sleep=core.time.sleep,
                                                 align=lambda: core.walk_to_x(
                                                     seg["until_x"], tol=portal_tol, timeout=3.0))
-                    if not ok:
-                        print(f"[sweep] segment {seg_i[0] + 1}: '{seg.get('then')}' at x={mmx} "
-                              f"not confirmed -- continuing")
-                    seg_i[0] = nxt_i; heading = sweep.seg_heading(nxt)
-                    core.STATUS["node"] = f"seg{nxt_i + 1}"
-                    print(f"[sweep] -> segment {nxt_i + 1}: {nxt['dir']} to x={nxt['until_x']}"
-                          f"{' (travel)' if not nxt.get('attack', True) else ''}")
+                    heading = _advance(ok, mmx)
+                    continue
+                if edge_zone and zone_walk[0] >= edge_wait:           # never found the edge
+                    print(f"[sweep] segment {seg_i[0] + 1}: no walk-off after {zone_walk[0]:.1f}s "
+                          f"of stepping -- jumping here")
+                    ok = sweep.route_transition("edge_jump", heading, heading, keys, core.kb,
+                                                read_xy=lambda: core.get_character_color(
+                                                    near=(mmx, _mmy)),
+                                                poll=0.03, sleep=core.time.sleep, edge_wait=0.5)
+                    heading = _advance(ok, mmx)
                     continue
                 if not seg.get("attack", True):                       # travel leg: just walk
+                    if edge_zone:
+                        heading = edge_step(heading, mmx, _mmy)
+                        continue
                     sweep.apply_action(sweep.WALK, heading, keys, core.kb, sleep=core.time.sleep)
                     core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))
                     continue
@@ -217,6 +251,8 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                                                 player_conf=_pconf)
             pos, last_px[0] = _player_pos(_anchor, frame, pbox, last_px[0])
             if pos is None:
+                if route and edge_zone:                    # no lock near the edge: careful step
+                    heading = edge_step(heading, mmx, _mmy); continue
                 if route:                                  # no player lock: keep walking the segment
                     sweep.apply_action(sweep.WALK, heading, keys, core.kb, sleep=core.time.sleep)
                 core.time.sleep(0.05); continue            # no player lock yet -> wait
@@ -229,8 +265,13 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             if route:
                 # Route attack leg, fixed rhythm: one push (z) then hold x (AoE); no push within
                 # push_edge_margin of the segment end (edge/portal/jump spot); no mob -> walk on.
-                near_edge = mmx >= 0 and sweep.near_seg_end(seg, mmx, push_margin)
+                # In an edge_jump zone the edge is somewhere ahead, unknown: never push (the dash could
+                # carry her off it), and walk only in edge_step steps.
+                near_edge = edge_zone or (mmx >= 0 and sweep.near_seg_end(seg, mmx, push_margin))
                 act = sweep.route_attack(mob_xs, px, heading, attack_range, reach, near_edge)
+                if edge_zone and act == sweep.WALK:
+                    heading = edge_step(heading, mmx, _mmy)
+                    continue
                 if act == sweep.GATHER:
                     if gcfg is None:
                         act = sweep.FIRE                      # no push skill configured

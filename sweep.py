@@ -135,6 +135,33 @@ def route_attack(mob_xs, px, heading, attack_range, reach, near_edge):
     return FIRE if near_edge else GATHER
 
 
+def walk_to_edge(heading, keys, kb, read_xy, sleep=lambda s: None, walk=0.4, poll=0.03,
+                 fall_dy=3, x_win=12, land=0.6, base=None):
+    """Walk `heading` for up to `walk` s watching for the walk-off (minimap y drops >= fall_dy).
+    On the drop: one air-jump, hold the heading `land` s to cross the gap, return True. No drop:
+    release and return False WITHOUT jumping, so the loop can stop and check for mobs (short steps
+    keep the pinned-minimap stretch before an edge_jump an attack zone). Reads more than x_win px
+    from the baseline are phantoms and ignored. base=(x, y) standing position if the caller already
+has one (else the first good read). read_xy must be FAST (single read)."""
+    face = keys["right"] if heading > 0 else keys["left"]
+    kb.safe_press(face)
+    x0, y0 = base if base is not None else (None, None)
+    waited = 0.0
+    while waited < walk:
+        x, y = read_xy()
+        if x is not None and x >= 0 and y is not None and y >= 0:
+            if x0 is None:
+                x0, y0 = x, y                     # standing on the platform
+            elif abs(x - x0) <= x_win and y - y0 >= fall_dy:
+                kb.safe_press(keys["jump"]); sleep(0.05); kb.safe_release(keys["jump"])
+                sleep(land)
+                kb.safe_release(face)
+                return True
+        sleep(poll); waited += poll
+    kb.safe_release(face)
+    return False
+
+
 def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=lambda s: None,
                      up_wait=2.5, poll=0.1, y_change=8, nudge=0.12, jump_gap=0.3, align=None,
                      edge_wait=4.0, fall_dy=3, x_win=12, land=0.6):
@@ -169,23 +196,15 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
         kb.safe_release(face)
         return True
     if then == "edge_jump":
-        face = keys["right"] if next_heading > 0 else keys["left"]
+        if walk_to_edge(next_heading, keys, kb, read_xy, sleep, walk=edge_wait, poll=poll,
+                        fall_dy=fall_dy, x_win=x_win, land=land):
+            return True
+        face = keys["right"] if next_heading > 0 else keys["left"]   # never walked off: jump anyway
         kb.safe_press(face)
-        x0 = y0 = None
-        fell, waited = False, 0.0
-        while waited < edge_wait:
-            x, y = read_xy()
-            if x is not None and x >= 0 and y is not None and y >= 0:
-                if x0 is None:
-                    x0, y0 = x, y                     # standing on the platform
-                elif abs(x - x0) <= x_win and y - y0 >= fall_dy:
-                    fell = True
-                    break
-            sleep(poll); waited += poll
         kb.safe_press(keys["jump"]); sleep(0.05); kb.safe_release(keys["jump"])
         sleep(land)
         kb.safe_release(face)
-        return fell
+        return False
     if then == "up":
         def _y():                                 # (-1,-1) = no minimap read -> not a level change
             y = read_xy()[1]
