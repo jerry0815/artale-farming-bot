@@ -136,13 +136,20 @@ def route_attack(mob_xs, px, heading, attack_range, reach, near_edge):
 
 
 def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=lambda s: None,
-                     up_wait=2.5, poll=0.1, y_change=8, nudge=0.12, jump_gap=0.3, align=None):
+                     up_wait=2.5, poll=0.1, y_change=8, nudge=0.12, jump_gap=0.3, align=None,
+                     edge_wait=4.0, fall_dy=3, x_win=12, land=0.6):
     """Run a segment's end-transition. Returns True when it (probably) worked.
 
     "up":   stop and press up (portal/ladder). Confirmed when the minimap y moves by >= y_change
             within up_wait; if not, nudge back a step (she may have overshot the portal) and
             retry ONCE, then report failure (the loop just continues the next segment).
     "jump": hold the next segment's direction and double-jump (the gap onto the next platform).
+    "edge_jump": keep walking the next direction until she walks OFF the edge (minimap y drops by
+            >= fall_dy), then jump once in the air and hold the direction `land` s to cross the gap.
+            For where the minimap dot is pinned by scrolling, so x can't find the edge. Reads more
+            than x_win px from her start x are phantoms and ignored. No walk-off within edge_wait
+            -> jump anyway and report failure. Pass a FAST read_xy (single read) -- a fall gives
+            ~0.2 s to react.
     None:   nothing to do.
     cur_heading: the segment just finished (portal-overshoot nudge goes against it);
     next_heading: the segment about to start (the jump faces it).
@@ -161,6 +168,24 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
         sleep(jump_gap)
         kb.safe_release(face)
         return True
+    if then == "edge_jump":
+        face = keys["right"] if next_heading > 0 else keys["left"]
+        kb.safe_press(face)
+        x0 = y0 = None
+        fell, waited = False, 0.0
+        while waited < edge_wait:
+            x, y = read_xy()
+            if x is not None and x >= 0 and y is not None and y >= 0:
+                if x0 is None:
+                    x0, y0 = x, y                     # standing on the platform
+                elif abs(x - x0) <= x_win and y - y0 >= fall_dy:
+                    fell = True
+                    break
+            sleep(poll); waited += poll
+        kb.safe_press(keys["jump"]); sleep(0.05); kb.safe_release(keys["jump"])
+        sleep(land)
+        kb.safe_release(face)
+        return fell
     if then == "up":
         def _y():                                 # (-1,-1) = no minimap read -> not a level change
             y = read_xy()[1]

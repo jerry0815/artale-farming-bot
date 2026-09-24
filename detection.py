@@ -146,8 +146,18 @@ def detect_red_dots(minimap_img, templates_folder='assets/minimap_other_characte
     # 關鍵：將所有模板的結果統一進行 NMS，避免同一個紅點被多個模板重複偵測
     final_rects = apply_nms(np.array(all_rects), overlapThresh=0.3)
     
+    # TM_CCOEFF_NORMED scores flat, featureless patches (grey minimap sky) as spurious high
+    # matches, so a hit only counts if it actually holds red (real dots: 78-103 red px; the
+    # flat_sweep false alarm: 0).
+    hsv = cv2.cvtColor(minimap_img, cv2.COLOR_BGR2HSV)
+    red_mask = None
+    for lo, hi in RED_HSV_RANGES:
+        m = cv2.inRange(hsv, lo, hi)
+        red_mask = m if red_mask is None else cv2.bitwise_or(red_mask, m)
     red_centers = []
     for (x1, y1, x2, y2) in final_rects:
+        if cv2.countNonZero(red_mask[y1:y2, x1:x2]) < RED_MIN_PIXELS:
+            continue
         red_centers.append([(x1 + x2) // 2, (y1 + y2) // 2])
         
     if debug:
@@ -167,6 +177,7 @@ RED_HSV_RANGES = [
 ]
 RED_MIN_AREA = 8
 RED_MAX_AREA = 250
+RED_MIN_PIXELS = 20      # template hit must contain at least this many red px (see detect_red_dots)
 
 
 def detect_red_dots_color(minimap_bgr, hsv_ranges=RED_HSV_RANGES,

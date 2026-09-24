@@ -178,3 +178,43 @@ def test_transition_up_realigns_instead_of_blind_nudge_on_retry():
     presses = [k for e, k in kb.events if e == "press"]
     assert ok is False and calls == ["align", "align"]
     assert "R" not in presses and "L" not in presses   # align replaces the blind nudge
+
+
+# --- edge_jump: walk off the platform edge, then air-jump across (flat_sweep upper -> right) ---
+# The minimap dot PINS at x=195 while the minimap scrolls, so x can't locate the edge; the walk-off
+# shows up as the minimap y dropping (55 -> 57+). Jump right then, once, while holding the heading.
+
+def _logged_reader(seq, events):
+    read = _reader(seq)
+    def r():
+        xy = read(); events.append(("read", xy)); return xy
+    return r
+
+
+def test_edge_jump_waits_for_walk_off_then_jumps_once():
+    kb = _KB()
+    read = _logged_reader([(195, 55), (195, 55), (195, 55), (195, 58)], kb.events)
+    ok = sweep.route_transition("edge_jump", 1, 1, KEYS, kb, read_xy=read, poll=0.01)
+    assert ok is True
+    presses = [k for e, k in kb.events if e == "press"]
+    assert presses.count("J") == 1
+    j = kb.events.index(("press", "J"))
+    assert ("read", (195, 58)) in kb.events[:j]              # jumped only after the drop
+    assert kb.events.index(("press", "R")) < j               # holding the heading the whole way
+
+
+def test_edge_jump_ignores_phantom_reads():
+    # phantom minimap reads (x far from her) must not look like a fall
+    kb = _KB()
+    read = _logged_reader([(195, 55), (8, 82), (33, 76), (195, 55), (195, 59)], kb.events)
+    sweep.route_transition("edge_jump", 1, 1, KEYS, kb, read_xy=read, poll=0.01)
+    j = kb.events.index(("press", "J"))
+    assert ("read", (195, 59)) in kb.events[:j]
+
+
+def test_edge_jump_no_walk_off_still_jumps_and_reports_failure():
+    kb = _KB()
+    ok = sweep.route_transition("edge_jump", 1, 1, KEYS, kb, read_xy=_reader([(195, 55)]),
+                                poll=0.1, edge_wait=0.3)
+    assert ok is False
+    assert [k for e, k in kb.events if e == "press"].count("J") == 1

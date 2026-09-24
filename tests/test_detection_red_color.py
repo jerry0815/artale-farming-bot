@@ -44,3 +44,24 @@ def test_two_players_two_centers():
     tpl = cv2.imread("assets/minimap_other_character/red_dot.png")
     frame = _paste(_paste(bg, tpl, 40, 30), tpl, 140, 80)
     assert len(detection.detect_red_dots_color(frame)) == 2
+
+
+# --- template detector: a hit must actually contain red (flat patches score spurious matches) ---
+
+def test_template_detects_a_real_pasted_red_dot():
+    rng = np.random.default_rng(0)
+    bg = rng.integers(40, 90, size=(150, 400, 3), dtype=np.uint8)   # textured minimap-ish
+    tpl = cv2.imread("assets/minimap_other_character/red_dot.png")
+    frame = _paste(bg, tpl, 200, 60)
+    assert len(detection.detect_red_dots(frame, "assets/minimap_other_character/", 0.75)) == 1
+
+
+def test_template_rejects_the_flat_grey_sky_false_alarm():
+    # flat_sweep 2026-09-24 02:05:19: the template scored >= 0.75 on featureless grey sky in the
+    # minimap (0 red pixels) -> another-player ALARM at farm start with nobody there.
+    f = cv2.imread("datasets/enemy_dots/samples/20260924_020519_424_enemy_t1_c7_agree.png")
+    if f is None:
+        import pytest
+        pytest.skip("local-only alarm sample not present")
+    mm = f[185:335, 15:415]
+    assert detection.detect_red_dots(mm, "assets/minimap_other_character/", 0.75) == []

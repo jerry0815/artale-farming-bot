@@ -58,14 +58,14 @@
     },
     {
       "dir": "left",
-      "until_x": 107,
+      "until_x": 120,
       "then": null,
       "attack": false
     },
     {
       "dir": "right",
       "until_x": 195,
-      "then": "jump",
+      "then": "edge_jump",
       "attack": true
     },
     {
@@ -87,13 +87,13 @@
       "attack": false
     }
   ],
-  "_route_note": "Recorded from a human run (routes/flat_sweep.capture.jsonl, cycle t 0.7-81.6s) via build_sweep_route.py. Start the character at bottom-left (minimap x~43) before farming.",
+  "_route_note": "Recorded from a human run (routes/flat_sweep.capture.jsonl, cycle t 0.7-81.6s) via build_sweep_route.py. Start the character at bottom-left (minimap x~43) before farming. Tuned: segment 3 stops at 120 (recorded 107/94) to stay off the upper-left edge. Segment 4 ends in 'edge_jump': the minimap dot PINS at x=195 while the minimap scrolls, so she keeps walking right until she walks off the upper platform (minimap y drops), then air-jumps -- exactly what the recording shows in all 3 laps.",
   "same_platform_band": 180,
   "_band_note": "Only mobs whose feet are within this many screen px above/below her feet count (sweep decide is x-only). Levels here are ~600px apart, so 180 separates them. Without it she FIREd forever at upper-floor mobs in x-range. Override one side with band_up / band_down.",
   "push_edge_margin": 25,
-  "_rhythm_note": "Route attack legs: one z push, wait push_settle_secs (push animation), then HOLD x for aoe_hold_secs (continuous AoE). Values from your recording: z->x gap median 0.61s, x hold median 1.06s. No push within push_edge_margin minimap px of the segment end (edge/portal/jump spot) -- AoE only. No mob on her level -> walk.",
-  "aoe_hold_secs": 1.05,
-  "push_settle_secs": 0.6,
+  "_rhythm_note": "Route attack legs: one z push, wait push_settle_secs, then HOLD x for aoe_hold_secs (continuous AoE). Recording: z->x gap median 0.61s (includes human reaction; 0.3 tried), x hold 1.06s = 2 casts (~0.53s/cast) -> 1.6s = 3 casts. No push within push_edge_margin minimap px of the segment end (edge/portal/jump spot) -- AoE only. No mob on her level -> walk.",
+  "aoe_hold_secs": 1.6,
+  "push_settle_secs": 0.3,
   "portal_tol": 2,
   "_portal_note": "Portal segments end at the minimap x where you pressed UP in the recording; before each UP press the loop lines her up with core.walk_to_x to within portal_tol px."
 }

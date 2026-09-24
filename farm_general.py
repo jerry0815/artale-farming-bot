@@ -181,9 +181,16 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 if mmx >= 0 and sweep.seg_done(seg, mmx):             # segment end -> transition
                     nxt_i = (seg_i[0] + 1) % len(route)
                     nxt = route[nxt_i]
+                    print(f"[sweep] segment {seg_i[0] + 1} end at x={mmx} y={_mmy}")
+                    # edge_jump reacts to a walk-off fall (~0.2 s window): single fast minimap
+                    # reads tracked near her (drops phantoms); portals keep the robust stable read.
+                    edge = seg.get("then") == "edge_jump"
                     ok = sweep.route_transition(seg.get("then"), sweep.seg_heading(seg),
                                                 sweep.seg_heading(nxt), keys, core.kb,
-                                                read_xy=lambda: core.stable_char(2),
+                                                read_xy=(lambda: core.get_character_color(
+                                                    near=(mmx, _mmy))) if edge
+                                                else (lambda: core.stable_char(2)),
+                                                poll=0.03 if edge else 0.1,
                                                 sleep=core.time.sleep,
                                                 align=lambda: core.walk_to_x(
                                                     seg["until_x"], tol=portal_tol, timeout=3.0))
