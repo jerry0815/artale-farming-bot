@@ -11,6 +11,12 @@ CLI:
   (run with no/unknown cmd to print the full command list)
 """
 import sys, time, ctypes
+# Run as a script (`python core.py <cmd>`), this module is `__main__`. The extracted modules
+# (exp_tracking, safety, capture, ...) `import core`, which would otherwise load core.py a SECOND
+# time and hit a circular import at the re-exports below. Alias ourselves as `core` first so they
+# get THIS module, exactly as when core is imported normally.
+if __name__ == "__main__":
+    sys.modules.setdefault("core", sys.modules["__main__"])
 from ctypes import wintypes
 import cv2
 import numpy as np
