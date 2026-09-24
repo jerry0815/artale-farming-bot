@@ -137,9 +137,14 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     active_tick, _freeze_active = core.make_active_timer()
     core.STATUS["buff_at"] = None
     last_px = [None]
+    # EXP tracker: per-10-min gain + running average (same knobs as farm_water).
+    exp_tick = core.make_exp_tracker(log_exp=map_cfg.get("log_exp", True),
+                                     sample_secs=float(map_cfg.get("exp_sample_secs", 10)),
+                                     window_secs=float(map_cfg.get("exp_window_secs", 600)),
+                                     max_exp_per_sec=float(map_cfg.get("exp_max_per_sec", 20000)))
 
     def guard():
-        """Per-beat housekeeping: STOP/time-cap/pause/focus/lie-check/enemy. Mirrors farm_water."""
+        """Per-beat housekeeping: STOP/time-cap/pause/focus/lie-check/EXP/enemy. Mirrors farm_water."""
         now = core.time.time()
         if core.STOP.is_set():
             core.kb.safe_release_all(); _freeze_active(now); core.STATUS["state"] = "idle"
@@ -154,6 +159,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             _freeze_active(now); core.time.sleep(0.3); return "skip"
         core.STATUS["state"] = "farming"; active_tick(now)
         core.lie_check_fast_tick(); core.STATUS["lie"] = core.is_lie_check_active()
+        exp_tick()
         if enemy_check and enemy_check():
             print("[sweep] another player -> ALARM + panic")
             core.enemy_alarm_on()

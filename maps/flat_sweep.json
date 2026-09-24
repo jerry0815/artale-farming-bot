@@ -41,8 +41,33 @@
   ],
   "_map_box_note": "Valid minimap-dot box [x_min,x_max,y_min,y_max]. y_min 48 rejects the phantom reads seen in the recording (y 5-40 is not a platform level); levels are y~55 (upper), 62-84 (right platforms/slope), 99-109 (bottom).",
   "enemy_threshold": 0.75,
-  "buff_groups": [],
-  "_buff_note": "Optional: [{\"keys\":[\"d\"],\"interval_secs\":300}, ...]. Empty = no buffs.",
+  "buff_groups": [
+    {
+      "keys": [
+        "d"
+      ],
+      "interval_secs": 300
+    },
+    {
+      "keys": [
+        "3"
+      ],
+      "interval_secs": 600
+    },
+    {
+      "keys": [
+        "g"
+      ],
+      "interval_secs": 900
+    },
+    {
+      "keys": [
+        "1"
+      ],
+      "interval_secs": 600
+    }
+  ],
+  "_buff_note": "Same buff groups as deep_sea_2 (d 5min, 3 10min, g 15min, 1 10min); each group fires on its own interval.",
   "route": [
     {
       "dir": "right",
