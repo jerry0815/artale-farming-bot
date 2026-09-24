@@ -107,9 +107,10 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     next_gather = [0.0]
     # Route attack rhythm knobs: AoE presses per push, and how close to a segment end (minimap px)
     # she stops pushing so the dash can't carry her past the edge / portal / jump spot.
-    route_aoe = int(map_cfg.get("route_aoe_count", 2))
+    aoe_hold = float(map_cfg.get("aoe_hold_secs", 1.05))      # hold x this long (continuous AoE)
+    push_settle = float(map_cfg.get("push_settle_secs", 0.6))  # push animation before the AoE
     push_margin = int(map_cfg.get("push_edge_margin", 25))
-    aoe_dwell = float(map_cfg.get("attack_dwell_secs", 0.25))
+    portal_tol = int(map_cfg.get("portal_tol", 2))             # minimap px to stand on the portal
     reach = sweep.dash_reach(attack_range, gcfg) if gcfg else attack_range
 
     # Buffs -- same scheme as farm_water (each group on its own interval).
@@ -183,7 +184,9 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                     ok = sweep.route_transition(seg.get("then"), sweep.seg_heading(seg),
                                                 sweep.seg_heading(nxt), keys, core.kb,
                                                 read_xy=lambda: core.stable_char(2),
-                                                sleep=core.time.sleep)
+                                                sleep=core.time.sleep,
+                                                align=lambda: core.walk_to_x(
+                                                    seg["until_x"], tol=portal_tol, timeout=3.0))
                     if not ok:
                         print(f"[sweep] segment {seg_i[0] + 1}: '{seg.get('then')}' at x={mmx} "
                               f"not confirmed -- continuing")
@@ -211,7 +214,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                                          band_up=band_up, band_down=band_down)
             core.STATUS["count"] = len(mob_xs)
             if route:
-                # Route attack leg, fixed rhythm: one push (z) then route_aoe x AoE; no push within
+                # Route attack leg, fixed rhythm: one push (z) then hold x (AoE); no push within
                 # push_edge_margin of the segment end (edge/portal/jump spot); no mob -> walk on.
                 near_edge = mmx >= 0 and sweep.near_seg_end(seg, mmx, push_margin)
                 act = sweep.route_attack(mob_xs, px, heading, attack_range, reach, near_edge)
@@ -224,7 +227,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                             core.time.sleep(wait)             # keep push -> AoE x2 (z cooldown)
                         next_gather[0] = core.time.time() + gather_cd
                 sweep.apply_action(act, heading, keys, core.kb, sleep=core.time.sleep,
-                                   burst=route_aoe, attack_dwell=aoe_dwell)
+                                   attack_hold=aoe_hold, pull_settle=push_settle)
                 core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))
                 continue
             now = core.time.time()

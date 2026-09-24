@@ -148,3 +148,33 @@ def test_combo_presses_push_once_then_two_aoe():
                        kb, burst=2)
     p = [k for e, k in kb.events if e == "press"]
     assert p.count("z") == 1 and p.count("x") == 2 and p.index("z") < p.index("x")
+
+
+# --- continuous AoE: hold x for a duration instead of discrete taps ---
+
+def test_attack_hold_is_one_continuous_press_of_the_given_length():
+    kb, slept = _KB(), []
+    sweep.apply_action(sweep.GATHER, 1, {"attack": "x", "dash": "z", "right": "R", "left": "L"},
+                       kb, sleep=slept.append, attack_hold=1.05, pull_settle=0.6)
+    p = [k for e, k in kb.events if e == "press"]
+    assert p.count("x") == 1 and p.index("z") < p.index("x")
+    assert 0.6 in slept and 1.05 in slept              # push settle, then the x hold
+
+
+# --- portal precision: re-align on the exact portal x before each UP press ---
+
+def test_transition_up_aligns_before_pressing_up():
+    kb, calls = _KB(), []
+    ok = sweep.route_transition("up", -1, -1, KEYS, kb,
+                                read_xy=_reader([(214, 106), (214, 106), (140, 55)]),
+                                align=lambda: calls.append("align"))
+    assert ok is True and calls == ["align"]
+
+
+def test_transition_up_realigns_instead_of_blind_nudge_on_retry():
+    kb, calls = _KB(), []
+    ok = sweep.route_transition("up", -1, -1, KEYS, kb, read_xy=_reader([(214, 106)]),
+                                up_wait=0.3, poll=0.1, align=lambda: calls.append("align"))
+    presses = [k for e, k in kb.events if e == "press"]
+    assert ok is False and calls == ["align", "align"]
+    assert "R" not in presses and "L" not in presses   # align replaces the blind nudge

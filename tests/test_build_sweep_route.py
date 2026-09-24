@@ -68,3 +68,12 @@ def test_flat_sweep_cycle1_matches_the_confirmed_7_step_loop():
         ("right", None), ("left", "up"), ("left", None), ("right", "jump"),
         ("right", None), ("left", "up"), ("left", None)]
     assert [s["attack"] for s in segs] == [True, False, False, True, True, True, False]
+
+
+def test_up_segment_ends_at_the_up_press_position_not_the_walk_end():
+    # she stopped walking at x=150, drifted to 146, THEN pressed up: the portal is at 146
+    recs = (_walk(0, 3, 300, 150, 106) + [_pos(3.05, 148, 106), _pos(3.1, 146, 106)]
+            + [_key(0, "left", "down"), _key(3.0, "left", "up"),
+               _key(3.15, "up", "down"), _key(3.3, "up", "up")])
+    segs = bsr.extract_segments(sorted(recs, key=lambda r: r["t"]), 0, 4)
+    assert segs[0]["then"] == "up" and segs[0]["until_x"] == 146

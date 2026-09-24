@@ -69,7 +69,7 @@ def decide(mob_xs, px, heading, attack_range, gather=None, cd_ok=False, aoe_max=
 
 
 def apply_action(action, heading, keys, kb, sleep=lambda s: None,
-                 burst=3, attack_dwell=0.2, face_gap=0.03, pull_settle=0.1):
+                 burst=3, attack_dwell=0.2, face_gap=0.03, pull_settle=0.1, attack_hold=None):
     """Translate a decide() action into key presses via the injected `kb` (dependency-injected
     so this stays pure/testable -- no core import). Returns the heading for the NEXT beat
     (flipped on ADVANCE so a route with no explicit segments ping-pongs the platform).
@@ -92,6 +92,9 @@ def apply_action(action, heading, keys, kb, sleep=lambda s: None,
     if action == GATHER:
         kb.safe_press(keys["dash"]); sleep(face_gap); kb.safe_release(keys["dash"])
         sleep(pull_settle)                               # let the pull group them before the AoE
+    if attack_hold:                                      # one continuous AoE hold (casts repeat)
+        kb.safe_press(keys["attack"]); sleep(attack_hold); kb.safe_release(keys["attack"])
+        return heading
     for _ in range(burst):
         kb.safe_press(keys["attack"]); sleep(attack_dwell); kb.safe_release(keys["attack"])
     return heading
@@ -133,7 +136,7 @@ def route_attack(mob_xs, px, heading, attack_range, reach, near_edge):
 
 
 def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=lambda s: None,
-                     up_wait=2.5, poll=0.1, y_change=8, nudge=0.12, jump_gap=0.3):
+                     up_wait=2.5, poll=0.1, y_change=8, nudge=0.12, jump_gap=0.3, align=None):
     """Run a segment's end-transition. Returns True when it (probably) worked.
 
     "up":   stop and press up (portal/ladder). Confirmed when the minimap y moves by >= y_change
@@ -143,7 +146,9 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
     None:   nothing to do.
     cur_heading: the segment just finished (portal-overshoot nudge goes against it);
     next_heading: the segment about to start (the jump faces it).
-    keys: {"up","jump","right","left"}; read_xy() -> (minimap x, y)."""
+    keys: {"up","jump","right","left"}; read_xy() -> (minimap x, y).
+    align: optional callback run before EACH up press to stand exactly on the portal x (the loop
+    passes core.walk_to_x); without it the retry does a blind one-step nudge back."""
     if not then:
         return True
     kb.safe_release_all()
@@ -162,7 +167,9 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
             return y if (y is not None and y >= 0) else None
         y0 = _y()
         for attempt in range(2):
-            if attempt == 1:                      # overshot the portal? step back and retry once
+            if align is not None:
+                align()                           # line up exactly on the portal x first
+            elif attempt == 1:                    # no aligner: overshot? step back and retry once
                 back = keys["left"] if cur_heading > 0 else keys["right"]
                 kb.safe_press(back); sleep(nudge); kb.safe_release(back)
             kb.safe_press(keys["up"]); sleep(0.25); kb.safe_release(keys["up"])

@@ -63,16 +63,21 @@ def extract_segments(recs, t0, t1, y_min=48, min_run=0.15, gather_key="z"):
             done = [r for r in runs if r[2] <= a + 0.05]
             if done and done[-1][3] is None:
                 done[-1][3] = TRANSITIONS[k]
+                if k == "up":
+                    done[-1].append(a)            # remember WHEN up was pressed (portal spot)
     segs = []
-    for k, a, b, then in runs:
+    for run in runs:
+        k, a, b, then = run[:4]
+        t_up = run[4] if len(run) > 4 else None
         if segs and segs[-1]["dir"] == k and segs[-1]["then"] is None:
-            segs[-1]["_t1"] = b; segs[-1]["then"] = then          # merge a kill-pause split
+            segs[-1]["_t1"] = b; segs[-1]["then"] = then; segs[-1]["_tup"] = t_up   # kill-pause merge
         else:
-            segs.append({"dir": k, "_t0": a, "_t1": b, "then": then})
+            segs.append({"dir": k, "_t0": a, "_t1": b, "then": then, "_tup": t_up})
     for s in segs:
-        s["until_x"] = x_at(s["_t1"])
+        # a portal segment ends where UP was pressed (the portal), not where walking stopped
+        s["until_x"] = x_at(s["_tup"], span=0.0) if s["_tup"] is not None else x_at(s["_t1"])
         s["attack"] = any(s["_t0"] <= g <= s["_t1"] for g in gathers)
-        del s["_t0"], s["_t1"]
+        del s["_t0"], s["_t1"], s["_tup"]
     return [{"dir": s["dir"], "until_x": s["until_x"], "then": s["then"], "attack": s["attack"]}
             for s in segs]
 
