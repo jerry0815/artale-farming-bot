@@ -112,10 +112,24 @@ def seg_done(seg, mmx):
     return mmx >= seg["until_x"] if seg_heading(seg) > 0 else mmx <= seg["until_x"]
 
 
-def route_action(action):
-    """Inside a route segment, empty ground means keep walking the segment -- ADVANCE's
-    heading flip (the flat-map ping-pong) must never happen mid-route."""
-    return WALK if action == ADVANCE else action
+def near_seg_end(seg, mmx, margin=25):
+    """True when she is within `margin` minimap px of the segment's end (until_x) in its heading.
+    Route segment ends are where the platform edge / portal / jump spot is, so a forward push
+    there would dash her past it -- the loop skips the push near here."""
+    return (seg["until_x"] - mmx) * seg_heading(seg) <= margin
+
+
+def route_attack(mob_xs, px, heading, attack_range, reach, near_edge):
+    """Route attack-leg rhythm: one push (dash-scoop) then AoE -- or just AoE near the edge.
+
+    Returns GATHER (push + AoE burst), FIRE (AoE burst only: near_edge), or WALK (no mob on her
+    level, or the nearest is ahead beyond push reach -> close in). Only mobs ahead, or just behind
+    within attack_range (the AoE still hits them), count; she never turns back mid-segment.
+    mob_xs must already be same-platform filtered."""
+    fwd = [(x - px) * heading for x in mob_xs]
+    if not any(-attack_range <= d <= reach for d in fwd):
+        return WALK
+    return FIRE if near_edge else GATHER
 
 
 def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=lambda s: None,

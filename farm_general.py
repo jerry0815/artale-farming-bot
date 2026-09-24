@@ -105,6 +105,12 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             gcfg["dash"] = int(gather["dash"])
     gather_cd = float((gather or {}).get("cooldown", 1.5))
     next_gather = [0.0]
+    # Route attack rhythm knobs: AoE presses per push, and how close to a segment end (minimap px)
+    # she stops pushing so the dash can't carry her past the edge / portal / jump spot.
+    route_aoe = int(map_cfg.get("route_aoe_count", 2))
+    push_margin = int(map_cfg.get("push_edge_margin", 25))
+    aoe_dwell = float(map_cfg.get("attack_dwell_secs", 0.25))
+    reach = sweep.dash_reach(attack_range, gcfg) if gcfg else attack_range
 
     # Buffs -- same scheme as farm_water (each group on its own interval).
     buff_groups = core.parse_buff_groups(map_cfg, skill_interval)
@@ -204,19 +210,29 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             mob_xs = sweep.same_platform([(m[1] + m[3] // 2, m[2] + m[4]) for m in mobs], pfeet,
                                          band_up=band_up, band_down=band_down)
             core.STATUS["count"] = len(mob_xs)
+            if route:
+                # Route attack leg, fixed rhythm: one push (z) then route_aoe x AoE; no push within
+                # push_edge_margin of the segment end (edge/portal/jump spot); no mob -> walk on.
+                near_edge = mmx >= 0 and sweep.near_seg_end(seg, mmx, push_margin)
+                act = sweep.route_attack(mob_xs, px, heading, attack_range, reach, near_edge)
+                if act == sweep.GATHER:
+                    if gcfg is None:
+                        act = sweep.FIRE                      # no push skill configured
+                    else:
+                        wait = next_gather[0] - core.time.time()
+                        if 0 < wait <= gather_cd:
+                            core.time.sleep(wait)             # keep push -> AoE x2 (z cooldown)
+                        next_gather[0] = core.time.time() + gather_cd
+                sweep.apply_action(act, heading, keys, core.kb, sleep=core.time.sleep,
+                                   burst=route_aoe, attack_dwell=aoe_dwell)
+                core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))
+                continue
             now = core.time.time()
             cd_ok = gcfg is not None and now >= next_gather[0]
             action = sweep.decide(mob_xs, px, heading, attack_range,
                                   gather=gcfg, cd_ok=cd_ok, aoe_max=aoe_max)
             if action == sweep.GATHER:
                 next_gather[0] = now + gather_cd
-            if route:
-                # Route: empty ground = keep walking this segment (never flip mid-segment); the
-                # segment-end check above owns turning around.
-                sweep.apply_action(sweep.route_action(action), heading, keys, core.kb,
-                                   sleep=core.time.sleep)
-                core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))
-                continue
             # Minimap-edge safety: never WALK off the platform -- turn around at a configured end.
             if action == sweep.WALK and bounds is not None:
                 mmx, _mmy = core.stable_char(2)

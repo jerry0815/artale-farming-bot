@@ -20,13 +20,6 @@ def test_seg_done_left_when_minimap_x_reaches_until():
     assert sweep.seg_done(seg, 214) and sweep.seg_done(seg, 200)
 
 
-def test_route_action_never_flips_mid_segment():
-    # empty ground inside a segment -> keep walking the segment (ADVANCE would ping-pong)
-    assert sweep.route_action(sweep.ADVANCE) == sweep.WALK
-    for a in (sweep.FIRE, sweep.WALK, sweep.GATHER):
-        assert sweep.route_action(a) == a
-
-
 class _KB:
     def __init__(self):
         self.events = []
@@ -110,3 +103,48 @@ def test_upper_level_mob_in_x_range_no_longer_pins_her_in_fire():
 def test_same_platform_asymmetric_band():
     mobs = [(100, 800), (120, 950)]            # 90 above, 60 below her feet (890)
     assert sweep.same_platform(mobs, 890, band_up=50, band_down=100) == [120]
+
+
+# --- route attack rhythm: one push (z) then N AoE (x); no push near the segment end (edge) ---
+
+def test_near_seg_end_within_margin_in_heading_direction():
+    seg = {"dir": "right", "until_x": 275}
+    assert sweep.near_seg_end(seg, 255, margin=25)       # 20 px to the edge
+    assert not sweep.near_seg_end(seg, 240, margin=25)   # 35 px away
+    seg_l = {"dir": "left", "until_x": 214}
+    assert sweep.near_seg_end(seg_l, 230, margin=25) and not sweep.near_seg_end(seg_l, 260, 25)
+
+
+def test_route_attack_pushes_then_aoe_when_mobs_in_reach():
+    # mob 150px ahead, reach 240 -> the combo (push + AoE) = GATHER
+    assert sweep.route_attack([650], px=500, heading=1, attack_range=200, reach=240,
+                              near_edge=False) == sweep.GATHER
+
+
+def test_route_attack_no_push_near_edge_just_aoe():
+    assert sweep.route_attack([650], px=500, heading=1, attack_range=200, reach=240,
+                              near_edge=True) == sweep.FIRE
+
+
+def test_route_attack_walks_when_no_mob():
+    assert sweep.route_attack([], px=500, heading=1, attack_range=200, reach=240,
+                              near_edge=False) == sweep.WALK
+
+
+def test_route_attack_walks_to_close_in_on_a_far_mob():
+    assert sweep.route_attack([900], px=500, heading=1, attack_range=200, reach=240,
+                              near_edge=False) == sweep.WALK
+
+
+def test_route_attack_hits_a_mob_just_behind_without_turning():
+    # 120px behind (inside AoE range) -> attack in place facing the heading; never walk back
+    assert sweep.route_attack([380], px=500, heading=1, attack_range=200, reach=240,
+                              near_edge=False) == sweep.GATHER
+
+
+def test_combo_presses_push_once_then_two_aoe():
+    kb = _KB()
+    sweep.apply_action(sweep.GATHER, 1, {"attack": "x", "dash": "z", "right": "R", "left": "L"},
+                       kb, burst=2)
+    p = [k for e, k in kb.events if e == "press"]
+    assert p.count("z") == 1 and p.count("x") == 2 and p.index("z") < p.index("x")
