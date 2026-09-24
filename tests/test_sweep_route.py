@@ -191,13 +191,15 @@ def _logged_reader(seq, events):
     return r
 
 
-def test_edge_jump_waits_for_walk_off_then_jumps_once():
+def test_edge_jump_waits_for_walk_off_then_double_jumps():
     kb = _KB()
     read = _logged_reader([(195, 55), (195, 55), (195, 55), (195, 58)], kb.events)
     ok = sweep.route_transition("edge_jump", 1, 1, KEYS, kb, read_xy=read, poll=0.01)
     assert ok is True
     presses = [k for e, k in kb.events if e == "press"]
-    assert presses.count("J") == 1
+    # 2 presses 0.3 s apart: if the 1st was still a ground jump off the lip, the 2nd is the air
+    # jump that carries her across (a spare press in the air is harmless) -- recorded lap 1
+    assert presses.count("J") == 2
     j = kb.events.index(("press", "J"))
     assert ("read", (195, 58)) in kb.events[:j]              # jumped only after the drop
     assert kb.events.index(("press", "R")) < j               # holding the heading the whole way
@@ -217,7 +219,7 @@ def test_edge_jump_no_walk_off_still_jumps_and_reports_failure():
     ok = sweep.route_transition("edge_jump", 1, 1, KEYS, kb, read_xy=_reader([(195, 55)]),
                                 poll=0.1, edge_wait=0.3)
     assert ok is False
-    assert [k for e, k in kb.events if e == "press"].count("J") == 1
+    assert [k for e, k in kb.events if e == "press"].count("J") == 2
 
 
 # --- walk_to_edge in short steps: the pinned zone before the jump is still an attack zone, so the
@@ -314,3 +316,22 @@ def test_gather_ready_pushes():
 def test_fire_and_walk_ignore_the_push_cooldown():
     assert sweep.push_ready_or_walk(sweep.FIRE, cd_left=0.6) == sweep.FIRE
     assert sweep.push_ready_or_walk(sweep.WALK, cd_left=0.6) == sweep.WALK
+
+
+def test_edge_jump_holds_the_heading_until_landing():
+    kb = _KB()
+    slept = []
+    sweep.walk_to_edge(1, KEYS, kb, read_xy=_reader([(195, 55), (195, 59)]), walk=0.3, poll=0.1,
+                       sleep=slept.append)
+    last_j = max(i for i, e in enumerate(kb.events) if e == ("press", "J"))
+    rel = kb.events.index(("release", "R"))
+    assert rel > last_j                                   # heading held through both jumps
+    assert sum(slept[-3:]) >= 1.0                         # ~1 s of flight before letting go
+
+
+def test_attack_without_face_tap_never_touches_the_direction_keys():
+    # at the edge lip the 0.03 s facing tap walks her OFF (seen live: fell during a FIRE)
+    kb = _KB()
+    sweep.apply_action(sweep.FIRE, 1, KEYS, kb, attack_hold=1.05, face_tap=False)
+    assert ("press", "R") not in kb.events and ("press", "L") not in kb.events
+    assert ("press", "x") in kb.events

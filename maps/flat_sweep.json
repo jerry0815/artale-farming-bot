@@ -88,7 +88,8 @@
       "until_x": 195,
       "then": "edge_jump",
       "attack": true,
-      "y": 55
+      "y": 55,
+      "push_margin": 45
     },
     {
       "dir": "right",
@@ -124,5 +125,6 @@
   "_mob_conf_note": "0.4 -> 0.6 (2026-09-24): she attacked air. Replaying the loop's decision on the 646 saved frames showed boxes on dropped loot (meso bags) and on AoE effects over dying mobs. On the labeled frames, 0.6 drops 36 -> 8 false boxes and keeps 96% of real mobs.",
   "debug_log": true,
   "_debug_note": "debug_log: per-beat decision trace -> logs/debug_<ts>.log + every attack's annotated frame -> logs/sweep_dbg/ (max debug_max_frames=400). Turn off once tuned.",
-  "_recovery_note": "Each segment's y = its floor's minimap y (build_sweep_route.py). If she walks stuck_secs (4) with no progress -- e.g. a failed jump left her on the bottom, whose right end (~285) never reaches segment 5's 307 -- the loop resyncs to the next segment on the floor she is on (bottom-right -> segment 6, the portal leg). Minimap reads jumping > 40 px within 2 s are phantoms."
+  "_recovery_note": "Each segment's y = its floor's minimap y (build_sweep_route.py). If she walks stuck_secs (4) with no progress -- e.g. a failed jump left her on the bottom, whose right end (~285) never reaches segment 5's 307 -- the loop resyncs to the next segment on the floor she is on (bottom-right -> segment 6, the portal leg). Minimap reads jumping > 40 px within 2 s are phantoms.",
+  "_jump_note": "Edge jump (segment 3): no push after x=150 (push_margin 45 -- a push carried her ~27 minimap px into the pinned zone, landing at the edge); no facing tap before AoE in the zone (it stepped her off the lip mid-AoE); on the walk-off she jumps TWICE 0.3s apart (1st may still be a ground jump off the lip) holding right ~1s."
 }

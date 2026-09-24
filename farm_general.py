@@ -339,7 +339,8 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 # push_edge_margin of the segment end (edge/portal/jump spot); no mob -> walk on.
                 # In an edge_jump zone the edge is somewhere ahead, unknown: never push (the dash could
                 # carry her off it), and walk only in edge_step steps.
-                near_edge = edge_zone or (mmx >= 0 and sweep.near_seg_end(seg, mmx, push_margin))
+                near_edge = edge_zone or (mmx >= 0 and sweep.near_seg_end(
+                    seg, mmx, int(seg.get("push_margin", push_margin))))   # per-segment override
                 act = sweep.route_attack(mob_xs, px, heading, attack_range, reach, near_edge)
                 if _debug:
                     core.dbg(f"[sweep] seg{seg_i[0] + 1} mm=({mmx},{_mmy}) p=({px},{pfeet}) "
@@ -361,8 +362,11 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                         act = sweep.push_ready_or_walk(act, next_gather[0] - core.time.time())
                         if act == sweep.GATHER:
                             next_gather[0] = core.time.time() + gather_cd
+                # edge zone: she already faces the heading (walked in), and the facing tap is a
+                # step that walks her off the lip mid-AoE (seen live) -> no tap there.
                 sweep.apply_action(act, heading, keys, core.kb, sleep=core.time.sleep,
-                                   attack_hold=aoe_hold, pull_settle=push_settle)
+                                   attack_hold=aoe_hold, pull_settle=push_settle,
+                                   face_tap=not edge_zone)
                 if act == sweep.WALK:
                     progress.mark_walking()
                 core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))

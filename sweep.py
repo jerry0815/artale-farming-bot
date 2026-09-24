@@ -69,7 +69,8 @@ def decide(mob_xs, px, heading, attack_range, gather=None, cd_ok=False, aoe_max=
 
 
 def apply_action(action, heading, keys, kb, sleep=lambda s: None,
-                 burst=3, attack_dwell=0.2, face_gap=0.03, pull_settle=0.1, attack_hold=None):
+                 burst=3, attack_dwell=0.2, face_gap=0.03, pull_settle=0.1, attack_hold=None,
+                 face_tap=True):
     """Translate a decide() action into key presses via the injected `kb` (dependency-injected
     so this stays pure/testable -- no core import). Returns the heading for the NEXT beat
     (flipped on ADVANCE so a route with no explicit segments ping-pongs the platform).
@@ -77,6 +78,8 @@ def apply_action(action, heading, keys, kb, sleep=lambda s: None,
     keys: {"attack","dash","right","left"} -- the attack key (water loop's attack_key), the
     push/gather key ('z'), and the two facing keys (core.Key.right/left live). The loop owns
     the gather cooldown: it passes cd_ok into decide(), and resets its timer after a GATHER.
+    face_tap=False skips the facing tap (she already faces the heading): at a platform edge that
+    0.03 s tap is a step that can walk her off.
     """
     face = keys["right"] if heading > 0 else keys["left"]
     if action == ADVANCE:
@@ -88,7 +91,8 @@ def apply_action(action, heading, keys, kb, sleep=lambda s: None,
         return heading
     # FIRE or GATHER: stop walking, face the heading, act in place.
     kb.safe_release(keys["right"]); kb.safe_release(keys["left"])
-    kb.safe_press(face); sleep(face_gap); kb.safe_release(face)
+    if face_tap:
+        kb.safe_press(face); sleep(face_gap); kb.safe_release(face)
     if action == GATHER:
         kb.safe_press(keys["dash"]); sleep(face_gap); kb.safe_release(keys["dash"])
         sleep(pull_settle)                               # let the pull group them before the AoE
@@ -142,10 +146,21 @@ def push_ready_or_walk(act, cd_left):
     return WALK if act == GATHER and cd_left > 0 else act
 
 
+def _double_jump(keys, kb, sleep, jump_gap=0.3, land=0.7):
+    """Jump, jump again jump_gap s later, then fly `land` s (caller holds the heading). The 1st
+    press may still be a GROUND jump off the lip (minimap y dips before she leaves it) -- the 2nd
+    is then the air jump that crosses the gap; if the 1st was already the air jump, the spare
+    press does nothing. Recorded lap 1 did exactly this (0.33 s apart)."""
+    kb.safe_press(keys["jump"]); sleep(0.05); kb.safe_release(keys["jump"])
+    sleep(jump_gap)
+    kb.safe_press(keys["jump"]); sleep(0.05); kb.safe_release(keys["jump"])
+    sleep(land)
+
+
 def walk_to_edge(heading, keys, kb, read_xy, sleep=lambda s: None, walk=0.4, poll=0.03,
-                 fall_dy=3, x_win=12, land=0.6, base=None):
+                 fall_dy=3, x_win=12, land=0.7, base=None):
     """Walk `heading` for up to `walk` s watching for the walk-off (minimap y drops >= fall_dy).
-    On the drop: one air-jump, hold the heading `land` s to cross the gap, return True. No drop:
+    On the drop: double jump (_double_jump) holding the heading ~1 s to cross, return True. No drop:
     release and return False WITHOUT jumping, so the loop can stop and check for mobs (short steps
     keep the pinned-minimap stretch before an edge_jump an attack zone). Reads more than x_win px
     from the baseline are phantoms and ignored. base=(x, y) standing position if the caller already
@@ -160,8 +175,7 @@ has one (else the first good read). read_xy must be FAST (single read)."""
             if x0 is None:
                 x0, y0 = x, y                     # standing on the platform
             elif abs(x - x0) <= x_win and y - y0 >= fall_dy:
-                kb.safe_press(keys["jump"]); sleep(0.05); kb.safe_release(keys["jump"])
-                sleep(land)
+                _double_jump(keys, kb, sleep, land=land)
                 kb.safe_release(face)
                 return True
         sleep(poll); waited += poll
@@ -171,7 +185,7 @@ has one (else the first good read). read_xy must be FAST (single read)."""
 
 def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=lambda s: None,
                      up_wait=2.5, poll=0.1, y_change=8, nudge=0.12, jump_gap=0.3, align=None,
-                     edge_wait=4.0, fall_dy=3, x_win=12, land=0.6):
+                     edge_wait=4.0, fall_dy=3, x_win=12, land=0.7):
     """Run a segment's end-transition. Returns True when it (probably) worked.
 
     "up":   stop and press up (portal/ladder). Confirmed when the minimap y moves by >= y_change
@@ -183,7 +197,7 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
             For where the minimap dot is pinned by scrolling, so x can't find the edge. Reads more
             than x_win px from her start x are phantoms and ignored. No walk-off within edge_wait
             -> jump anyway and report failure. Pass a FAST read_xy (single read) -- a fall gives
-            ~0.2 s to react.
+            ~0.2 s to react. Jumps twice (see _double_jump).
     None:   nothing to do.
     cur_heading: the segment just finished (portal-overshoot nudge goes against it);
     next_heading: the segment about to start (the jump faces it).
@@ -208,8 +222,7 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
             return True
         face = keys["right"] if next_heading > 0 else keys["left"]   # never walked off: jump anyway
         kb.safe_press(face)
-        kb.safe_press(keys["jump"]); sleep(0.05); kb.safe_release(keys["jump"])
-        sleep(land)
+        _double_jump(keys, kb, sleep, land=land)
         kb.safe_release(face)
         return False
     if then == "up":
