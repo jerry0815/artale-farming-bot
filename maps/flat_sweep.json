@@ -1,37 +1,87 @@
 {
   "loop": "sweep",
-  "_scaffold_note": "First general-sweep map. Player = generic HP-bar anchor (no character/template). Mobs = generic pooled model. Geometry values marked TODO_MEASURE need a live frame; sweep numbers are starting guesses to tune in-game.",
-
+  "_scaffold_note": "First general-sweep map, route mode. Player = generic HP-bar anchor (no character). Mobs = models/mob_generic.pt. attack_range/aoe_max/gather numbers are starting guesses.",
   "detector": "mob_yolo",
   "mob_model": "models/mob_generic.pt",
   "mob_conf": 0.4,
   "mob_imgsz": 640,
-
   "anchor": "hpbar",
   "player": {},
   "_player_note": "Empty {} = default red-HP-bar detection (DEFAULTS in player.py). Add hue_lo / sat_val_lo / foot_offset / bar-geometry overrides here only if the anchor misgrabs on this map.",
-
   "attack_key": "x",
   "_attack_key_note": "x = AoE attack (no cooldown).",
   "attack_range": 200,
   "aoe_max": 6,
   "start_heading": 1,
   "beat_gap": 0.05,
-
-  "gather": {"key": "z", "grp": 90, "min": 3, "dash_gap": 50, "cooldown": 1.0},
+  "gather": {
+    "key": "z",
+    "grp": 90,
+    "min": 3,
+    "dash_gap": 50,
+    "cooldown": 1.0
+  },
   "_gather_note": "z = push/gather (path-scoop) skill, 1s cooldown: dashes forward and scoops mobs along the path into a clump within attack_range, doubling as forward locomotion. grp/min/dash_gap are starting guesses: grp=how spread mobs must be to bother scooping, min=fewest mobs worth a scoop, dash_gap=attack_range - dash reach. Tune live.",
-
-  "sweep_bounds": null,
-  "_sweep_bounds_note": "TODO_MEASURE: [mm_x_lo, mm_x_hi] = minimap x of the platform's left/right ends, so she turns around at an edge instead of walking off. Read via python live_pos.py while standing at each end. null = no edge turnaround (relies on empty-ground ADVANCE only).",
-
-  "minimap": {"x": 15, "y": 185, "w": 400, "h": 150},
-  "_minimap_note": "PROVISIONAL (measured from a capture frame's 小地圖 content area). Refine live if the dot reads look off. Note: this map's minimap SCROLLS (very wide), so (x,y) is view-relative.",
-
-  "map_box": [5, 395, 5, 145],
-  "_map_box_note": "PROVISIONAL: permissive full-crop box so recording doesn't reject valid dots. Tighten after live observation.",
-
+  "minimap": {
+    "x": 15,
+    "y": 185,
+    "w": 400,
+    "h": 150
+  },
+  "_minimap_note": "Minimap crop measured from a capture frame. The recording showed the same minimap x at the same place every lap (start ~43, portal ~214, jump ~195), so route until_x waypoints are stable despite the wide map.",
+  "map_box": [
+    5,
+    395,
+    48,
+    120
+  ],
+  "_map_box_note": "Valid minimap-dot box [x_min,x_max,y_min,y_max]. y_min 48 rejects the phantom reads seen in the recording (y 5-40 is not a platform level); levels are y~55 (upper), 62-84 (right platforms/slope), 99-109 (bottom).",
   "enemy_threshold": 0.75,
-
   "buff_groups": [],
-  "_buff_note": "Optional: [{\"keys\":[\"d\"],\"interval_secs\":300}, ...]. Empty = no buffs."
+  "_buff_note": "Optional: [{\"keys\":[\"d\"],\"interval_secs\":300}, ...]. Empty = no buffs.",
+  "route": [
+    {
+      "dir": "right",
+      "until_x": 275,
+      "then": null,
+      "attack": true
+    },
+    {
+      "dir": "left",
+      "until_x": 219,
+      "then": "up",
+      "attack": false
+    },
+    {
+      "dir": "left",
+      "until_x": 107,
+      "then": null,
+      "attack": false
+    },
+    {
+      "dir": "right",
+      "until_x": 195,
+      "then": "jump",
+      "attack": true
+    },
+    {
+      "dir": "right",
+      "until_x": 307,
+      "then": null,
+      "attack": true
+    },
+    {
+      "dir": "left",
+      "until_x": 217,
+      "then": "up",
+      "attack": true
+    },
+    {
+      "dir": "left",
+      "until_x": 45,
+      "then": null,
+      "attack": false
+    }
+  ],
+  "_route_note": "Recorded from a human run (routes/flat_sweep.capture.jsonl, cycle t 0.7-81.6s) via build_sweep_route.py. Start the character at bottom-left (minimap x~43) before farming."
 }

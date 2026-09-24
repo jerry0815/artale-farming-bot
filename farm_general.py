@@ -79,7 +79,19 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     attack_key = map_cfg.get("attack_key", "c")
     gather = map_cfg.get("gather")
     keys = {"attack": attack_key, "dash": (gather or {}).get("key", "z"),
-            "right": core.Key.right, "left": core.Key.left}
+            "right": core.Key.right, "left": core.Key.left,
+            "up": core.Key.up, "jump": core.JUMP}
+
+    # Route mode: a recorded, cyclic list of segments (build_sweep_route.py). Heading is fixed per
+    # segment; a segment ends when the minimap x reaches its until_x, then its transition ("up"
+    # portal / "jump") runs. Without a route the loop ping-pongs one platform (sweep_bounds).
+    # Start the character at the route's first segment start (where the demo run began).
+    route = map_cfg.get("route") or None
+    seg_i = [0]
+    if route:
+        heading = sweep.seg_heading(route[0])
+        print(f"[sweep] route mode: {len(route)} segments, starting at segment 1 "
+              f"({route[0]['dir']} to x={route[0]['until_x']})")
 
     # Normalize the gather block for sweep.decide (it derives dash = attack_range - dash_gap).
     gcfg = None
@@ -153,11 +165,35 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             frame = core.capture()
             if frame is None:
                 core.time.sleep(0.05); continue
+            if route:
+                seg = route[seg_i[0]]
+                mmx, _mmy = core.stable_char(2)
+                if mmx >= 0 and sweep.seg_done(seg, mmx):             # segment end -> transition
+                    nxt_i = (seg_i[0] + 1) % len(route)
+                    nxt = route[nxt_i]
+                    ok = sweep.route_transition(seg.get("then"), sweep.seg_heading(seg),
+                                                sweep.seg_heading(nxt), keys, core.kb,
+                                                read_xy=lambda: core.stable_char(2),
+                                                sleep=core.time.sleep)
+                    if not ok:
+                        print(f"[sweep] segment {seg_i[0] + 1}: '{seg.get('then')}' at x={mmx} "
+                              f"not confirmed -- continuing")
+                    seg_i[0] = nxt_i; heading = sweep.seg_heading(nxt)
+                    core.STATUS["node"] = f"seg{nxt_i + 1}"
+                    print(f"[sweep] -> segment {nxt_i + 1}: {nxt['dir']} to x={nxt['until_x']}"
+                          f"{' (travel)' if not nxt.get('attack', True) else ''}")
+                    continue
+                if not seg.get("attack", True):                       # travel leg: just walk
+                    sweep.apply_action(sweep.WALK, heading, keys, core.kb, sleep=core.time.sleep)
+                    core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))
+                    continue
             mobs, pbox = mob_detect.yolo_detect(_mm, frame, conf=_mconf, imgsz=_mimg,
                                                 class_conf=_cconf, near=last_px[0], max_jump=_pmax,
                                                 player_conf=_pconf)
             px, last_px[0] = _player_x(_anchor, frame, pbox, last_px[0])
             if px is None:
+                if route:                                  # no player lock: keep walking the segment
+                    sweep.apply_action(sweep.WALK, heading, keys, core.kb, sleep=core.time.sleep)
                 core.time.sleep(0.05); continue            # no player lock yet -> wait
             mob_xs = [m[1] + m[3] // 2 for m in mobs]       # center-x of each mob box
             core.STATUS["count"] = len(mob_xs)
@@ -167,6 +203,13 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                                   gather=gcfg, cd_ok=cd_ok, aoe_max=aoe_max)
             if action == sweep.GATHER:
                 next_gather[0] = now + gather_cd
+            if route:
+                # Route: empty ground = keep walking this segment (never flip mid-segment); the
+                # segment-end check above owns turning around.
+                sweep.apply_action(sweep.route_action(action), heading, keys, core.kb,
+                                   sleep=core.time.sleep)
+                core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))
+                continue
             # Minimap-edge safety: never WALK off the platform -- turn around at a configured end.
             if action == sweep.WALK and bounds is not None:
                 mmx, _mmy = core.stable_char(2)

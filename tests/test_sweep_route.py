@@ -81,3 +81,11 @@ def test_transition_jump_double_jumps_holding_next_direction():
     assert ok is True
     assert presses.count("J") == 2
     assert presses.index("R") < presses.index("J")   # moving toward the next segment first
+
+
+def test_transition_up_ignores_failed_minimap_reads():
+    # (-1,-1) = no read; it must NOT count as a level change (106 -> -1 is not the portal)
+    kb = _KB()
+    ok = sweep.route_transition("up", -1, -1, KEYS, kb, read_xy=_reader([(214, 106), (-1, -1)]),
+                                up_wait=0.3, poll=0.1)
+    assert ok is False

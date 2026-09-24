@@ -135,7 +135,10 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
         kb.safe_release(face)
         return True
     if then == "up":
-        y0 = read_xy()[1]
+        def _y():                                 # (-1,-1) = no minimap read -> not a level change
+            y = read_xy()[1]
+            return y if (y is not None and y >= 0) else None
+        y0 = _y()
         for attempt in range(2):
             if attempt == 1:                      # overshot the portal? step back and retry once
                 back = keys["left"] if cur_heading > 0 else keys["right"]
@@ -143,8 +146,10 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
             kb.safe_press(keys["up"]); sleep(0.25); kb.safe_release(keys["up"])
             waited = 0.0
             while waited < up_wait:
-                y = read_xy()[1]
-                if y is not None and y0 is not None and abs(y - y0) >= y_change:
+                y = _y()
+                if y0 is None:
+                    y0 = y                            # no baseline yet: take the first good read
+                elif y is not None and abs(y - y0) >= y_change:
                     return True
                 sleep(poll); waited += poll
         return False
