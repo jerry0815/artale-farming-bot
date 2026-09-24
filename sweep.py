@@ -135,6 +135,13 @@ def route_attack(mob_xs, px, heading, attack_range, reach, near_edge):
     return FIRE if near_edge else GATHER
 
 
+def push_ready_or_walk(act, cd_left):
+    """A GATHER (push) decided while the push is still on cooldown (cd_left s > 0) becomes WALK:
+    keep closing in until it is ready instead of standing idle or AoE-ing without the push. The
+    next beat re-decides (near an edge that becomes FIRE, so the walk can't carry her off)."""
+    return WALK if act == GATHER and cd_left > 0 else act
+
+
 def walk_to_edge(heading, keys, kb, read_xy, sleep=lambda s: None, walk=0.4, poll=0.03,
                  fall_dy=3, x_win=12, land=0.6, base=None):
     """Walk `heading` for up to `walk` s watching for the walk-off (minimap y drops >= fall_dy).

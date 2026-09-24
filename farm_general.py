@@ -357,11 +357,10 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 if act == sweep.GATHER:
                     if gcfg is None:
                         act = sweep.FIRE                      # no push skill configured
-                    else:
-                        wait = next_gather[0] - core.time.time()
-                        if 0 < wait <= gather_cd:
-                            core.time.sleep(wait)             # keep push -> AoE x2 (z cooldown)
-                        next_gather[0] = core.time.time() + gather_cd
+                    else:                                     # push on cooldown -> walk until ready
+                        act = sweep.push_ready_or_walk(act, next_gather[0] - core.time.time())
+                        if act == sweep.GATHER:
+                            next_gather[0] = core.time.time() + gather_cd
                 sweep.apply_action(act, heading, keys, core.kb, sleep=core.time.sleep,
                                    attack_hold=aoe_hold, pull_settle=push_settle)
                 if act == sweep.WALK:

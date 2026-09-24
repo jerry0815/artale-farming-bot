@@ -298,3 +298,19 @@ def test_minimap_gate_drops_phantom_jumps_then_accepts_after_stale():
     assert g.feed(135, 55, 3.0) == (135, 55)        # a real teleport is accepted once stale
     g.reset()
     assert g.feed(30, 76, 3.1) == (30, 76)          # after reset (post-transition) take any read
+
+
+# --- push on cooldown: walk on until it is ready (don't stand waiting, don't AoE without the push)
+
+def test_gather_on_cooldown_walks_instead():
+    assert sweep.push_ready_or_walk(sweep.GATHER, cd_left=0.6) == sweep.WALK
+
+
+def test_gather_ready_pushes():
+    assert sweep.push_ready_or_walk(sweep.GATHER, cd_left=0.0) == sweep.GATHER
+    assert sweep.push_ready_or_walk(sweep.GATHER, cd_left=-0.2) == sweep.GATHER
+
+
+def test_fire_and_walk_ignore_the_push_cooldown():
+    assert sweep.push_ready_or_walk(sweep.FIRE, cd_left=0.6) == sweep.FIRE
+    assert sweep.push_ready_or_walk(sweep.WALK, cd_left=0.6) == sweep.WALK
