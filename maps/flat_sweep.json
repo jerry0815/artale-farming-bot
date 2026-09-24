@@ -3,7 +3,7 @@
   "_scaffold_note": "First general-sweep map, route mode. Player = generic HP-bar anchor (no character). Mobs = models/mob_generic.pt. attack_range/aoe_max/gather numbers are starting guesses.",
   "detector": "mob_yolo",
   "mob_model": "models/mob_generic.pt",
-  "mob_conf": 0.4,
+  "mob_conf": 0.6,
   "mob_imgsz": 640,
   "anchor": "hpbar",
   "player": {
@@ -120,5 +120,8 @@
   "aoe_hold_secs": 1.6,
   "push_settle_secs": 0.3,
   "portal_tol": 2,
-  "_portal_note": "Portal segments end at the minimap x where you pressed UP in the recording; before each UP press the loop lines her up with core.walk_to_x to within portal_tol px."
+  "_portal_note": "Portal segments end at the minimap x where you pressed UP in the recording; before each UP press the loop lines her up with core.walk_to_x to within portal_tol px.",
+  "_mob_conf_note": "0.4 -> 0.6 (2026-09-24): she attacked air. Replaying the loop's decision on the 646 saved frames showed boxes on dropped loot (meso bags) and on AoE effects over dying mobs. On the labeled frames, 0.6 drops 36 -> 8 false boxes and keeps 96% of real mobs.",
+  "debug_log": true,
+  "_debug_note": "debug_log: per-beat decision trace -> logs/debug_<ts>.log + every attack's annotated frame -> logs/sweep_dbg/ (max debug_max_frames=400). Turn off once tuned."
 }

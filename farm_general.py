@@ -31,6 +31,37 @@ def _player_pos(anchor, frame, pbox, last):
     return last, last
 
 
+def _dump_attack(frame, mobs, kept, pos, act, seg_no, mmx, attack_range, reach, heading,
+                 outdir="logs/sweep_dbg"):
+    """debug_log: save the frame this attack decision was made on, annotated -- every mob box
+    (green = counted: on her level; grey = dropped by the same-platform band) with its conf, her
+    HP-bar position (red cross), the AoE range (yellow) and push reach (cyan) she decided with.
+    Best-effort, never raises (rides the hot loop). Returns the path or None."""
+    try:
+        cv2 = core.cv2
+        img = frame.copy()
+        px, pfeet = pos
+        for m in mobs:
+            c, x, y, w, h = m[:5]
+            col = (0, 220, 0) if (x + w // 2, y + h) in kept else (140, 140, 140)
+            cv2.rectangle(img, (x, y), (x + w, y + h), col, 2)
+            cv2.putText(img, f"{c:.2f}", (x, y - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
+        cv2.drawMarker(img, (int(px), int(pfeet)), (0, 0, 255), cv2.MARKER_CROSS, 30, 3)
+        for dx, col in ((-attack_range, (0, 220, 220)), (attack_range, (0, 220, 220)),
+                        (reach * heading, (220, 220, 0))):
+            X = int(px + dx)
+            cv2.line(img, (X, int(pfeet) - 150), (X, int(pfeet) + 20), col, 2)
+        cv2.putText(img, f"seg{seg_no} x={mmx} {act} counted={len(kept)}", (20, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
+        core.os.makedirs(outdir, exist_ok=True)
+        ts = core.time.strftime("%H%M%S", core.time.localtime()) + f"_{int((core.time.time() % 1) * 1000):03d}"
+        path = core.os.path.join(outdir, f"{ts}_seg{seg_no}_{act}.jpg")
+        cv2.imwrite(path, img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return path
+    except Exception:
+        return None
+
+
 def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                          skill_interval=(240, 300), max_seconds=None):
     import random as _r  # noqa: F401  (kept for parity with the other loops' break jitter)
@@ -42,6 +73,14 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     core.set_enemy_threshold(map_cfg.get("enemy_threshold", 0.75))
     if map_cfg.get("map_box"):
         core.set_map_box(*map_cfg["map_box"])
+    # debug_log: per-beat decision trace -> logs/debug_<ts>.log, plus every route attack's frame
+    # annotated -> logs/sweep_dbg/ (capped) -- to see WHAT she attacked when she hits air.
+    _debug = bool(map_cfg.get("debug_log", False))
+    _dump_left = [int(map_cfg.get("debug_max_frames", 400))]
+    if _debug:
+        _p = core.open_debug_log()
+        print(f"[sweep] debug trace -> {_p} + attack frames -> logs/sweep_dbg/" if _p
+              else "[sweep] debug trace: could not open file")
     if not core.focus():
         print("[sweep] could not focus"); return
     core.STOP.clear(); core.STATUS["state"] = "farming"
@@ -269,6 +308,16 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 # carry her off it), and walk only in edge_step steps.
                 near_edge = edge_zone or (mmx >= 0 and sweep.near_seg_end(seg, mmx, push_margin))
                 act = sweep.route_attack(mob_xs, px, heading, attack_range, reach, near_edge)
+                if _debug:
+                    core.dbg(f"[sweep] seg{seg_i[0] + 1} mm=({mmx},{_mmy}) p=({px},{pfeet}) "
+                             f"mobs={[(m[1] + m[3] // 2, m[2] + m[4], round(m[0], 2)) for m in mobs]} "
+                             f"kept={mob_xs} -> {act}{' edge' if near_edge else ''}")
+                    if act != sweep.WALK and _dump_left[0] > 0:
+                        _dump_left[0] -= 1
+                        kept = [(m[1] + m[3] // 2, m[2] + m[4]) for m in mobs
+                                if (m[1] + m[3] // 2) in mob_xs]
+                        _dump_attack(frame, mobs, kept, (px, pfeet), act, seg_i[0] + 1, mmx,
+                                     attack_range, reach, heading)
                 if edge_zone and act == sweep.WALK:
                     heading = edge_step(heading, mmx, _mmy)
                     continue

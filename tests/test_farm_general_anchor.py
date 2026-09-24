@@ -40,3 +40,13 @@ def test_yolo_mode_uses_pbox_center_x_and_bottom_as_feet():
 def test_yolo_mode_no_box_rides_last_position():
     pos, last = farm_general._player_pos(None, frame=object(), pbox=None, last=(150, 890))
     assert pos == (150, 890)
+
+
+def test_dump_attack_writes_an_annotated_frame(tmp_path):
+    import numpy as np
+    frame = np.zeros((300, 600, 3), np.uint8)
+    mobs = [(0.9, 300, 100, 40, 60), (0.5, 100, 10, 40, 30)]      # counted + dropped (other level)
+    path = farm_general._dump_attack(frame, mobs, [(320, 160)], (250, 170), "GATHER", 4, 195,
+                                     200, 240, 1, outdir=str(tmp_path))
+    assert path is not None and path.endswith("_seg4_GATHER.jpg")
+    assert (frame == 0).all()                                     # annotates a copy, not the live frame
