@@ -50,3 +50,52 @@ def test_edge_zone_fights_then_steps_then_advances(monkeypatch):
     assert ("press", "x") in events[:first_step]         # fought the in-range mob first
     assert ("press", "z") not in events                  # never pushed in the edge zone
     assert core.STATUS["node"] == "seg2"                 # walked off -> advanced
+
+
+def test_failed_jump_stuck_on_bottom_resyncs_to_the_bottom_leg(monkeypatch, capsys):
+    """Missed jump: route is on segment 5 (upper-right, until 307) but she is on the bottom floor,
+    whose right end (~285) never reaches 307. Walking with no progress -> resync to segment 6."""
+    clock = [1000.0]
+    kb = core.kb
+    monkeypatch.setattr(kb, "pause", False, raising=False)
+    monkeypatch.setattr(kb, "safe_press", lambda k: None)
+    monkeypatch.setattr(kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(kb, "safe_release_all", lambda: None)
+
+    def stable_char(n=3):
+        clock[0] += 0.25
+        return (285, 106)                                  # pinned against the bottom-right wall
+
+    for name, fn in {"focus": lambda: True, "set_minimap": lambda *a: None,
+                     "ensure_game_focused": lambda **k: True, "lie_check_fast_tick": lambda: None,
+                     "is_lie_check_active": lambda: False, "capture": lambda: object(),
+                     "make_exp_tracker": lambda **k: (lambda: None), "stable_char": stable_char,
+                     "make_active_timer": lambda: (lambda now: None, lambda now: None)}.items():
+        monkeypatch.setattr(core, name, fn)
+    monkeypatch.setattr(core.time, "time", lambda: clock[0])
+    monkeypatch.setattr(core.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    import mob_detect
+    monkeypatch.setattr(mob_detect, "load_yolo", lambda p: object())
+
+    def no_mobs(*a, **k):
+        if core.STATUS.get("node") == "seg2":             # resynced -> done
+            core.STOP.set()
+        return ([], (0.9, 480, 290, 40, 70))
+    monkeypatch.setattr(mob_detect, "yolo_detect", no_mobs)
+
+    # flat_sweep's route rotated so the loop STARTS on segment 5 (route index 0 here = real seg 5)
+    route = [{"dir": "right", "until_x": 307, "then": None, "attack": True, "y": 62},
+             {"dir": "left", "until_x": 214, "then": "up", "attack": True, "y": 106},
+             {"dir": "left", "until_x": 45, "then": None, "attack": False, "y": 55},
+             {"dir": "right", "until_x": 275, "then": None, "attack": True, "y": 106},
+             {"dir": "left", "until_x": 216, "then": "up", "attack": False, "y": 106},
+             {"dir": "left", "until_x": 120, "then": None, "attack": False, "y": 55},
+             {"dir": "right", "until_x": 195, "then": "edge_jump", "attack": True, "y": 55}]
+    cfg = {"loop": "sweep", "anchor": "yolo_player", "attack_key": "x",
+           "minimap": {"x": 0, "y": 0, "w": 10, "h": 10}, "route": route}
+    core.STOP.clear(); core.STATUS["node"] = None
+    farm_general.farming_loop_general(cfg, max_seconds=60)
+    out = capsys.readouterr().out
+    # real segment 5 stuck at the bottom wall -> real segment 6 (left to the bottom portal)
+    assert "segment 1 stuck at x=285 y=106 -> resync to segment 2" in out
+    assert core.STATUS["node"] == "seg2"

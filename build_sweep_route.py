@@ -39,7 +39,8 @@ def _intervals(recs, t_end):
 
 
 def extract_segments(recs, t0, t1, y_min=48, min_run=0.15, gather_key="z"):
-    """Segments for the cycle in [t0, t1]: [{"dir","until_x","then","attack"}, ...].
+    """Segments for the cycle in [t0, t1]: [{"dir","until_x","then","attack","y"}, ...]; y = the
+    level's minimap y (used to resync after a failed jump/portal).
     Minimap reads with y < y_min are phantoms (not a real platform level) and are ignored."""
     pos = [r for r in recs if "x" in r and "key" not in r and "mark" not in r
            and r.get("y", 0) >= y_min]
@@ -52,6 +53,11 @@ def extract_segments(recs, t0, t1, y_min=48, min_run=0.15, gather_key="z"):
             return int(statistics.median(near))
         j = min(max(i - 1, 0), len(pos) - 1)
         return pos[j]["x"]
+
+    def level_y(ta, tb):                # the segment's minimap level: median y of reads that sit
+        ys = [p["y"] for p in pos       # on her path (x near the short median -- drops phantoms)
+              if ta <= p["t"] <= tb and abs(p["x"] - x_at(p["t"], span=0.3)) <= 15]
+        return int(statistics.median(ys)) if ys else None
 
     iv = [(k, a, b) for k, a, b in _intervals(recs, t1) if t0 <= a <= t1]
     runs = [[k, a, min(b, t1), None] for k, a, b in iv
@@ -77,9 +83,10 @@ def extract_segments(recs, t0, t1, y_min=48, min_run=0.15, gather_key="z"):
         # a portal segment ends where UP was pressed (the portal), not where walking stopped
         s["until_x"] = x_at(s["_tup"], span=0.0) if s["_tup"] is not None else x_at(s["_t1"])
         s["attack"] = any(s["_t0"] <= g <= s["_t1"] for g in gathers)
+        s["y"] = level_y(s["_t0"], s["_t1"])
         del s["_t0"], s["_t1"], s["_tup"]
-    return [{"dir": s["dir"], "until_x": s["until_x"], "then": s["then"], "attack": s["attack"]}
-            for s in segs]
+    return [{"dir": s["dir"], "until_x": s["until_x"], "then": s["then"], "attack": s["attack"],
+             "y": s["y"]} for s in segs]
 
 
 def main():
@@ -90,7 +97,7 @@ def main():
     segs = extract_segments(load(cap), t0, t1)
     for i, s in enumerate(segs, 1):
         print(f"  {i}. {s['dir']:5} until x={s['until_x']:3}  then={s['then'] or '-':4}  "
-              f"attack={s['attack']}")
+              f"attack={s['attack']}  y={s['y']}")
     out = opt("--out")
     if out:
         with open(out, encoding="utf-8") as fh:

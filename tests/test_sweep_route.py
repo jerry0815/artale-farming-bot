@@ -236,3 +236,65 @@ def test_walk_to_edge_step_with_fall_jumps():
     fell = sweep.walk_to_edge(1, KEYS, kb, read_xy=_reader([(195, 55), (195, 59)]),
                               walk=0.3, poll=0.1)
     assert fell is True and ("press", "J") in kb.events
+
+
+# --- recovery: a failed jump leaves her on the bottom while the route expects the upper-right
+# platform, so she walks into the bottom wall forever. Stuck (walking, no progress) -> resync to the
+# next segment on the level she is actually on.
+
+def test_progress_flags_stuck_after_walking_without_gain():
+    pr = sweep.Progress(stuck_secs=4.0)
+    t = 0.0
+    assert pr.update(t, 280, 1) is False
+    for _ in range(9):                      # 9 walking beats x 0.5 s, x frozen at the wall
+        pr.mark_walking(); t += 0.5
+        stuck = pr.update(t, 281, 1)
+    assert stuck is True
+
+
+def test_progress_fighting_in_place_is_not_stuck():
+    pr = sweep.Progress(stuck_secs=4.0)
+    t = 0.0
+    pr.update(t, 150, 1)
+    for _ in range(20):                     # AoE beats (not walking): no time accrues
+        t += 1.6
+        assert pr.update(t, 150, 1) is False
+
+
+def test_progress_gain_resets_the_clock():
+    pr = sweep.Progress(stuck_secs=4.0)
+    t = 0.0
+    pr.update(t, 100, 1)
+    for i in range(20):
+        pr.mark_walking(); t += 0.5
+        assert pr.update(t, 100 + 3 * (i + 1), 1) is False
+
+
+ROUTE = [{"dir": "right", "until_x": 275, "y": 106}, {"dir": "left", "until_x": 216, "y": 106},
+         {"dir": "left", "until_x": 120, "y": 55}, {"dir": "right", "until_x": 195, "y": 55},
+         {"dir": "right", "until_x": 307, "y": 62}, {"dir": "left", "until_x": 214, "y": 106},
+         {"dir": "left", "until_x": 45, "y": 99}]
+
+
+def test_resync_failed_jump_bottom_right_goes_to_the_bottom_portal_leg():
+    # stuck in seg 5 (index 4) at the bottom-right wall -> seg 6 (left to the portal), normal lap
+    assert sweep.resync_segment(ROUTE, 4, 285, 106) == 5
+
+
+def test_resync_skips_segments_already_past_their_end():
+    # on the bottom at x=200: seg 6 (left to 214) is already done -> seg 7 (left to 45)
+    assert sweep.resync_segment(ROUTE, 4, 200, 106) == 6
+
+
+def test_resync_none_when_no_segment_on_this_level():
+    assert sweep.resync_segment(ROUTE, 4, 285, 20) is None
+
+
+def test_minimap_gate_drops_phantom_jumps_then_accepts_after_stale():
+    g = sweep.MinimapGate(max_jump=40, stale=2.0)
+    assert g.feed(212, 106, 0.0) == (212, 106)
+    assert g.feed(32, 76, 0.3) == (-1, -1)          # phantom: 180 px jump in 0.3 s
+    assert g.feed(210, 106, 0.6) == (210, 106)
+    assert g.feed(135, 55, 3.0) == (135, 55)        # a real teleport is accepted once stale
+    g.reset()
+    assert g.feed(30, 76, 3.1) == (30, 76)          # after reset (post-transition) take any read

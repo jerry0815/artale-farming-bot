@@ -227,3 +227,72 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
                 sleep(poll); waited += poll
         return False
     raise ValueError(f"unknown route transition {then!r}")
+
+
+# --- Route recovery ------------------------------------------------------------------------
+# A failed jump/portal leaves her on a different level than the route expects; the segment's
+# until_x may then be unreachable (flat_sweep: bottom floor ends ~285, segment 5 wants 307), so she
+# walks into a wall forever. Progress detects that; resync_segment picks where to continue.
+
+class Progress:
+    """Stuck detector: WALKING time with no minimap-x gain in the heading. Only time spent walking
+    counts (mark_walking() after a walk action), so fighting in place is never 'stuck'."""
+
+    def __init__(self, stuck_secs=4.0, min_gain=2):
+        self.stuck_secs, self.min_gain = stuck_secs, min_gain
+        self.reset()
+
+    def reset(self):
+        self.best, self.walk, self.t, self.walking = None, 0.0, None, False
+
+    def mark_walking(self):
+        self.walking = True
+
+    def update(self, now, mmx, heading):
+        """Call once per beat with the current minimap x. True = stuck (walked stuck_secs with no
+        gain of min_gain px toward the heading)."""
+        if self.walking and self.t is not None:
+            self.walk += now - self.t
+        self.t, self.walking = now, False
+        if mmx is not None and mmx >= 0:
+            p = mmx * heading
+            if self.best is None or p >= self.best + self.min_gain:
+                self.best, self.walk = p, 0.0
+        return self.walk >= self.stuck_secs
+
+
+def resync_segment(route, cur_i, mmx, mmy, level_tol=10):
+    """Index of the segment to continue from when she is off-route: the next one in route order
+    (after cur_i, cyclic) on HER level (seg "y" within level_tol of mmy) whose until_x is still
+    ahead of her. None if no segment matches (segments without "y" never match)."""
+    n = len(route)
+    for k in range(1, n + 1):
+        i = (cur_i + k) % n
+        seg = route[i]
+        if seg.get("y") is None or abs(seg["y"] - mmy) > level_tol:
+            continue
+        if not seg_done(seg, mmx):
+            return i
+    return None
+
+
+class MinimapGate:
+    """Drops phantom minimap reads: a read more than max_jump px (x) from the last accepted one
+    within `stale` s is a phantom (she can't move that far that fast; stray yellow blobs on the
+    minimap can). After `stale` s without an accepted read, any read is accepted (self-heals if a
+    phantom got in first). reset() after a transition (a portal legitimately teleports her)."""
+
+    def __init__(self, max_jump=40, stale=2.0):
+        self.max_jump, self.stale = max_jump, stale
+        self.reset()
+
+    def reset(self):
+        self.last, self.t = None, None
+
+    def feed(self, x, y, now):
+        if x is None or x < 0:
+            return -1, -1
+        if self.last is not None and now - self.t < self.stale and abs(x - self.last[0]) > self.max_jump:
+            return -1, -1
+        self.last, self.t = (x, y), now
+        return x, y

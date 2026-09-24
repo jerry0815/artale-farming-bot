@@ -77,3 +77,18 @@ def test_up_segment_ends_at_the_up_press_position_not_the_walk_end():
                _key(3.15, "up", "down"), _key(3.3, "up", "up")])
     segs = bsr.extract_segments(sorted(recs, key=lambda r: r["t"]), 0, 4)
     assert segs[0]["then"] == "up" and segs[0]["until_x"] == 146
+
+
+def test_segments_carry_their_level_y_ignoring_phantoms():
+    recs = []
+    t = 0.0
+    for i in range(40):                               # walking right on y=55, x 100 -> 139
+        recs.append({"x": 100 + i, "y": 55, "t": t})
+        if i % 5 == 0:
+            recs.append({"x": 8, "y": 82, "t": t + 0.01})   # phantom read
+        t += 0.05
+    recs.append({"key": "right", "ev": "down", "t": 0.0})
+    recs.append({"key": "right", "ev": "up", "t": 1.9})
+    recs.sort(key=lambda r: r["t"])
+    segs = bsr.extract_segments(recs, 0.0, 2.0)
+    assert segs[0]["y"] == 55

@@ -73,43 +73,50 @@
       "dir": "right",
       "until_x": 275,
       "then": null,
-      "attack": true
+      "attack": true,
+      "y": 106
     },
     {
       "dir": "left",
       "until_x": 216,
       "then": "up",
-      "attack": false
+      "attack": false,
+      "y": 106
     },
     {
       "dir": "left",
       "until_x": 120,
       "then": null,
-      "attack": false
+      "attack": false,
+      "y": 55
     },
     {
       "dir": "right",
       "until_x": 195,
       "then": "edge_jump",
-      "attack": true
+      "attack": true,
+      "y": 55
     },
     {
       "dir": "right",
       "until_x": 307,
       "then": null,
-      "attack": true
+      "attack": true,
+      "y": 62
     },
     {
       "dir": "left",
       "until_x": 214,
       "then": "up",
-      "attack": true
+      "attack": true,
+      "y": 106
     },
     {
       "dir": "left",
       "until_x": 45,
       "then": null,
-      "attack": false
+      "attack": false,
+      "y": 55
     }
   ],
   "_route_note": "Recorded from a human run (routes/flat_sweep.capture.jsonl, cycle t 0.7-81.6s) via build_sweep_route.py. Start the character at bottom-left (minimap x~43) before farming. Tuned: segment 3 stops at 120 (recorded 107/94) to stay off the upper-left edge. Segment 4 ends in 'edge_jump': the minimap dot PINS at x=195 while the minimap scrolls, so she keeps walking right until she walks off the upper platform (minimap y drops), then air-jumps -- exactly what the recording shows in all 3 laps.",
@@ -123,5 +130,6 @@
   "_portal_note": "Portal segments end at the minimap x where you pressed UP in the recording; before each UP press the loop lines her up with core.walk_to_x to within portal_tol px.",
   "_mob_conf_note": "0.4 -> 0.6 (2026-09-24): she attacked air. Replaying the loop's decision on the 646 saved frames showed boxes on dropped loot (meso bags) and on AoE effects over dying mobs. On the labeled frames, 0.6 drops 36 -> 8 false boxes and keeps 96% of real mobs.",
   "debug_log": true,
-  "_debug_note": "debug_log: per-beat decision trace -> logs/debug_<ts>.log + every attack's annotated frame -> logs/sweep_dbg/ (max debug_max_frames=400). Turn off once tuned."
+  "_debug_note": "debug_log: per-beat decision trace -> logs/debug_<ts>.log + every attack's annotated frame -> logs/sweep_dbg/ (max debug_max_frames=400). Turn off once tuned.",
+  "_recovery_note": "Each segment's y = its floor's minimap y (build_sweep_route.py). If she walks stuck_secs (4) with no progress -- e.g. a failed jump left her on the bottom, whose right end (~285) never reaches segment 5's 307 -- the loop resyncs to the next segment on the floor she is on (bottom-right -> segment 6, the portal leg). Minimap reads jumping > 40 px within 2 s are phantoms."
 }

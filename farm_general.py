@@ -210,6 +210,24 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     edge_wait = float(map_cfg.get("edge_wait_secs", 6.0))  # max stepping time hunting the edge
     edge_step_secs = float(map_cfg.get("edge_step_secs", 0.4))
     zone_walk = [0.0]
+    # Recovery: phantom minimap reads are gated out; walking stuck_secs with no progress (a failed
+    # jump/portal left her on a level where this segment's until_x is unreachable) -> resync.
+    gate = sweep.MinimapGate(max_jump=int(map_cfg.get("mm_max_jump", 40)))
+    progress = sweep.Progress(stuck_secs=float(map_cfg.get("stuck_secs", 4.0)))
+
+    def _resync(mmx, mmy, why):
+        """Continue from the next route segment on the level she is actually on. Returns the new
+        heading, or None if no segment matches (keep going; the stuck clock restarts)."""
+        progress.reset()
+        j = sweep.resync_segment(route, seg_i[0], mmx, mmy)
+        if j is None:
+            print(f"[sweep] {why} at x={mmx} y={mmy} -- no route segment on this level")
+            return None
+        print(f"[sweep] {why} at x={mmx} y={mmy} -> resync to segment {j + 1}")
+        core.kb.safe_release_all()
+        seg_i[0] = j; zone_walk[0] = 0.0
+        core.STATUS["node"] = f"seg{j + 1}"
+        return sweep.seg_heading(route[j])
 
     def _advance(ok, mmx):
         """Move to the next route segment (after its transition ran). Returns the new heading."""
@@ -219,6 +237,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         seg_i[0] = (seg_i[0] + 1) % len(route)
         nxt = route[seg_i[0]]
         zone_walk[0] = 0.0
+        gate.reset(); progress.reset()                 # a transition may teleport her (portal)
         core.STATUS["node"] = f"seg{seg_i[0] + 1}"
         print(f"[sweep] -> segment {seg_i[0] + 1}: {nxt['dir']} to x={nxt['until_x']}"
               f"{' (travel)' if not nxt.get('attack', True) else ''}")
@@ -252,12 +271,24 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 core.time.sleep(0.05); continue
             if route:
                 seg = route[seg_i[0]]
-                mmx, _mmy = core.stable_char(2)
+                now = core.time.time()
+                mmx, _mmy = gate.feed(*core.stable_char(2), now)
+                if progress.update(now, mmx, heading):              # walking, going nowhere
+                    h = _resync(mmx, _mmy, f"segment {seg_i[0] + 1} stuck")
+                    if h is not None:
+                        heading = h
+                    continue
                 done = mmx >= 0 and sweep.seg_done(seg, mmx)
                 # edge_jump segments: until_x is only where the minimap dot PINS (the minimap scrolls
                 # on), not the edge -- so past it she keeps fighting and walks on in short steps
                 # (edge_step) until she actually walks off, instead of one blind walk to the edge.
                 edge_zone = done and seg.get("then") == "edge_jump"
+                if edge_zone and seg.get("y") is not None and _mmy - seg["y"] >= 15:
+                    # already BELOW the jump level: she dropped off without the jump firing
+                    h = _resync(mmx, _mmy, f"segment {seg_i[0] + 1} fell before the jump")
+                    if h is not None:
+                        heading = h
+                        continue
                 if done and not edge_zone:                            # segment end -> transition
                     nxt = route[(seg_i[0] + 1) % len(route)]
                     print(f"[sweep] segment {seg_i[0] + 1} end at x={mmx} y={_mmy}")
@@ -283,6 +314,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                         heading = edge_step(heading, mmx, _mmy)
                         continue
                     sweep.apply_action(sweep.WALK, heading, keys, core.kb, sleep=core.time.sleep)
+                    progress.mark_walking()
                     core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))
                     continue
             mobs, pbox = mob_detect.yolo_detect(_mm, frame, conf=_mconf, imgsz=_mimg,
@@ -294,6 +326,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                     heading = edge_step(heading, mmx, _mmy); continue
                 if route:                                  # no player lock: keep walking the segment
                     sweep.apply_action(sweep.WALK, heading, keys, core.kb, sleep=core.time.sleep)
+                    progress.mark_walking()
                 core.time.sleep(0.05); continue            # no player lock yet -> wait
             px, pfeet = pos
             # decide() is x-only: keep only mobs on HER level (feet within the band), else a mob on
@@ -331,6 +364,8 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                         next_gather[0] = core.time.time() + gather_cd
                 sweep.apply_action(act, heading, keys, core.kb, sleep=core.time.sleep,
                                    attack_hold=aoe_hold, pull_settle=push_settle)
+                if act == sweep.WALK:
+                    progress.mark_walking()
                 core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))
                 continue
             now = core.time.time()
