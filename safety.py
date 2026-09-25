@@ -231,7 +231,10 @@ def set_enemy_threshold(t):
 
 def _dump_enemy_sample(frame, tag=""):
     """Save a FULL frame to datasets/enemy_dots/samples/ for offline template-vs-color review.
-    Best-effort -- never raises (rides the safety path)."""
+    Best-effort -- never raises (rides the safety path). Off unless core._ENEMY_SAMPLE_DUMPS: the
+    shadow comparison fires constantly on red-heavy maps (18 GB of frames, ~1.7 GB/day)."""
+    if not core._ENEMY_SAMPLE_DUMPS:
+        return None
     try:
         core.os.makedirs(core._ENEMY_SAMPLE_DIR, exist_ok=True)
         ts = core.time.strftime("%Y%m%d_%H%M%S", core.time.localtime()) + f"_{int((core.time.time() % 1) * 1000):03d}"

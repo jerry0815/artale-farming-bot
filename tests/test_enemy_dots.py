@@ -107,3 +107,14 @@ def test_shadow_throttles_repeat_agreement(monkeypatch):
     core._enemy_dots(_frame())                              # 2nd call within the throttle window
     assert len(dumps) == 1                                      # dump throttled...
     assert len(logs) == 2                                       # ...but every activity is still logged
+
+
+def test_sample_dumps_are_off_by_default(monkeypatch, tmp_path):
+    # the shadow comparison saved a full screenshot every ~10 s whenever template and color
+    # disagreed -- 18 GB (566 frames in one day on flat_sweep). Opt-in now.
+    monkeypatch.setattr(core, "_ENEMY_SAMPLE_DIR", str(tmp_path / "samples"))
+    assert core._ENEMY_SAMPLE_DUMPS is False
+    assert core._dump_enemy_sample(np.zeros((10, 10, 3), np.uint8), "x") is None
+    assert not (tmp_path / "samples").exists()
+    monkeypatch.setattr(core, "_ENEMY_SAMPLE_DUMPS", True)
+    assert core._dump_enemy_sample(np.zeros((10, 10, 3), np.uint8), "x") is not None

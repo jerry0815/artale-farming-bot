@@ -265,7 +265,7 @@
     "P1"
   ],
   "swim_jump_gap": 0.03,
-  "debug_log": true,
+  "debug_log": false,
   "stacked_drift_secs": 0.3,
   "fishhouse_conf": 0.3
 }

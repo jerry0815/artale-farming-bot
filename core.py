@@ -298,6 +298,7 @@ ENEMY_THRESHOLD = 0.75      # red-dot match threshold; per-map via set_enemy_thr
 # or miss -- accumulate for offline double-checking. The shadow never changes the alarm decision
 # and never raises into the safety loop. ---
 _ENEMY_SAMPLE_DIR = "datasets/enemy_dots/samples"      # full frames dumped here for offline review
+_ENEMY_SAMPLE_DUMPS = False    # opt-in: set True to collect template-vs-color review frames again
 _ENEMY_SHADOW_LOG = "logs/enemy_dots_shadow.jsonl"     # one line per template/color activity
 _ENEMY_AGREE_DUMP_INTERVAL = 30.0    # both agree (player present or both quiet-with-one-firing): rarer dumps
 _ENEMY_DISAGREE_DUMP_INTERVAL = 10.0 # color-only or template-only: the interesting cases, dumped more often
