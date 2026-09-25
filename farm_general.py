@@ -298,6 +298,26 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
               f"{' (travel)' if not nxt.get('attack', True) else ''}")
         return sweep.seg_heading(nxt)
 
+    aoe_hold_max = float(map_cfg.get("aoe_hold_max_secs", 6.0))  # cap on one AoE-until-clear hold
+
+    def _still_in_range(heading, t0):
+        """keep_holding for the AoE: re-detect on a fresh frame while x is held; True while a mob
+        on her level is still in AoE range ahead (or overlapping her). False on pause/STOP, no frame
+        or no player lock, or after aoe_hold_max s of wall time (a false box can't pin her)."""
+        if core.STOP.is_set() or core.kb.pause or core.time.time() - t0 > aoe_hold_max:
+            return False
+        fr = core.capture()
+        if fr is None:
+            return False
+        ms, pb = mob_detect.yolo_detect(_mm, fr, conf=_mconf, imgsz=_mimg, class_conf=_cconf,
+                                        near=last_px[0], max_jump=_pmax, player_conf=_pconf)
+        pos, last_px[0] = _player_pos(_anchor, fr, pb, last_px[0])
+        if pos is None:
+            return False
+        xs = sweep.same_platform([(m[1] + m[3] // 2, m[2] + m[4]) for m in ms], pos[1],
+                                 band_up=band_up, band_down=band_down)
+        return any(-30 <= (x - pos[0]) * heading <= attack_range for x in xs)
+
     finish_max = int(map_cfg.get("finish_rounds", 3))   # AoE rounds allowed past a segment end
     finish_n = [0]
 
@@ -452,8 +472,10 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                     print(f"[sweep] segment {seg_i[0] + 1} end reached mid-fight -- finishing "
                           f"the mobs in range first")
                 finish_n[0] += 1
+                _t0, _h = core.time.time(), heading
                 sweep.apply_action(sweep.FIRE, heading, keys, core.kb, sleep=core.time.sleep,
-                                   attack_hold=aoe_hold, face_tap=False)
+                                   attack_hold=aoe_hold, face_tap=False,
+                                   keep_holding=lambda: _still_in_range(_h, _t0), hold_max=60)
                 continue
             if route:
                 # Route attack leg, fixed rhythm: one push (z) then hold x (AoE); no push within
@@ -485,9 +507,11 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                             next_gather[0] = core.time.time() + gather_cd
                 # edge zone: she already faces the heading (walked in), and the facing tap is a
                 # step that walks her off the lip mid-AoE (seen live) -> no tap there.
+                _t0, _h = core.time.time(), heading
                 sweep.apply_action(act, heading, keys, core.kb, sleep=core.time.sleep,
                                    attack_hold=aoe_hold, pull_settle=push_settle,
-                                   face_tap=not edge_zone, pre_walk=push_prewalk)
+                                   face_tap=not edge_zone, pre_walk=push_prewalk,
+                                   keep_holding=lambda: _still_in_range(_h, _t0), hold_max=60)
                 if act == sweep.WALK:
                     progress.mark_walking()
                 core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))

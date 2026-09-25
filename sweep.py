@@ -70,7 +70,7 @@ def decide(mob_xs, px, heading, attack_range, gather=None, cd_ok=False, aoe_max=
 
 def apply_action(action, heading, keys, kb, sleep=lambda s: None,
                  burst=3, attack_dwell=0.2, face_gap=0.03, pull_settle=0.1, attack_hold=None,
-                 face_tap=True, pre_walk=0.0):
+                 face_tap=True, pre_walk=0.0, keep_holding=None, hold_max=6.0, hold_poll=0.1):
     """Translate a decide() action into key presses via the injected `kb` (dependency-injected
     so this stays pure/testable -- no core import). Returns the heading for the NEXT beat
     (flipped on ADVANCE so a route with no explicit segments ping-pongs the platform).
@@ -82,6 +82,9 @@ def apply_action(action, heading, keys, kb, sleep=lambda s: None,
     0.03 s tap is a step that can walk her off.
     pre_walk (s): GATHER walks in the heading this long first and pushes WHILE still moving (the
     arrow stays held through the push) -- a push from a standstill sometimes glitches (user).
+    keep_holding: optional callable polled after the attack_hold minimum; while it returns True
+    (a mob still in range -- the loop re-detects on a fresh frame) x stays held, up to hold_max s
+    more. Releasing and re-deciding every hold left ~0.4 s dead gaps mid-fight (user).
     """
     face = keys["right"] if heading > 0 else keys["left"]
     if action == ADVANCE:
@@ -106,7 +109,12 @@ def apply_action(action, heading, keys, kb, sleep=lambda s: None,
             kb.safe_press(keys["dash"]); sleep(face_gap); kb.safe_release(keys["dash"])
             sleep(pull_settle)                           # let the pull group them before the AoE
     if attack_hold:                                      # one continuous AoE hold (casts repeat)
-        kb.safe_press(keys["attack"]); sleep(attack_hold); kb.safe_release(keys["attack"])
+        kb.safe_press(keys["attack"]); sleep(attack_hold)
+        if keep_holding is not None:                     # ...until nothing is left in range
+            extra = 0.0
+            while extra < hold_max and keep_holding():
+                sleep(hold_poll); extra += hold_poll
+        kb.safe_release(keys["attack"])
         return heading
     for _ in range(burst):
         kb.safe_press(keys["attack"]); sleep(attack_dwell); kb.safe_release(keys["attack"])

@@ -481,3 +481,30 @@ def test_finish_ignores_mobs_well_behind_her():
     # forward AoE can't hit them; turning back is not wanted (one direction per segment)
     assert sweep.finish_or_move([300], px=500, heading=1, attack_range=200,
                                 rounds=0, max_rounds=3) == sweep.ADVANCE
+
+
+# --- AoE until clear: after the minimum hold keep x held while a mob is still in range (re-checked
+# while holding), instead of releasing and re-deciding every 1.05 s (dead time between holds).
+
+def test_aoe_keeps_holding_while_mobs_remain_then_releases():
+    kb, checks = _KB(), iter([True, True, False])
+    sweep.apply_action(sweep.FIRE, 1, KEYS, kb, attack_hold=1.05,
+                       keep_holding=lambda: next(checks), hold_max=6.0)
+    ev = kb.events
+    assert [e for e in ev if e == ("press", "x")] == [("press", "x")]      # ONE continuous press
+    assert ev.index(("release", "x")) > ev.index(("press", "x"))
+
+
+def test_aoe_hold_is_capped():
+    kb, n = _KB(), [0]
+    def always():
+        n[0] += 1; return True
+    sweep.apply_action(sweep.FIRE, 1, KEYS, kb, attack_hold=1.05, keep_holding=always,
+                       hold_max=1.0, hold_poll=0.25)
+    assert n[0] <= 4 and ("release", "x") in kb.events
+
+
+def test_aoe_without_keep_holding_is_the_fixed_hold():
+    kb, slept = _KB(), []
+    sweep.apply_action(sweep.FIRE, 1, KEYS, kb, sleep=slept.append, attack_hold=1.05)
+    assert 1.05 in slept and [k for e, k in kb.events if e == "press"].count("x") == 1
