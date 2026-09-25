@@ -511,7 +511,10 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 sweep.apply_action(act, heading, keys, core.kb, sleep=core.time.sleep,
                                    attack_hold=aoe_hold, pull_settle=push_settle,
                                    face_tap=not edge_zone, pre_walk=push_prewalk,
-                                   keep_holding=lambda: _still_in_range(_h, _t0), hold_max=60)
+                                   # AoE-until-clear only for AoE-only (FIRE); after a push the
+                                   # AoE stays the fixed 2 casts (user)
+                                   keep_holding=(lambda: _still_in_range(_h, _t0))
+                                   if act == sweep.FIRE else None, hold_max=60)
                 if act == sweep.WALK:
                     progress.mark_walking()
                 core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))

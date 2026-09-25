@@ -135,3 +135,49 @@ def test_segment_end_finishes_the_mob_in_range_before_moving_on(monkeypatch, cap
     first_x = events.index(("press", "x"))
     assert first_x < len(events)                          # it AoE'd the mob at the segment end...
     assert "finishing" in out                             # ...before the transition
+
+
+def test_push_aoe_is_fixed_but_aoe_only_holds_until_clear(monkeypatch):
+    """AoE-until-clear is for AoE-only (FIRE); the AoE after a push stays the fixed 2 casts."""
+    import sweep as sw
+    calls = []
+    real = sw.apply_action
+
+    def spy(action, heading, keys, kb, **k):
+        calls.append((action, k.get("keep_holding") is not None))
+        return heading
+    monkeypatch.setattr(sw, "apply_action", spy)
+    kb = core.kb
+    monkeypatch.setattr(kb, "pause", False, raising=False)
+    monkeypatch.setattr(kb, "safe_press", lambda k: None)
+    monkeypatch.setattr(kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(kb, "safe_release_all", lambda: None)
+    for name, fn in {"focus": lambda: True, "set_minimap": lambda *a: None,
+                     "ensure_game_focused": lambda **k: True, "lie_check_fast_tick": lambda: None,
+                     "is_lie_check_active": lambda: False, "capture": lambda: object(),
+                     "make_exp_tracker": lambda **k: (lambda: None),
+                     "stable_char": lambda n=3: (100, 106)}.items():
+        monkeypatch.setattr(core, name, fn)
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    import mob_detect
+    monkeypatch.setattr(mob_detect, "load_yolo", lambda p: object())
+    n = [0]
+
+    def detect(*a, **k):
+        n[0] += 1
+        if n[0] > 2:
+            core.STOP.set()
+        return ([(0.9, 530, 300, 40, 70)], (0.9, 480, 300, 40, 70))   # a mob in range
+    monkeypatch.setattr(mob_detect, "yolo_detect", detect)
+    # beat 1: far from the end -> GATHER (push); beat 2: near the end -> FIRE (AoE-only)
+    # (a realistic step: the phantom-read gate drops > 40 px jumps)
+    pos = iter([(240, 106), (262, 106)])
+    monkeypatch.setattr(core, "stable_char", lambda n=3: next(pos, (262, 106)))
+    cfg = {"loop": "sweep", "anchor": "yolo_player", "attack_key": "x",
+           "minimap": {"x": 0, "y": 0, "w": 10, "h": 10}, "gather": {"key": "z", "cooldown": 0},
+           "route": [{"dir": "right", "until_x": 275, "then": None, "attack": True, "y": 106},
+                     {"dir": "left", "until_x": 215, "then": None, "attack": True, "y": 106}]}
+    core.STOP.clear()
+    farm_general.farming_loop_general(cfg, max_seconds=5)
+    assert (sw.GATHER, False) in calls                   # push + fixed AoE
+    assert (sw.FIRE, True) in calls                      # AoE-only holds until clear
