@@ -9,9 +9,13 @@
   "player": {
     "min_h": 6,
     "max_h": 10,
-    "max_w": 72
+    "max_w": 72,
+    "feet_band": [
+      0.5,
+      0.9
+    ]
   },
-  "_player_note": "HP-bar anchor shape for this map: your floating HP bar is ~7-8px tall (width varies with HP%, ~43-56 seen). The default accepted any red blob 2-16px tall, so near the map ends (camera clamped, you off-center) it grabbed STOP-sign mob parts, the red medal banner under your name (12px), bin signs and mob HP bars (4px), and damage numbers. Checked on the 646 captured frames. Remaining weak spot: big damage numbers covering your bar mid-attack.",
+  "_player_note": "HP-bar anchor shape for this map: your floating HP bar is ~7-8px tall (width varies with HP%, ~43-56 seen). The default accepted any red blob 2-16px tall, so near the map ends (camera clamped, you off-center) it grabbed STOP-sign mob parts, the red medal banner under your name (12px), bin signs and mob HP bars (4px), and damage numbers. Checked on the 646 captured frames. Remaining weak spot: big damage numbers covering your bar mid-attack. feet_band [0.5, 0.9]: her feet are never in the top half of the screen here (seen 0.62-0.86 of the height); at the start (no usual-spot history yet) the tracker locked a red object near the top (feet 365/1135) and she pushed at upper-floor mobs.",
   "attack_key": "x",
   "_attack_key_note": "x = AoE attack (no cooldown).",
   "attack_range": 200,

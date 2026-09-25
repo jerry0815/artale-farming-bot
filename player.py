@@ -8,13 +8,15 @@ the game (operates on a passed frame); the geometry filters are unit-testable.
 
 Tunables live in a map config under "player" (all optional):
   {"foot_offset":135, "hue_lo":120, "region":[x0,y0,x1,y1],
-   "min_w":18,"max_w":140,"min_h":2,"max_h":16}
+   "min_w":18,"max_w":140,"min_h":2,"max_h":16, "feet_band":[lo, hi]}
+feet_band: allowed feet y as fractions of the frame height (a candidate implying feet outside it is
+ignored) -- e.g. [0.5, 0.9] when the camera never shows the player in the top half.
 """
 import time as _t
 import cv2
 import numpy as np
 
-DEFAULTS = dict(foot_offset=135, hue_lo=120, min_w=18, max_w=140, min_h=2, max_h=16)
+DEFAULTS = dict(foot_offset=135, hue_lo=120, min_w=18, max_w=140, min_h=2, max_h=16, feet_band=None)
 
 
 def _red_mask(bgr, sat_val_lo=120):
@@ -227,6 +229,10 @@ def find_player(bgr, region=None, cfg=None, debug=False, near=None, near_tol=130
     c = {**DEFAULTS, **(cfg or {})}
     fo = c["foot_offset"]
     cands = bar_candidates(bgr, region=region, cfg=c)
+    if c.get("feet_band"):                            # implausible screen height -> not her bar
+        H = bgr.shape[0]
+        lo, hi = c["feet_band"]
+        cands = [b for b in cands if lo * H <= b[1] + fo <= hi * H]
     bar = None
     if near is not None and cands:                    # sticky: prefer the bar nearest last pos
         b = pick_near(cands, near, fo)

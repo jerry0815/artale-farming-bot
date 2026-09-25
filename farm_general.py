@@ -65,9 +65,10 @@ def _against_heading(prev, cur, heading, min_mm=8, min_px=60, home_x=None, away=
 
 
 def _floor_key(mmy):
-    """Minimap y rounded to the floor it belongs to (10 px buckets) -- her usual screen spot differs
-    per floor (the camera clamps vertically): feet ~710 upper, ~798 bottom on flat_sweep."""
-    return int(round(mmy / 10.0)) * 10
+    """Minimap y bucketed to its floor (5 px buckets) -- her usual screen spot differs per floor
+    (the camera clamps vertically): feet ~710 upper (y 55), ~798 right platform (y 62) and bottom
+    (y 99-106) on flat_sweep. 10 px buckets merged 55 and 62."""
+    return int(mmy // 5) * 5
 
 
 def _dump_attack(frame, mobs, kept, pos, act, seg_no, mmx, attack_range, reach, heading,

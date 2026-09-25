@@ -216,3 +216,18 @@ def test_with_home_and_nothing_near_it_returns_none_not_junk():
     # her bar hidden by skill effects; only a sliver far from home -> None (caller rides last)
     f = _frame([(800, 150, 40, 8)])
     assert player.find_player(f, cfg={"foot_offset": 135}, home=(1020, 798)) is None
+
+
+# --- feet band: at the start there is no home yet, and the center pick locked a red object near
+# the TOP of the screen (feet y 365 vs her ~798 of 1135) for 13 s -> upper-floor mobs counted as
+# hers -> pushes at nothing. cfg feet_band = allowed feet y as a fraction of the frame height.
+
+def test_feet_band_drops_candidates_high_on_screen():
+    f = _frame([(800, 150, 40, 8), (400, 600, 50, 8)])     # 1000-high frame: feet 285 vs 735
+    p = player.find_player(f, cfg={"foot_offset": 135, "feet_band": [0.5, 0.9]})
+    assert abs(p[0] - 400) <= 4                              # the high one (center-nearer) is out
+
+
+def test_no_feet_band_by_default():
+    f = _frame([(800, 150, 40, 8)])
+    assert player.find_player(f, cfg={"foot_offset": 135}) is not None

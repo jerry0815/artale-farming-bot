@@ -122,3 +122,9 @@ def test_window_catches_both_live_bad_locks_and_no_steady_beats():
         win.append(pt)
         assert not (len(win) >= 2 and farm_general._against_heading(win[0], win[-1], 1,
                                                                      home_x=1020))
+
+
+def test_floor_key_separates_upper_floor_and_right_platform():
+    # flat_sweep: upper floor minimap y 55 (feet ~710) vs right platform y 62 (feet ~798)
+    assert farm_general._floor_key(55) != farm_general._floor_key(62)
+    assert farm_general._floor_key(99) != farm_general._floor_key(55)
