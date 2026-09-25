@@ -78,7 +78,7 @@
     },
     {
       "dir": "left",
-      "until_x": 219,
+      "until_x": 215,
       "then": "up",
       "attack": false,
       "y": 106
@@ -99,7 +99,7 @@
     },
     {
       "dir": "left",
-      "until_x": 219,
+      "until_x": 215,
       "then": "up",
       "attack": true,
       "y": 106
@@ -119,8 +119,8 @@
   "_rhythm_note": "Route attack legs: one z push, wait push_settle_secs, then HOLD x for aoe_hold_secs (continuous AoE). x hold 1.05s = 2 casts (recording median 1.06s; 1.6s = 3 casts was tried). z->x gap recording median 0.61s includes human reaction; 0.3 used. Push cooldown 1.5s: a push decided while it is still cooling down walks forward instead until it is ready. No push within push_edge_margin minimap px of the segment end (edge/portal/jump spot) -- AoE only. No mob on her level -> walk.",
   "aoe_hold_secs": 1.05,
   "push_settle_secs": 0.3,
-  "portal_tol": 2,
-  "_portal_note": "Both portal legs walk LEFT into the same bottom portal (UP at x=219). The press spot reads differently by arrival side, so the line-up (sweep.approach_x) always ARRIVES moving left: it takes over portal_lead (20) px early with fast minimap reads and short left taps; if she is already past it she backs up 6 px and comes back in leftwards. walk_to_x used to overshoot to 209/214 and walk back RIGHT -> UP missed.",
+  "portal_tol": 1,
+  "_portal_note": "Both portal legs walk LEFT into the same bottom portal. Measured with locate_player.py (2026-09-24): UP worked at x=215 walking LEFT into it, x=213 walking RIGHT (the spot reads ~2 px differently by arrival side). Route stops at 215 +-1 (portal_tol). The line-up (sweep.approach_x) always ARRIVES moving left, taking over portal_lead (20) px early; if already past it she backs up 6 px and comes back in leftwards.",
   "_mob_conf_note": "0.4 -> 0.6 (2026-09-24): she attacked air. Replaying the loop's decision on the 646 saved frames showed boxes on dropped loot (meso bags) and on AoE effects over dying mobs. On the labeled frames, 0.6 drops 36 -> 8 false boxes and keeps 96% of real mobs.",
   "debug_log": true,
   "_debug_note": "debug_log: per-beat decision trace -> logs/debug_<ts>.log + every attack's annotated frame -> logs/sweep_dbg/ (max debug_max_frames=400). Turn off once tuned.",
