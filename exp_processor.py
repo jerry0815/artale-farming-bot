@@ -26,6 +26,7 @@ class ExpProcessor:
         self.start_time = time.time()
         # 儲存上一次成功解析的絕對數值
         self.last_exp_value = None
+        self._level_totals = deque(maxlen=7)   # EXP / (percent/100) from clean reads (see parse)
 
         # 累計總增益和錯誤統計
         self.total_exp_gain = 0.0 # EXP 增益使用浮點數
@@ -62,7 +63,49 @@ class ExpProcessor:
         """
         從 OCR 原始文字中解析並修正 EXP 數字和百分比。
         返回 (exp_number_str, exp_percent_str) 元組，如果解析失敗則返回 (None, None)。
+
+        Fused reads: the '[' between number and percent is sometimes read as '1' or dropped, so
+        the percent's integer digits glue onto the number ('421766016.37' = 4217660 [6.37). EXP /
+        percent is constant within a level, so clean reads teach that total and a fused read keeps
+        the split that matches it (never a guess: no total learned yet -> (None, None)).
         """
+        text = raw_text.replace('\n', '').replace(' ', '')
+        fused = re.match(r"(\d{5,})[.,](\d*)", text)
+        if fused:
+            return self._split_fused(fused.group(1), fused.group(2))
+        num, pct = self._parse_clean(raw_text)
+        try:
+            if num and pct and float(pct) >= 0.5:           # tiny % -> ratio too coarse to learn
+                self._level_totals.append(int(num) / (float(pct) / 100.0))
+        except ValueError:
+            pass
+        return num, pct
+
+    def _split_fused(self, digits, dec, tol=0.08):
+        """Split 'NNNN[P' fused as digits + '.' + dec, where the '[' became one digit (usually '1')
+        or vanished and P's integer part is 1-2 digits. Keep the split whose EXP/percent matches the
+        learned level total within tol; else (None, None)."""
+        if not self._level_totals:
+            return None, None
+        t = sorted(self._level_totals)[len(self._level_totals) // 2]
+        best = None
+        for k in (1, 2):                                   # digits in the percent's integer part
+            for bracket in (1, 0):                         # '[' misread as a digit / dropped
+                n = digits[:len(digits) - k - bracket]
+                if not n:
+                    continue
+                pint = digits[len(digits) - k:]
+                pct = float(f"{pint}.{dec or '0'}")
+                if pct <= 0:
+                    continue
+                err = abs(int(n) / (pct / 100.0) - t) / t
+                if best is None or err < best[0]:
+                    best = (err, n, f"{int(pint)}.{(dec + '00')[:2]}")
+        if best is None or best[0] > tol:
+            return None, None
+        return best[1], best[2]
+
+    def _parse_clean(self, raw_text: str):
         text = raw_text.replace('\n', '').replace(' ', '') # 清理常見的噪音
 
         # 嘗試辨識正常格式：exp數字 + 分隔符號 + 百分比數字 + '%'
@@ -83,6 +126,13 @@ class ExpProcessor:
 
             exp_percent = f"{left}.{right}"
             return exp_number, exp_percent
+
+        # number, a separator ('[' / ']' ...), then the percent as int.decimals -- the usual live
+        # read has no '%' ('4154300[6.27'); the two-group fallback below misread that as 6.00 and
+        # '58995074[94.06' as 0.94.
+        sep = re.search(r"(\d+)[^\d.,]+(\d{1,2})[.,](\d{1,3})", text)
+        if sep:
+            return sep.group(1), f"{int(sep.group(2))}.{(sep.group(3) + '00')[:2]}"
 
         # 嘗試抓取格式錯誤但只有兩段數字的狀況（如 "5568" 但原本是 "55.68%"）
         # 這裡假設第一個數字是 exp 數字，第二個數字（或部分）是百分比
