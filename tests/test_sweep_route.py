@@ -411,3 +411,26 @@ def test_approach_from_the_right_side_only_moves_left():
     assert sweep.approach_x(219, -1, KEYS, w, w.read, w.sleep, tol=2) is True
     assert ("press", "R") not in w.events
     assert 217 <= w.x <= 221
+
+
+# --- push from a walk: pushing from a standstill sometimes glitches (user) -> walk >= pre_walk s
+# in the heading first and push while still moving (the recording holds the arrow through z).
+
+def test_push_is_preceded_by_a_short_walk_and_fired_while_moving():
+    w = _World(150)
+    ev = w.events
+    slept = []
+    def sleep(dt):
+        slept.append(dt); w.sleep(dt)
+    sweep.apply_action(sweep.GATHER, 1, KEYS, w, sleep=sleep, attack_hold=1.05, pre_walk=0.2)
+    zi = ev.index(("press", "z"))
+    assert ("press", "R") in ev[:zi]                    # walking right before the push
+    assert ("release", "R") not in ev[ev.index(("press", "R")):zi]   # still moving at the push
+    assert 0.2 in slept and w.x > 150                   # actually walked ~0.2 s first
+
+
+def test_no_pre_walk_by_default_keeps_the_old_sequence():
+    kb = _KB()
+    sweep.apply_action(sweep.GATHER, 1, KEYS, kb, attack_hold=1.05)
+    p = [k for e, k in kb.events if e == "press"]
+    assert p.index("z") < p.index("x")

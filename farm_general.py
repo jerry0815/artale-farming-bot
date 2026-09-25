@@ -188,6 +188,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     aoe_hold = float(map_cfg.get("aoe_hold_secs", 1.05))      # hold x this long (continuous AoE)
     push_settle = float(map_cfg.get("push_settle_secs", 0.6))  # push animation before the AoE
     push_margin = int(map_cfg.get("push_edge_margin", 25))
+    push_prewalk = float(map_cfg.get("push_prewalk_secs", 0.0))  # walk this long, push while moving
     portal_tol = int(map_cfg.get("portal_tol", 2))             # minimap px to stand on the portal
     portal_lead = int(map_cfg.get("portal_lead", 20))          # start the portal line-up this early
     reach = sweep.dash_reach(attack_range, gcfg) if gcfg else attack_range
@@ -458,7 +459,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 # step that walks her off the lip mid-AoE (seen live) -> no tap there.
                 sweep.apply_action(act, heading, keys, core.kb, sleep=core.time.sleep,
                                    attack_hold=aoe_hold, pull_settle=push_settle,
-                                   face_tap=not edge_zone)
+                                   face_tap=not edge_zone, pre_walk=push_prewalk)
                 if act == sweep.WALK:
                     progress.mark_walking()
                 core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))

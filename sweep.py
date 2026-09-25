@@ -70,7 +70,7 @@ def decide(mob_xs, px, heading, attack_range, gather=None, cd_ok=False, aoe_max=
 
 def apply_action(action, heading, keys, kb, sleep=lambda s: None,
                  burst=3, attack_dwell=0.2, face_gap=0.03, pull_settle=0.1, attack_hold=None,
-                 face_tap=True):
+                 face_tap=True, pre_walk=0.0):
     """Translate a decide() action into key presses via the injected `kb` (dependency-injected
     so this stays pure/testable -- no core import). Returns the heading for the NEXT beat
     (flipped on ADVANCE so a route with no explicit segments ping-pongs the platform).
@@ -80,6 +80,8 @@ def apply_action(action, heading, keys, kb, sleep=lambda s: None,
     the gather cooldown: it passes cd_ok into decide(), and resets its timer after a GATHER.
     face_tap=False skips the facing tap (she already faces the heading): at a platform edge that
     0.03 s tap is a step that can walk her off.
+    pre_walk (s): GATHER walks in the heading this long first and pushes WHILE still moving (the
+    arrow stays held through the push) -- a push from a standstill sometimes glitches (user).
     """
     face = keys["right"] if heading > 0 else keys["left"]
     if action == ADVANCE:
@@ -89,13 +91,20 @@ def apply_action(action, heading, keys, kb, sleep=lambda s: None,
         kb.safe_release(keys["left"] if heading > 0 else keys["right"])
         kb.safe_press(face)
         return heading
-    # FIRE or GATHER: stop walking, face the heading, act in place.
-    kb.safe_release(keys["right"]); kb.safe_release(keys["left"])
-    if face_tap:
-        kb.safe_press(face); sleep(face_gap); kb.safe_release(face)
-    if action == GATHER:
+    if action == GATHER and pre_walk > 0:                # push from a walk, not a standstill
+        kb.safe_release(keys["left"] if heading > 0 else keys["right"])
+        kb.safe_press(face); sleep(pre_walk)
         kb.safe_press(keys["dash"]); sleep(face_gap); kb.safe_release(keys["dash"])
+        kb.safe_release(face)
         sleep(pull_settle)                               # let the pull group them before the AoE
+    else:
+        # FIRE or GATHER: stop walking, face the heading, act in place.
+        kb.safe_release(keys["right"]); kb.safe_release(keys["left"])
+        if face_tap:
+            kb.safe_press(face); sleep(face_gap); kb.safe_release(face)
+        if action == GATHER:
+            kb.safe_press(keys["dash"]); sleep(face_gap); kb.safe_release(keys["dash"])
+            sleep(pull_settle)                           # let the pull group them before the AoE
     if attack_hold:                                      # one continuous AoE hold (casts repeat)
         kb.safe_press(keys["attack"]); sleep(attack_hold); kb.safe_release(keys["attack"])
         return heading
