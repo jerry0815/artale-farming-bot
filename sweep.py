@@ -191,6 +191,19 @@ def approach_x(target, heading, keys, kb, read_xy, sleep=lambda s: None, tol=2, 
     return False
 
 
+def finish_or_move(mob_xs, px, heading, attack_range, rounds, max_rounds, behind_tol=30):
+    """At a segment end: FIRE (AoE, no push -- the end is an edge / portal / turn) while a mob on
+    her level is in AoE range ahead (or overlapping her), else ADVANCE to the transition. Reaching
+    until_x mid-fight used to move her on with the mobs she was hitting still alive; overshooting
+    the point a bit is fine. Capped at max_rounds so a respawn / false box can't pin her there.
+    mob_xs must already be same-platform filtered."""
+    if rounds >= max_rounds:
+        return ADVANCE
+    if any(-behind_tol <= (x - px) * heading <= attack_range for x in mob_xs):
+        return FIRE
+    return ADVANCE
+
+
 def push_ready_or_walk(act, cd_left):
     """A GATHER (push) decided while the push is still on cooldown (cd_left s > 0) becomes WALK:
     keep closing in until it is ready instead of standing idle or AoE-ing without the push. The

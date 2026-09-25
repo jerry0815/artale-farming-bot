@@ -454,3 +454,30 @@ def test_seg_done_until_x_still_ends_it_as_a_fallback():
 def test_seg_done_without_y_is_unchanged():
     seg = {"dir": "left", "until_x": 45}
     assert sweep.seg_done(seg, 80, 99) is False and sweep.seg_done(seg, 45) is True
+
+
+# --- finish the fight before moving on: reaching until_x mid-fight moved her to the next segment
+# with the mobs she was hitting still alive (user). At a segment end: AoE again while a mob on her
+# level is in AoE range (overshooting the point a bit is fine), capped at max_rounds.
+
+def test_finish_keeps_fighting_while_a_mob_is_in_aoe_range():
+    assert sweep.finish_or_move([560], px=500, heading=1, attack_range=200,
+                                rounds=0, max_rounds=3) == sweep.FIRE
+
+
+def test_finish_moves_on_when_nothing_is_in_range():
+    assert sweep.finish_or_move([900], px=500, heading=1, attack_range=200,
+                                rounds=0, max_rounds=3) == sweep.ADVANCE      # beyond AoE range
+    assert sweep.finish_or_move([], px=500, heading=1, attack_range=200,
+                                rounds=0, max_rounds=3) == sweep.ADVANCE
+
+
+def test_finish_is_capped():
+    assert sweep.finish_or_move([560], px=500, heading=1, attack_range=200,
+                                rounds=3, max_rounds=3) == sweep.ADVANCE
+
+
+def test_finish_ignores_mobs_well_behind_her():
+    # forward AoE can't hit them; turning back is not wanted (one direction per segment)
+    assert sweep.finish_or_move([300], px=500, heading=1, attack_range=200,
+                                rounds=0, max_rounds=3) == sweep.ADVANCE

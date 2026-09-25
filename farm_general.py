@@ -278,7 +278,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             return None
         print(f"[sweep] {why} at x={mmx} y={mmy} -> resync to segment {j + 1}")
         core.kb.safe_release_all()
-        seg_i[0] = j; zone_walk[0] = 0.0
+        seg_i[0] = j; zone_walk[0] = 0.0; finish_n[0] = 0
         _reanchor_here()
         core.STATUS["node"] = f"seg{j + 1}"
         return sweep.seg_heading(route[j])
@@ -290,13 +290,29 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                   f"not confirmed -- continuing")
         seg_i[0] = (seg_i[0] + 1) % len(route)
         nxt = route[seg_i[0]]
-        zone_walk[0] = 0.0
+        zone_walk[0] = 0.0; finish_n[0] = 0
         gate.reset(); progress.reset()                 # a transition may teleport her (portal)
         _reanchor_here()                               # the camera moved: re-seed the HP-bar lock
         core.STATUS["node"] = f"seg{seg_i[0] + 1}"
         print(f"[sweep] -> segment {seg_i[0] + 1}: {nxt['dir']} to x={nxt['until_x']}"
               f"{' (travel)' if not nxt.get('attack', True) else ''}")
         return sweep.seg_heading(nxt)
+
+    finish_max = int(map_cfg.get("finish_rounds", 3))   # AoE rounds allowed past a segment end
+    finish_n = [0]
+
+    def _transition(seg, mmx, mmy):
+        """Run the segment's end transition (portal / jump / none) and advance. Returns heading."""
+        nxt = route[(seg_i[0] + 1) % len(route)]
+        print(f"[sweep] segment {seg_i[0] + 1} end at x={mmx} y={mmy}")
+        ok = sweep.route_transition(seg.get("then"), sweep.seg_heading(seg),
+                                    sweep.seg_heading(nxt), keys, core.kb,
+                                    read_xy=lambda: core.stable_char(2),
+                                    sleep=core.time.sleep,
+                                    align=lambda: _portal_align(seg, mmx, mmy))
+        if seg.get("then") == "up":
+            core.time.sleep(portal_settle)                 # let the camera finish panning first
+        return _advance(ok, mmx)
 
     def _portal_align(seg, mmx, mmy):
         """Line up on the portal x arriving in the segment's heading (the recorded press side);
@@ -360,17 +376,14 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                     if h is not None:
                         heading = h
                         continue
-                if done and not edge_zone:                            # segment end -> transition
-                    nxt = route[(seg_i[0] + 1) % len(route)]
-                    print(f"[sweep] segment {seg_i[0] + 1} end at x={mmx} y={_mmy}")
-                    ok = sweep.route_transition(seg.get("then"), sweep.seg_heading(seg),
-                                                sweep.seg_heading(nxt), keys, core.kb,
-                                                read_xy=lambda: core.stable_char(2),
-                                                sleep=core.time.sleep,
-                                                align=lambda: _portal_align(seg, mmx, _mmy))
-                    if seg.get("then") == "up":
-                        core.time.sleep(portal_settle)     # let the camera finish panning first
-                    heading = _advance(ok, mmx)
+                # Segment end: on attack legs first FINISH the mobs in AoE range (reaching the
+                # point mid-fight moved her on with them alive); an until_y landing ends at once.
+                landed = (seg.get("until_y") is not None and _mmy >= 0
+                          and abs(_mmy - seg["until_y"]) <= 6)
+                finishing = (done and not edge_zone and seg.get("attack", True) and not landed
+                             and finish_n[0] < finish_max)
+                if done and not edge_zone and not finishing:          # segment end -> transition
+                    heading = _transition(seg, mmx, _mmy)
                     continue
                 if edge_zone and zone_walk[0] >= edge_wait:           # never found the edge
                     print(f"[sweep] segment {seg_i[0] + 1}: no walk-off after {zone_walk[0]:.1f}s "
@@ -402,6 +415,8 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                                 if len(xs) >= 5 and len(fy) >= 5 else None)
             pos, last_px[0] = _player_pos(_anchor, frame, pbox, last_px[0])
             if pos is None:
+                if route and finishing:                    # can't see the fight: move on
+                    heading = _transition(seg, mmx, _mmy); continue
                 if route and edge_zone:                    # no lock near the edge: careful step
                     heading = edge_step(heading, mmx, _mmy); continue
                 if route:                                  # no player lock: keep walking the segment
@@ -428,6 +443,18 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             mob_xs = sweep.same_platform([(m[1] + m[3] // 2, m[2] + m[4]) for m in mobs], pfeet,
                                          band_up=band_up, band_down=band_down)
             core.STATUS["count"] = len(mob_xs)
+            if route and finishing:
+                act = sweep.finish_or_move(mob_xs, px, heading, attack_range, finish_n[0], finish_max)
+                if act == sweep.ADVANCE:
+                    heading = _transition(seg, mmx, _mmy)
+                    continue
+                if finish_n[0] == 0:
+                    print(f"[sweep] segment {seg_i[0] + 1} end reached mid-fight -- finishing "
+                          f"the mobs in range first")
+                finish_n[0] += 1
+                sweep.apply_action(sweep.FIRE, heading, keys, core.kb, sleep=core.time.sleep,
+                                   attack_hold=aoe_hold, face_tap=False)
+                continue
             if route:
                 # Route attack leg, fixed rhythm: one push (z) then hold x (AoE); no push within
                 # push_edge_margin of the segment end (edge/portal/jump spot); no mob -> walk on.

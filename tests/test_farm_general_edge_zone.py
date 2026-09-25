@@ -99,3 +99,39 @@ def test_failed_jump_stuck_on_bottom_resyncs_to_the_bottom_leg(monkeypatch, caps
     # real segment 5 stuck at the bottom wall -> real segment 6 (left to the bottom portal)
     assert "segment 1 stuck at x=285 y=106 -> resync to segment 2" in out
     assert core.STATUS["node"] == "seg2"
+
+
+def test_segment_end_finishes_the_mob_in_range_before_moving_on(monkeypatch, capsys):
+    events = []
+    kb = core.kb
+    monkeypatch.setattr(kb, "pause", False, raising=False)
+    monkeypatch.setattr(kb, "safe_press", lambda k: events.append(("press", k)))
+    monkeypatch.setattr(kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(kb, "safe_release_all", lambda: events.append(("release_all", None)))
+    for name, fn in {"focus": lambda: True, "set_minimap": lambda *a: None,
+                     "ensure_game_focused": lambda **k: True, "lie_check_fast_tick": lambda: None,
+                     "is_lie_check_active": lambda: False, "capture": lambda: object(),
+                     "make_exp_tracker": lambda **k: (lambda: None),
+                     "stable_char": lambda n=3: (280, 106)}.items():   # already past until_x 275
+        monkeypatch.setattr(core, name, fn)
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    import mob_detect
+    monkeypatch.setattr(mob_detect, "load_yolo", lambda p: object())
+    beats = iter([[(0.9, 530, 300, 40, 70)]])           # a mob in AoE range on beat 1, then none
+
+    def detect(*a, **k):
+        if core.STATUS.get("node") == "seg2":
+            core.STOP.set()
+        return (next(beats, []), (0.9, 480, 300, 40, 70))
+    monkeypatch.setattr(mob_detect, "yolo_detect", detect)
+    cfg = {"loop": "sweep", "anchor": "yolo_player", "attack_key": "x",
+           "minimap": {"x": 0, "y": 0, "w": 10, "h": 10},
+           "route": [{"dir": "right", "until_x": 275, "then": None, "attack": True, "y": 106},
+                     {"dir": "left", "until_x": 215, "then": None, "attack": True, "y": 106}]}
+    core.STOP.clear(); core.STATUS["node"] = None
+    farm_general.farming_loop_general(cfg, max_seconds=5)
+    out = capsys.readouterr().out
+    assert "segment 1 end" in out and core.STATUS["node"] == "seg2"
+    first_x = events.index(("press", "x"))
+    assert first_x < len(events)                          # it AoE'd the mob at the segment end...
+    assert "finishing" in out                             # ...before the transition
