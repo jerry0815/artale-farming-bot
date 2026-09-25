@@ -46,6 +46,30 @@ def _reanchor(anchor, recent):
         anchor.last = None
 
 
+def _against_heading(prev, cur, heading, min_mm=8, min_px=60, home_x=None, away=150):
+    """prev/cur = (screen x of the HP-bar lock, minimap x), the ends of a short window of beats.
+    True when the minimap advanced >= min_mm in the heading but the lock's screen x moved >= min_px
+    AGAINST it. The camera keeps her at ~the
+    same screen x while she walks (or she moves WITH the heading when the camera is clamped), so a
+    lock drifting backwards is scenery sliding past -- the tracker latched onto a STOP-sign sliver
+    after a portal (live: mm 155->174 while "her" x went 907->838->800->726).
+    home_x (her usual screen x on this floor): the camera catching up after a push dash also slides
+    her backwards on screen (1147 -> 1026) but TOWARD home; a scenery lock slides AWAY from it, so
+    with home_x it must end > `away` px from home and farther than it started."""
+    (px0, mm0), (px1, mm1) = prev, cur
+    if not ((mm1 - mm0) * heading >= min_mm and (px1 - px0) * heading <= -min_px):
+        return False
+    if home_x is None:
+        return True
+    return abs(px1 - home_x) > away and abs(px1 - home_x) > abs(px0 - home_x)
+
+
+def _floor_key(mmy):
+    """Minimap y rounded to the floor it belongs to (10 px buckets) -- her usual screen spot differs
+    per floor (the camera clamps vertically): feet ~710 upper, ~798 bottom on flat_sweep."""
+    return int(round(mmy / 10.0)) * 10
+
+
 def _dump_attack(frame, mobs, kept, pos, act, seg_no, mmx, attack_range, reach, heading,
                  outdir="logs/sweep_dbg"):
     """debug_log: save the frame this attack decision was made on, annotated -- every mob box
@@ -227,12 +251,20 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     edge_step_secs = float(map_cfg.get("edge_step_secs", 0.4))
     zone_walk = [0.0]
     import collections as _col
-    recent_pos = _col.deque(maxlen=int(map_cfg.get("anchor_home_beats", 30)))  # her usual spot
-    portal_settle = float(map_cfg.get("portal_settle_secs", 0.8))   # camera pan after a portal
+    home_n = int(map_cfg.get("anchor_home_beats", 30))
+    recent_pos = _col.defaultdict(lambda: _col.deque(maxlen=home_n))  # floor -> her usual spot
+    portal_settle = float(map_cfg.get("portal_settle_secs", 1.5))   # camera pan after a portal
+    lock_win = _col.deque(maxlen=4)  # (screen x, minimap x) of the last beats, for _against_heading
     # Recovery: phantom minimap reads are gated out; walking stuck_secs with no progress (a failed
     # jump/portal left her on a level where this segment's until_x is unreachable) -> resync.
     gate = sweep.MinimapGate(max_jump=int(map_cfg.get("mm_max_jump", 40)))
     progress = sweep.Progress(stuck_secs=float(map_cfg.get("stuck_secs", 4.0)))
+
+    def _reanchor_here():
+        """Re-seed the HP-bar lock at her usual screen spot for the floor she is on NOW."""
+        x, y = core.stable_char(2)
+        _reanchor(_anchor, list(recent_pos[_floor_key(y)]) if y >= 0 else [])
+        lock_win.clear()
 
     def _resync(mmx, mmy, why):
         """Continue from the next route segment on the level she is actually on. Returns the new
@@ -245,7 +277,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         print(f"[sweep] {why} at x={mmx} y={mmy} -> resync to segment {j + 1}")
         core.kb.safe_release_all()
         seg_i[0] = j; zone_walk[0] = 0.0
-        _reanchor(_anchor, list(recent_pos))
+        _reanchor_here()
         core.STATUS["node"] = f"seg{j + 1}"
         return sweep.seg_heading(route[j])
 
@@ -258,7 +290,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         nxt = route[seg_i[0]]
         zone_walk[0] = 0.0
         gate.reset(); progress.reset()                 # a transition may teleport her (portal)
-        _reanchor(_anchor, list(recent_pos))           # the camera moved: re-seed the HP-bar lock
+        _reanchor_here()                               # the camera moved: re-seed the HP-bar lock
         core.STATUS["node"] = f"seg{seg_i[0] + 1}"
         print(f"[sweep] -> segment {seg_i[0] + 1}: {nxt['dir']} to x={nxt['until_x']}"
               f"{' (travel)' if not nxt.get('attack', True) else ''}")
@@ -368,7 +400,20 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                     progress.mark_walking()
                 core.time.sleep(0.05); continue            # no player lock yet -> wait
             px, pfeet = pos
-            recent_pos.append(pos)
+            if route and mmx >= 0:
+                lock_win.append((px, mmx))
+                # her usual screen x is the same on every floor (the camera centers her
+                # horizontally), so pool x across floors; y (camera clamp) is per floor.
+                xs = sorted(p[0] for d in recent_pos.values() for p in d)
+                home_x = xs[len(xs) // 2] if len(xs) >= 5 else None
+                if len(lock_win) >= 2 and _against_heading(lock_win[0], lock_win[-1], heading,
+                                                           home_x=home_x):
+                    # over the last few beats she advanced but "she" slid backwards: scenery
+                    print(f"[sweep] HP-bar lock drifting against the heading (x={px}) -> re-anchor")
+                    _reanchor(_anchor, list(recent_pos[_floor_key(_mmy)]))
+                    lock_win.clear()
+                    continue
+                recent_pos[_floor_key(_mmy)].append(pos)
             # decide() is x-only: keep only mobs on HER level (feet within the band), else a mob on
             # the floor above/below that she can't hit pins her in FIRE forever.
             mob_xs = sweep.same_platform([(m[1] + m[3] // 2, m[2] + m[4]) for m in mobs], pfeet,
