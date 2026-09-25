@@ -434,3 +434,23 @@ def test_no_pre_walk_by_default_keeps_the_old_sequence():
     sweep.apply_action(sweep.GATHER, 1, KEYS, kb, attack_hold=1.05)
     p = [k for e, k in kb.events if e == "press"]
     assert p.index("z") < p.index("x")
+
+
+# --- until_y: the last leg drops from the upper floor to the bottom-left start; walking on left to
+# until_x after landing wastes time (the next leg heads right). End as soon as she is on that floor.
+
+def test_seg_done_on_reaching_the_target_floor():
+    seg = {"dir": "left", "until_x": 45, "until_y": 99}
+    assert sweep.seg_done(seg, 80, 55) is False          # still on the upper floor
+    assert sweep.seg_done(seg, 80, 99) is True           # landed on the bottom: done, x not needed
+    assert sweep.seg_done(seg, 80, 103) is True          # within the floor tolerance
+
+
+def test_seg_done_until_x_still_ends_it_as_a_fallback():
+    seg = {"dir": "left", "until_x": 45, "until_y": 99}
+    assert sweep.seg_done(seg, 44, 55) is True
+
+
+def test_seg_done_without_y_is_unchanged():
+    seg = {"dir": "left", "until_x": 45}
+    assert sweep.seg_done(seg, 80, 99) is False and sweep.seg_done(seg, 45) is True

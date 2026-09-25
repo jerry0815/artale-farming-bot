@@ -116,15 +116,20 @@ def apply_action(action, heading, keys, kb, sleep=lambda s: None,
 # --- Route mode --------------------------------------------------------------------------
 # A route is an ordered, cyclic list of segments recorded from a human run
 # (build_sweep_route.py): {"dir": "right"|"left", "until_x": <minimap x>, "then": "up"|"jump"|null,
-# "attack": bool}. Heading is FIXED for the whole segment; the segment ends when the minimap x
+# "attack": bool, optional "until_y": end on reaching that floor}. Heading is FIXED for the whole segment; the segment ends when the minimap x
 # reaches until_x, then its transition runs and the next segment starts.
 
 def seg_heading(seg):
     return 1 if seg["dir"] == "right" else -1
 
 
-def seg_done(seg, mmx):
-    """True once the minimap x has reached the segment's until_x in its direction."""
+def seg_done(seg, mmx, mmy=None, y_tol=6):
+    """True once the minimap x has reached the segment's until_x in its direction -- or, if the
+    segment has "until_y", as soon as she is on that floor (|mmy - until_y| <= y_tol). The last leg
+    drops from the upper floor to the start floor; walking on to until_x after landing just wastes
+    time because the next leg heads back the other way."""
+    if seg.get("until_y") is not None and mmy is not None and mmy >= 0             and abs(mmy - seg["until_y"]) <= y_tol:
+        return True
     return mmx >= seg["until_x"] if seg_heading(seg) > 0 else mmx <= seg["until_x"]
 
 

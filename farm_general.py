@@ -348,7 +348,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                     continue
                 # Portal legs hand over to the line-up portal_lead px early: walking reads come
                 # ~0.3 s apart, so she overshot the spot and had to come back from the wrong side.
-                done = mmx >= 0 and (sweep.seg_done(seg, mmx) or (
+                done = mmx >= 0 and (sweep.seg_done(seg, mmx, _mmy) or (
                     seg.get("then") == "up" and sweep.near_seg_end(seg, mmx, portal_lead)))
                 # edge_jump segments: until_x is only where the minimap dot PINS (the minimap scrolls
                 # on), not the edge -- so past it she keeps fighting and walks on in short steps
