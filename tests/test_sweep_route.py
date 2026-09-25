@@ -563,3 +563,24 @@ def test_edge_jump_default_still_releases_after_landing():
     sweep.walk_to_edge(1, KEYS, kb, read_xy=_reader([(195, 55), (195, 60)]), walk=0.3, poll=0.1,
                        level=55)
     assert kb.events[-1] == ("release", "R")
+
+
+# --- landing check after the edge jump (recorded flights: take off ~y60, rise to ~52, land at the
+# right platform's y 62 after 0.70-0.77 s; a miss drops toward the bottom floor y 99-106).
+
+def test_landing_state_in_the_air_early():
+    assert sweep.landing_state(0.3, 52, target_y=62) == "air"
+    assert sweep.landing_state(0.2, 61, target_y=62) == "air"      # take-off height, too soon
+
+
+def test_landing_state_landed_on_the_platform():
+    assert sweep.landing_state(0.7, 62, target_y=62) == "landed"
+    assert sweep.landing_state(0.6, 59, target_y=62) == "landed"
+
+
+def test_landing_state_fell_below():
+    assert sweep.landing_state(0.5, 80, target_y=62) == "fell"
+
+
+def test_landing_state_gives_up_waiting():
+    assert sweep.landing_state(2.5, 55, target_y=62) == "timeout"

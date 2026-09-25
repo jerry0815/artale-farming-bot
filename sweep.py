@@ -277,6 +277,21 @@ def walk_to_edge(heading, keys, kb, read_xy, sleep=lambda s: None, walk=0.4, pol
     return False
 
 
+def landing_state(elapsed, mmy, target_y, min_air=0.55, tol=4, fall_dy=15, max_air=2.0):
+    """After an edge jump: 'fell' (minimap y >= target_y + fall_dy -- dropping past the platform),
+    'landed' (>= min_air s after the jump and y within tol of the landing platform's y), 'timeout'
+    (stop waiting after max_air s) or 'air'. min_air matters: she takes off near the landing height
+    (slope bottom ~60 vs platform 62), so an early read would look landed. Recorded flights land
+    after 0.70-0.77 s."""
+    if mmy is not None and mmy >= 0 and mmy >= target_y + fall_dy:
+        return "fell"
+    if elapsed >= min_air and mmy is not None and mmy >= 0 and abs(mmy - target_y) <= tol:
+        return "landed"
+    if elapsed >= max_air:
+        return "timeout"
+    return "air"
+
+
 def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=lambda s: None,
                      up_wait=2.5, poll=0.1, y_change=8, nudge=0.12, jump_gap=0.3, align=None,
                      edge_wait=4.0, jump_dy=5, x_win=12, land=1.0, level=None):

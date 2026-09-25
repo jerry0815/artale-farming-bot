@@ -181,3 +181,51 @@ def test_push_aoe_is_fixed_but_aoe_only_holds_until_clear(monkeypatch):
     farm_general.farming_loop_general(cfg, max_seconds=5)
     assert (sw.GATHER, False) in calls                   # push + fixed AoE
     assert (sw.FIRE, True) in calls                      # AoE-only holds until clear
+
+
+import pytest as _pt
+
+
+@_pt.mark.parametrize("after_jump, expect", [
+    ([(200, 58), (205, 62)], "landed"),                      # arc, then the right platform
+    ([(200, 80), (205, 106)], "jump fell short"),            # dropped to the bottom floor
+])
+def test_after_the_jump_regular_beats_with_a_landing_check(monkeypatch, capsys, after_jump, expect):
+    import sweep as sw
+    kb = core.kb
+    monkeypatch.setattr(kb, "pause", False, raising=False)
+    monkeypatch.setattr(kb, "safe_press", lambda k: None)
+    monkeypatch.setattr(kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(kb, "safe_release_all", lambda: None)
+    clock = [1000.0]
+    reads = iter([(196, 55)] + after_jump)
+    def stable_char(n=3):
+        clock[0] += 0.3
+        return next(reads, after_jump[-1])
+    for name, fn in {"focus": lambda: True, "set_minimap": lambda *a: None,
+                     "ensure_game_focused": lambda **k: True, "lie_check_fast_tick": lambda: None,
+                     "is_lie_check_active": lambda: False, "capture": lambda: object(),
+                     "make_exp_tracker": lambda **k: (lambda: None), "stable_char": stable_char,
+                     "make_active_timer": lambda: (lambda now: None, lambda now: None)}.items():
+        monkeypatch.setattr(core, name, fn)
+    monkeypatch.setattr(core.time, "time", lambda: clock[0])
+    monkeypatch.setattr(core.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    import mob_detect
+    monkeypatch.setattr(mob_detect, "load_yolo", lambda p: object())
+    n = [0]
+    def detect(*a, **k):
+        n[0] += 1
+        if n[0] > 3:
+            core.STOP.set()
+        return ([], (0.9, 1000, 300, 40, 70))
+    monkeypatch.setattr(mob_detect, "yolo_detect", detect)
+    monkeypatch.setattr(sw, "walk_to_edge", lambda *a, **k: True)     # jumps on the first step
+    route = [{"dir": "right", "until_x": 195, "then": "edge_jump", "attack": True, "y": 55},
+             {"dir": "right", "until_x": 307, "then": None, "attack": True, "y": 62},
+             {"dir": "right", "until_x": 275, "then": None, "attack": True, "y": 106}]
+    cfg = {"loop": "sweep", "anchor": "yolo_player", "attack_key": "x",
+           "minimap": {"x": 0, "y": 0, "w": 10, "h": 10}, "route": route}
+    core.STOP.clear()
+    farm_general.farming_loop_general(cfg, max_seconds=30)
+    out = capsys.readouterr().out
+    assert "slope bottom -> jump" in out and expect in out

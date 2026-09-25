@@ -251,7 +251,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
 
     edge_wait = float(map_cfg.get("edge_wait_secs", 6.0))  # max stepping time hunting the edge
     edge_step_secs = float(map_cfg.get("edge_step_secs", 3.0))  # one continuous walk (stops for mobs)
-    jump_land = float(map_cfg.get("jump_land_secs", 0.8))  # flight time (recording: 0.70-0.77 s)
+    air = [None]                    # (jump time, landing platform y) while airborne after a jump
     zone_walk = [0.0]
     import collections as _col
     home_n = int(map_cfg.get("anchor_home_beats", 30))
@@ -358,10 +358,13 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                                   sleep=core.time.sleep, walk=edge_step_secs, poll=0.03,
                                   base=(mmx, mmy), level=route[seg_i[0]].get("y"),
                                   interrupt=lambda: _still_in_range(heading, core.time.time()),
-                                  check_every=0.25, land=jump_land, keep_moving=True)
+                                  check_every=0.25, land=0.0, keep_moving=True)
         zone_walk[0] += core.time.time() - t_walk
         if fell:
             print(f"[sweep] segment {seg_i[0] + 1}: slope bottom -> jump")
+            nxt = route[(seg_i[0] + 1) % len(route)]
+            if nxt.get("y") is not None:                   # regular beats + a landing check
+                air[0] = (core.time.time(), nxt["y"])
             return _advance(True, mmx)
         return heading
 
@@ -382,6 +385,25 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 seg = route[seg_i[0]]
                 now = core.time.time()
                 mmx, _mmy = gate.feed(*core.stable_char(2), now)
+                if air[0] is not None:                              # just jumped: landed yet?
+                    t_j, ty = air[0]
+                    st = sweep.landing_state(now - t_j, _mmy, ty)
+                    if st == "landed":
+                        print(f"[sweep] landed (y={_mmy}) {now - t_j:.2f}s after the jump")
+                        air[0] = None
+                    elif st == "timeout" or now - t_j > 3.0:
+                        air[0] = None
+                    elif st == "fell" and sweep.resync_segment(route, seg_i[0], mmx, _mmy) is not None:
+                        air[0] = None                  # missed it and landed on a known floor
+                        h = _resync(mmx, _mmy, f"segment {seg_i[0] + 1} jump fell short")
+                        if h is not None:
+                            heading = h
+                        continue
+                    else:                              # in the air / still dropping: keep going
+                        sweep.apply_action(sweep.WALK, heading, keys, core.kb,
+                                           sleep=core.time.sleep)
+                        progress.mark_walking()
+                        continue
                 if progress.update(now, mmx, heading):              # walking, going nowhere
                     h = _resync(mmx, _mmy, f"segment {seg_i[0] + 1} stuck")
                     if h is not None:
