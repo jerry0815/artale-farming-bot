@@ -543,3 +543,23 @@ def test_edge_walk_never_checks_mobs_once_on_the_slope():
                               read_xy=_reader([(195, 55), (195, 57), (195, 58), (195, 59), (195, 60)]),
                               walk=5.0, poll=0.05, level=55, interrupt=interrupt, check_every=0.05)
     assert fell is True and len(checked) <= 1
+
+
+# --- after the jump: releasing the arrow on landing left her standing ~0.9 s while the loop
+# re-anchored and ran a detection beat (user: "stops a bit after jump"). keep_moving leaves the
+# heading held so she walks on until the next action takes over.
+
+def test_edge_jump_keep_moving_leaves_the_heading_held():
+    kb = _KB()
+    fell = sweep.walk_to_edge(1, KEYS, kb, read_xy=_reader([(195, 55), (195, 60)]), walk=0.3,
+                              poll=0.1, level=55, keep_moving=True)
+    assert fell is True
+    j = kb.events.index(("press", "J"))
+    assert ("release", "R") not in kb.events[j:]           # still walking right after landing
+
+
+def test_edge_jump_default_still_releases_after_landing():
+    kb = _KB()
+    sweep.walk_to_edge(1, KEYS, kb, read_xy=_reader([(195, 55), (195, 60)]), walk=0.3, poll=0.1,
+                       level=55)
+    assert kb.events[-1] == ("release", "R")

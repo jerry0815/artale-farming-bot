@@ -251,6 +251,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
 
     edge_wait = float(map_cfg.get("edge_wait_secs", 6.0))  # max stepping time hunting the edge
     edge_step_secs = float(map_cfg.get("edge_step_secs", 3.0))  # one continuous walk (stops for mobs)
+    jump_land = float(map_cfg.get("jump_land_secs", 0.8))  # flight time (recording: 0.70-0.77 s)
     zone_walk = [0.0]
     import collections as _col
     home_n = int(map_cfg.get("anchor_home_beats", 30))
@@ -357,7 +358,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                                   sleep=core.time.sleep, walk=edge_step_secs, poll=0.03,
                                   base=(mmx, mmy), level=route[seg_i[0]].get("y"),
                                   interrupt=lambda: _still_in_range(heading, core.time.time()),
-                                  check_every=0.25)
+                                  check_every=0.25, land=jump_land, keep_moving=True)
         zone_walk[0] += core.time.time() - t_walk
         if fell:
             print(f"[sweep] segment {seg_i[0] + 1}: slope bottom -> jump")

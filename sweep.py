@@ -229,7 +229,7 @@ def _jump(keys, kb, sleep, land=1.0):
 
 def walk_to_edge(heading, keys, kb, read_xy, sleep=lambda s: None, walk=0.4, poll=0.03,
                  jump_dy=5, commit_dy=2, commit_max=1.0, x_win=12, land=1.0, base=None,
-                 level=None, interrupt=None, check_every=0.25):
+                 level=None, interrupt=None, check_every=0.25, keep_moving=False):
     """Walk `heading` for up to `walk` s toward the edge_jump gap and jump at the SLOPE BOTTOM.
 
     The upper platform slopes down (minimap y 55 -> ~62) to the gap; recorded laps jump when the
@@ -244,7 +244,9 @@ def walk_to_edge(heading, keys, kb, read_xy, sleep=lambda s: None, walk=0.4, pol
     interrupt: optional callable checked every check_every s while still on the flat part; True (a
     mob came into range) -> stop and return False so the loop can fight. This makes the approach one
     continuous walk instead of short steps with a full stop between them. Never checked once the
-    descent has started (the jump window is ~0.2 s; a detection must not delay it)."""
+    descent has started (the jump window is ~0.2 s; a detection must not delay it).
+    keep_moving: after the jump leave the heading HELD (the caller's next action takes over) --
+    releasing it on landing left her standing ~0.9 s through the next detection beat."""
     face = keys["right"] if heading > 0 else keys["left"]
     kb.safe_press(face)
     x0 = base[0] if base is not None else None
@@ -261,7 +263,8 @@ def walk_to_edge(heading, keys, kb, read_xy, sleep=lambda s: None, walk=0.4, pol
             if abs(x - x0) <= x_win:
                 if y - y_lvl >= jump_dy:          # at the slope bottom -> jump now
                     _jump(keys, kb, sleep, land=land)
-                    kb.safe_release(face)
+                    if not keep_moving:
+                        kb.safe_release(face)
                     return True
                 if not committed and y - y_lvl >= commit_dy:
                     committed, limit = True, waited + commit_max   # on the slope: finish it
