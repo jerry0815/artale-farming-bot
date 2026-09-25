@@ -210,6 +210,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     edge_wait = float(map_cfg.get("edge_wait_secs", 6.0))  # max stepping time hunting the edge
     edge_step_secs = float(map_cfg.get("edge_step_secs", 0.4))
     zone_walk = [0.0]
+    facing_back = [False]           # a BACK turn left her facing backwards (edge zone re-face)
     # Recovery: phantom minimap reads are gated out; walking stuck_secs with no progress (a failed
     # jump/portal left her on a level where this segment's until_x is unreachable) -> resync.
     gate = sweep.MinimapGate(max_jump=int(map_cfg.get("mm_max_jump", 40)))
@@ -249,10 +250,11 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         fell = sweep.walk_to_edge(heading, keys, core.kb,
                                   read_xy=lambda: core.get_character_color(near=(mmx, mmy)),
                                   sleep=core.time.sleep, walk=edge_step_secs, poll=0.03,
-                                  base=(mmx, mmy))
+                                  base=(mmx, mmy), level=route[seg_i[0]].get("y"))
+        facing_back[0] = False                         # walking faces the heading again
         zone_walk[0] += edge_step_secs
         if fell:
-            print(f"[sweep] segment {seg_i[0] + 1}: walked off the edge -> air-jump")
+            print(f"[sweep] segment {seg_i[0] + 1}: slope bottom -> jump")
             return _advance(True, mmx)
         return heading
 
@@ -306,7 +308,8 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                     ok = sweep.route_transition("edge_jump", heading, heading, keys, core.kb,
                                                 read_xy=lambda: core.get_character_color(
                                                     near=(mmx, _mmy)),
-                                                poll=0.03, sleep=core.time.sleep, edge_wait=0.5)
+                                                poll=0.03, sleep=core.time.sleep, edge_wait=0.5,
+                                                level=seg.get("y"))
                     heading = _advance(ok, mmx)
                     continue
                 if not seg.get("attack", True):                       # travel leg: just walk
@@ -363,10 +366,12 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                         if act == sweep.GATHER:
                             next_gather[0] = core.time.time() + gather_cd
                 # edge zone: she already faces the heading (walked in), and the facing tap is a
-                # step that walks her off the lip mid-AoE (seen live) -> no tap there.
+                # step that walks her off the lip mid-AoE (seen live) -> no tap there, unless a
+                # BACK turn left her facing backwards.
                 sweep.apply_action(act, heading, keys, core.kb, sleep=core.time.sleep,
                                    attack_hold=aoe_hold, pull_settle=push_settle,
-                                   face_tap=not edge_zone)
+                                   face_tap=(not edge_zone) or facing_back[0])
+                facing_back[0] = act == sweep.BACK
                 if act == sweep.WALK:
                     progress.mark_walking()
                 core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))

@@ -136,10 +136,31 @@ def test_route_attack_walks_to_close_in_on_a_far_mob():
                               near_edge=False) == sweep.WALK
 
 
-def test_route_attack_hits_a_mob_just_behind_without_turning():
-    # 120px behind (inside AoE range) -> attack in place facing the heading; never walk back
-    assert sweep.route_attack([380], px=500, heading=1, attack_range=200, reach=240,
+def test_route_attack_mob_overlapping_her_counts_as_ahead():
+    # within behind_tol (her own body width) the forward push/AoE still hits it
+    assert sweep.route_attack([480], px=500, heading=1, attack_range=200, reach=240,
                               near_edge=False) == sweep.GATHER
+
+
+def test_route_attack_mob_only_behind_turns_back():
+    # 120 px behind, nothing ahead: push+AoE forward would hit air and leave it alive (live trace:
+    # 44/229 attacks were behind-only) -> BACK (turn, AoE, carry on)
+    assert sweep.route_attack([380], px=500, heading=1, attack_range=200, reach=240,
+                              near_edge=False) == sweep.BACK
+
+
+def test_route_attack_mobs_ahead_win_over_mobs_behind():
+    assert sweep.route_attack([380, 600], px=500, heading=1, attack_range=200, reach=240,
+                              near_edge=False) == sweep.GATHER
+
+
+def test_back_turns_aoes_and_keeps_the_route_heading():
+    kb = _KB()
+    h = sweep.apply_action(sweep.BACK, 1, KEYS, kb, attack_hold=1.05)
+    presses = [k for e, k in kb.events if e == "press"]
+    assert h == 1                                          # route heading unchanged
+    assert presses.index("L") < presses.index("x")         # face back first, then AoE
+    assert "z" not in presses                              # no push backwards
 
 
 def test_combo_presses_push_once_then_two_aoe():
@@ -191,27 +212,27 @@ def _logged_reader(seq, events):
     return r
 
 
-def test_edge_jump_waits_for_walk_off_then_double_jumps():
+def test_edge_jump_waits_for_the_slope_bottom_then_jumps():
     kb = _KB()
-    read = _logged_reader([(195, 55), (195, 55), (195, 55), (195, 58)], kb.events)
+    read = _logged_reader([(195, 55), (195, 55), (195, 57), (195, 60)], kb.events)
     ok = sweep.route_transition("edge_jump", 1, 1, KEYS, kb, read_xy=read, poll=0.01)
     assert ok is True
     presses = [k for e, k in kb.events if e == "press"]
-    # 2 presses 0.3 s apart: if the 1st was still a ground jump off the lip, the 2nd is the air
-    # jump that carries her across (a spare press in the air is harmless) -- recorded lap 1
-    assert presses.count("J") == 2
+    # ONE jump at the slope bottom (level + 5), like recorded laps 2-3
+    assert presses.count("J") == 1
     j = kb.events.index(("press", "J"))
-    assert ("read", (195, 58)) in kb.events[:j]              # jumped only after the drop
+    assert ("read", (195, 60)) in kb.events[:j]              # not before she reached the bottom
+    assert ("read", (195, 57)) in kb.events[:j]
     assert kb.events.index(("press", "R")) < j               # holding the heading the whole way
 
 
 def test_edge_jump_ignores_phantom_reads():
     # phantom minimap reads (x far from her) must not look like a fall
     kb = _KB()
-    read = _logged_reader([(195, 55), (8, 82), (33, 76), (195, 55), (195, 59)], kb.events)
+    read = _logged_reader([(195, 55), (8, 82), (33, 76), (195, 55), (195, 60)], kb.events)
     sweep.route_transition("edge_jump", 1, 1, KEYS, kb, read_xy=read, poll=0.01)
     j = kb.events.index(("press", "J"))
-    assert ("read", (195, 59)) in kb.events[:j]
+    assert ("read", (195, 60)) in kb.events[:j]
 
 
 def test_edge_jump_no_walk_off_still_jumps_and_reports_failure():
@@ -219,7 +240,7 @@ def test_edge_jump_no_walk_off_still_jumps_and_reports_failure():
     ok = sweep.route_transition("edge_jump", 1, 1, KEYS, kb, read_xy=_reader([(195, 55)]),
                                 poll=0.1, edge_wait=0.3)
     assert ok is False
-    assert [k for e, k in kb.events if e == "press"].count("J") == 2
+    assert [k for e, k in kb.events if e == "press"].count("J") == 1
 
 
 # --- walk_to_edge in short steps: the pinned zone before the jump is still an attack zone, so the
@@ -235,7 +256,7 @@ def test_walk_to_edge_step_without_fall_releases_and_does_not_jump():
 
 def test_walk_to_edge_step_with_fall_jumps():
     kb = _KB()
-    fell = sweep.walk_to_edge(1, KEYS, kb, read_xy=_reader([(195, 55), (195, 59)]),
+    fell = sweep.walk_to_edge(1, KEYS, kb, read_xy=_reader([(195, 55), (195, 60)]),
                               walk=0.3, poll=0.1)
     assert fell is True and ("press", "J") in kb.events
 
@@ -321,7 +342,7 @@ def test_fire_and_walk_ignore_the_push_cooldown():
 def test_edge_jump_holds_the_heading_until_landing():
     kb = _KB()
     slept = []
-    sweep.walk_to_edge(1, KEYS, kb, read_xy=_reader([(195, 55), (195, 59)]), walk=0.3, poll=0.1,
+    sweep.walk_to_edge(1, KEYS, kb, read_xy=_reader([(195, 55), (195, 60)]), walk=0.3, poll=0.1,
                        sleep=slept.append)
     last_j = max(i for i, e in enumerate(kb.events) if e == ("press", "J"))
     rel = kb.events.index(("release", "R"))
@@ -335,3 +356,27 @@ def test_attack_without_face_tap_never_touches_the_direction_keys():
     sweep.apply_action(sweep.FIRE, 1, KEYS, kb, attack_hold=1.05, face_tap=False)
     assert ("press", "R") not in kb.events and ("press", "L") not in kb.events
     assert ("press", "x") in kb.events
+
+
+
+# --- "too late" (live): she stopped part-way down the slope (a step ended / an AoE), and the next
+# step re-based on HER height, so it only jumped after walking off the lower lip. The trigger is
+# now relative to the PLATFORM level, and once the descent starts the step is not cut short.
+
+def test_edge_jump_at_the_slope_bottom_already_jumps_immediately():
+    kb = _KB()
+    reads = []
+    def read():
+        reads.append(1); return (195, 61)                  # standing at the slope bottom
+    fell = sweep.walk_to_edge(1, KEYS, kb, read_xy=read, walk=0.4, poll=0.03,
+                              base=(195, 61), level=55)
+    assert fell is True and len(reads) == 1               # first read -> jump, no extra walking
+
+
+def test_edge_jump_descent_started_is_not_cut_short_by_the_step_timer():
+    kb = _KB()
+    # the step is only 0.06 s (2 polls) but the descent starts on read 2 -> keep walking to 60
+    fell = sweep.walk_to_edge(1, KEYS, kb,
+                              read_xy=_reader([(195, 55), (195, 57), (195, 58), (195, 59), (195, 60)]),
+                              walk=0.06, poll=0.03, level=55)
+    assert fell is True and ("press", "J") in kb.events
