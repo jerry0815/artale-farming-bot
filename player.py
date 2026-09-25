@@ -194,9 +194,10 @@ class HPBarAnchor:
     def __init__(self, cfg=None):
         self.cfg = cfg
         self.last = None
+        self.home = None          # (x, feet) her usual screen spot, set by the loop (optional)
 
     def locate(self, frame_bgr):
-        p = find_player(frame_bgr, cfg=self.cfg, near=self.last)
+        p = find_player(frame_bgr, cfg=self.cfg, near=self.last, home=self.home)
         if p:
             self.last = p
         return p
@@ -208,11 +209,21 @@ def pick_near(cands, near, foot_offset):
     return min(cands, key=lambda b: (b[0] - nx) ** 2 + ((b[1] + foot_offset) - ny) ** 2)
 
 
-def find_player(bgr, region=None, cfg=None, debug=False, near=None, near_tol=130):
+def find_player(bgr, region=None, cfg=None, debug=False, near=None, near_tol=130, home=None,
+                home_tol_x=600, home_tol_y=150):
     """Player screen position (x, feet_y), or None. If `near`=(x,feet) (last known player)
     is given, LOCK onto the candidate nearest it (within near_tol) so transient monster HP
     bars near screen-center don't steal the anchor; else fall back to center-bias. With
-    debug=True returns {player, bar, candidates}."""
+    debug=True returns {player, bar, candidates}.
+
+    home=(x, feet): her USUAL screen spot (the camera keeps her there; the caller tracks it). A
+    sticky lock whose feet are > home_tol_y from home's height is rejected (a red sliver at the top
+    of the screen), and a lost lock (e.g. a push dash moved her > near_tol) re-acquires the bar
+    nearest home (within home_tol_x/y) before falling back to screen center -- the center pick
+    grabbed scenery and followed it (flat_sweep, live). With a home and nothing near it (her bar
+    hidden by skill effects), return None -- the caller rides her last position -- rather than
+    the center pick, which grabbed junk at the bottom of the play area.
+    """
     c = {**DEFAULTS, **(cfg or {})}
     fo = c["foot_offset"]
     cands = bar_candidates(bgr, region=region, cfg=c)
@@ -220,8 +231,13 @@ def find_player(bgr, region=None, cfg=None, debug=False, near=None, near_tol=130
     if near is not None and cands:                    # sticky: prefer the bar nearest last pos
         b = pick_near(cands, near, fo)
         if abs(b[0] - near[0]) <= near_tol and abs((b[1] + fo) - near[1]) <= near_tol:
+            if home is None or abs((b[1] + fo) - home[1]) <= home_tol_y:
+                bar = b
+    if bar is None and home is not None and cands:    # re-acquire near her usual spot
+        b = pick_near(cands, home, fo)
+        if abs(b[0] - home[0]) <= home_tol_x and abs((b[1] + fo) - home[1]) <= home_tol_y:
             bar = b
-    if bar is None:                                   # re-acquire: nearest screen center
+    if bar is None and home is None:                  # re-acquire: nearest screen center
         bar = pick_center(cands, bgr.shape)
     player = None if bar is None else (bar[0], bar[1] + fo)
     if debug:

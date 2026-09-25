@@ -391,6 +391,13 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             mobs, pbox = mob_detect.yolo_detect(_mm, frame, conf=_mconf, imgsz=_mimg,
                                                 class_conf=_cconf, near=last_px[0], max_jump=_pmax,
                                                 player_conf=_pconf)
+            if _anchor is not None and route and _mmy >= 0:
+                # her usual screen spot: x pooled over all floors (the camera centers her), feet y
+                # for THIS floor (the camera clamps vertically) -- find_player's home prior.
+                xs = sorted(p[0] for d in recent_pos.values() for p in d)
+                fy = sorted(p[1] for p in recent_pos[_floor_key(_mmy)])
+                _anchor.home = ((xs[len(xs) // 2], fy[len(fy) // 2])
+                                if len(xs) >= 5 and len(fy) >= 5 else None)
             pos, last_px[0] = _player_pos(_anchor, frame, pbox, last_px[0])
             if pos is None:
                 if route and edge_zone:                    # no lock near the edge: careful step

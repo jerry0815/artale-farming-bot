@@ -177,3 +177,42 @@ def test_composite_anchor_reacquires_after_sustained_rejection():
     for _ in range(3):
         assert c.locate(None) is None      # rejected while _good is fresh
     assert c.locate(None) == (999, 0)      # after 3 rejections _good dropped -> re-acquired
+
+
+# --- home prior (flat_sweep, 2026-09-24): after a push dash she moves > near_tol on screen, the
+# sticky lock fails, and the center pick grabbed a red sliver at the TOP of the screen (feet y 275
+# vs her ~798) and followed it. The camera keeps her at ~the same spot, so re-acquire near `home`.
+
+def test_lost_lock_reacquires_near_home_not_screen_center():
+    # her bar at (1020, 663); a sliver near screen center (800, 150); last lock far away (dash)
+    f = _frame([(1020, 663, 50, 8), (800, 150, 40, 8)])
+    p = player.find_player(f, cfg={"foot_offset": 135}, near=(500, 900), home=(1020, 798))
+    assert abs(p[0] - 1020) <= 4 and abs(p[1] - 798) <= 4
+
+
+def test_sticky_lock_at_the_wrong_height_is_rejected():
+    # last lock sits on the sliver (feet 285) -- but her floor's feet height is ~798
+    f = _frame([(1020, 663, 50, 8), (800, 150, 40, 8)])
+    p = player.find_player(f, cfg={"foot_offset": 135}, near=(800, 285), home=(1020, 798))
+    assert abs(p[0] - 1020) <= 4
+
+
+def test_sticky_lock_at_the_right_height_still_wins_over_home():
+    # camera clamped at a map end: she is legitimately far from home x, same height
+    f = _frame([(400, 663, 50, 8), (1020, 663, 50, 8)])
+    p = player.find_player(f, cfg={"foot_offset": 135}, near=(410, 798), home=(1020, 798))
+    assert abs(p[0] - 400) <= 4
+
+
+def test_hpbar_anchor_uses_its_home():
+    a = player.HPBarAnchor(cfg={"foot_offset": 135})
+    a.home = (1020, 798)
+    a.last = (500, 900)
+    f = _frame([(1020, 663, 50, 8), (800, 150, 40, 8)])
+    assert abs(a.locate(f)[0] - 1020) <= 4
+
+
+def test_with_home_and_nothing_near_it_returns_none_not_junk():
+    # her bar hidden by skill effects; only a sliver far from home -> None (caller rides last)
+    f = _frame([(800, 150, 40, 8)])
+    assert player.find_player(f, cfg={"foot_offset": 135}, home=(1020, 798)) is None
