@@ -124,7 +124,7 @@
   "same_platform_band": 180,
   "_band_note": "Only mobs whose feet are within this many screen px above/below her feet count (sweep decide is x-only). Levels here are ~600px apart, so 180 separates them. Without it she FIREd forever at upper-floor mobs in x-range. Override one side with band_up / band_down.",
   "push_edge_margin": 18,
-  "_rhythm_note": "Route attack legs: one z push, wait push_settle_secs, then HOLD x for aoe_hold_secs (continuous AoE). x hold 1.05s = 2 casts (recording median 1.06s; 1.6s = 3 casts was tried). z->x gap recording median 0.61s includes human reaction; 0.3 used. Push cooldown 1.5s: a push decided while it is still cooling down walks forward instead until it is ready. No push within push_edge_margin minimap px of the segment end (edge/portal/jump spot) -- AoE only. No mob on her level -> walk. Every push is preceded by a 0.2 s walk and fired while still moving (push_prewalk_secs): a push from a standstill sometimes glitched. At a segment end on an attack leg she first finishes the mobs in AoE range ahead (AoE only, up to finish_rounds=3 extra rounds, overshooting the point a little) before the transition. AoE until clear (AoE-ONLY actions, not the AoE after a push, which stays 2 casts): after the aoe_hold_secs minimum x stays held while a mob on her level is still in AoE range (re-detected every ~0.2 s while holding), capped at aoe_hold_max_secs (6).",
+  "_rhythm_note": "Route attack legs: one z push, wait push_settle_secs, then HOLD x for aoe_hold_secs (continuous AoE). x hold 1.05s = 2 casts (recording median 1.06s; 1.6s = 3 casts was tried). z->x gap recording median 0.61s includes human reaction; 0.3 used. Push cooldown 1.5s: a push decided while it is still cooling down walks forward instead until it is ready. No push within push_edge_margin minimap px of the segment end (edge/portal/jump spot) -- AoE only. No mob on her level -> walk. Every push is preceded by a 0.1 s walk and fired while still moving (push_prewalk_secs): a push from a standstill sometimes glitched. At a segment end on an attack leg she first finishes the mobs in AoE range ahead (AoE only, up to finish_rounds=3 extra rounds, overshooting the point a little) before the transition. AoE until clear (AoE-ONLY actions, not the AoE after a push, which stays 2 casts): after the aoe_hold_secs minimum x stays held while a mob on her level is still in AoE range (re-detected every ~0.2 s while holding), capped at aoe_hold_max_secs (6).",
   "aoe_hold_secs": 1.05,
   "push_settle_secs": 0.3,
   "portal_tol": 1,
@@ -137,7 +137,7 @@
   "portal_lead": 20,
   "portal_settle_secs": 0.1,
   "_anchor_reseed_note": "HP-bar tracker: after every transition it is re-seeded at her usual screen spot for the floor she is on (median of recent positions on that floor). A lock whose screen x moves >= 40 px AGAINST the heading for 2 beats while the minimap advances is scenery (a STOP-sign sliver) -> re-seed. After a portal she waits portal_settle_secs (0.5, trying shorter; the camera pan lasts ~1.5 s and the drift check catches a bad lock during the rest).",
-  "push_prewalk_secs": 0.2,
+  "push_prewalk_secs": 0.1,
   "finish_rounds": 3,
   "aoe_hold_max_secs": 6.0,
   "edge_step_secs": 3.0
