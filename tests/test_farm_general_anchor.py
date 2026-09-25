@@ -50,3 +50,28 @@ def test_dump_attack_writes_an_annotated_frame(tmp_path):
                                      200, 240, 1, outdir=str(tmp_path))
     assert path is not None and path.endswith("_seg4_GATHER.jpg")
     assert (frame == 0).all()                                     # annotates a copy, not the live frame
+
+
+# --- after a portal the camera pans and the HP bar jumps far on screen; the sticky tracker lost
+# her, re-acquired a red blob nearest screen center and followed it ~3 s (live: p drifted 821 -> 557
+# while the minimap showed her walking right, then snapped to ~1030). Re-seed it at her usual spot.
+
+class _Anchor:
+    last = (557, 812)
+
+
+def test_reanchor_seeds_the_tracker_at_her_usual_screen_spot():
+    a = _Anchor()
+    recent = [(1010, 712), (1030, 711), (1020, 710), (1147, 709), (1015, 712)]
+    farm_general._reanchor(a, recent)
+    assert a.last == (1020, 711)                         # median, not the stale wrong lock
+
+
+def test_reanchor_without_history_forgets_the_lock():
+    a = _Anchor()
+    farm_general._reanchor(a, [])
+    assert a.last is None                                 # -> find_player re-acquires fresh
+
+
+def test_reanchor_ignores_yolo_mode():
+    farm_general._reanchor(None, [(1, 2)])               # no HP-bar anchor: nothing to do

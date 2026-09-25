@@ -127,5 +127,7 @@
       ],
       "interval_secs": 600
     }
-  ]
+  ],
+  "portal_settle_secs": 0.8,
+  "_anchor_reseed_note": "After every transition the HP-bar tracker is re-seeded at her usual screen spot (median of the last 30 positions): a portal pans the camera, the sticky tracker lost her and followed another red blob for ~3 s (she walked 'blind', mobs beside her looked 400 px away). After a portal she also waits portal_settle_secs (0.8) for the camera pan."
 }

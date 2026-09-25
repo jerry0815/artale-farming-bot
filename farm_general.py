@@ -31,6 +31,21 @@ def _player_pos(anchor, frame, pbox, last):
     return last, last
 
 
+def _reanchor(anchor, recent):
+    """Re-seed the HP-bar tracker after a transition. A portal teleport pans the camera and the
+    bar jumps far on screen; the sticky tracker (near_tol) lost her, re-acquired a red blob nearest
+    screen center and followed it for ~3 s (live). Seed it at her usual screen spot (median of
+    recent good positions) so find_player locks onto the bar there; no history -> forget the lock
+    (fresh re-acquire). No-op in yolo_player mode (anchor None)."""
+    if anchor is None:
+        return
+    if recent:
+        xs = sorted(p[0] for p in recent); ys = sorted(p[1] for p in recent)
+        anchor.last = (xs[len(xs) // 2], ys[len(ys) // 2])
+    else:
+        anchor.last = None
+
+
 def _dump_attack(frame, mobs, kept, pos, act, seg_no, mmx, attack_range, reach, heading,
                  outdir="logs/sweep_dbg"):
     """debug_log: save the frame this attack decision was made on, annotated -- every mob box
@@ -211,6 +226,9 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     edge_wait = float(map_cfg.get("edge_wait_secs", 6.0))  # max stepping time hunting the edge
     edge_step_secs = float(map_cfg.get("edge_step_secs", 0.4))
     zone_walk = [0.0]
+    import collections as _col
+    recent_pos = _col.deque(maxlen=int(map_cfg.get("anchor_home_beats", 30)))  # her usual spot
+    portal_settle = float(map_cfg.get("portal_settle_secs", 0.8))   # camera pan after a portal
     # Recovery: phantom minimap reads are gated out; walking stuck_secs with no progress (a failed
     # jump/portal left her on a level where this segment's until_x is unreachable) -> resync.
     gate = sweep.MinimapGate(max_jump=int(map_cfg.get("mm_max_jump", 40)))
@@ -227,6 +245,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         print(f"[sweep] {why} at x={mmx} y={mmy} -> resync to segment {j + 1}")
         core.kb.safe_release_all()
         seg_i[0] = j; zone_walk[0] = 0.0
+        _reanchor(_anchor, list(recent_pos))
         core.STATUS["node"] = f"seg{j + 1}"
         return sweep.seg_heading(route[j])
 
@@ -239,6 +258,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         nxt = route[seg_i[0]]
         zone_walk[0] = 0.0
         gate.reset(); progress.reset()                 # a transition may teleport her (portal)
+        _reanchor(_anchor, list(recent_pos))           # the camera moved: re-seed the HP-bar lock
         core.STATUS["node"] = f"seg{seg_i[0] + 1}"
         print(f"[sweep] -> segment {seg_i[0] + 1}: {nxt['dir']} to x={nxt['until_x']}"
               f"{' (travel)' if not nxt.get('attack', True) else ''}")
@@ -314,6 +334,8 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                                                 read_xy=lambda: core.stable_char(2),
                                                 sleep=core.time.sleep,
                                                 align=lambda: _portal_align(seg, mmx, _mmy))
+                    if seg.get("then") == "up":
+                        core.time.sleep(portal_settle)     # let the camera finish panning first
                     heading = _advance(ok, mmx)
                     continue
                 if edge_zone and zone_walk[0] >= edge_wait:           # never found the edge
@@ -346,6 +368,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                     progress.mark_walking()
                 core.time.sleep(0.05); continue            # no player lock yet -> wait
             px, pfeet = pos
+            recent_pos.append(pos)
             # decide() is x-only: keep only mobs on HER level (feet within the band), else a mob on
             # the floor above/below that she can't hit pins her in FIRE forever.
             mob_xs = sweep.same_platform([(m[1] + m[3] // 2, m[2] + m[4]) for m in mobs], pfeet,
