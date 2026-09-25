@@ -19,7 +19,6 @@ ADVANCE = "ADVANCE"   # nothing ahead -> move to the next route segment
 FIRE = "FIRE"         # a mob is within attack_range -> AoE in place
 WALK = "WALK"         # a mob is ahead but out of range -> close on it (heading)
 GATHER = "GATHER"     # dash-scoop enough spread mobs into a clump, then AoE
-BACK = "BACK"         # route: mobs only behind her -> turn, AoE them, keep the route heading
 
 
 def same_platform(mobs, pfeet, band_up=180, band_down=180):
@@ -90,16 +89,6 @@ def apply_action(action, heading, keys, kb, sleep=lambda s: None,
         kb.safe_release(keys["left"] if heading > 0 else keys["right"])
         kb.safe_press(face)
         return heading
-    if action == BACK:                                   # turn to the mobs behind, AoE, no push
-        back = keys["left"] if heading > 0 else keys["right"]
-        kb.safe_release(keys["right"]); kb.safe_release(keys["left"])
-        kb.safe_press(back); sleep(face_gap); kb.safe_release(back)
-        if attack_hold:
-            kb.safe_press(keys["attack"]); sleep(attack_hold); kb.safe_release(keys["attack"])
-        else:
-            for _ in range(burst):
-                kb.safe_press(keys["attack"]); sleep(attack_dwell); kb.safe_release(keys["attack"])
-        return heading                                   # the route heading never flips
     # FIRE or GATHER: stop walking, face the heading, act in place.
     kb.safe_release(keys["right"]); kb.safe_release(keys["left"])
     if face_tap:
@@ -140,18 +129,52 @@ def near_seg_end(seg, mmx, margin=25):
 def route_attack(mob_xs, px, heading, attack_range, reach, near_edge, behind_tol=30):
     """Route attack-leg rhythm: one push (dash-scoop) then AoE -- or just AoE near the edge.
 
-    Returns GATHER (push + AoE), FIRE (AoE only: near_edge), BACK (mobs in range only BEHIND her:
-    turn and AoE them), or WALK (no mob on her level, or the nearest is ahead beyond push reach ->
-    close in). Push and AoE both fire FORWARD, so a mob behind her is only hit if she turns: live,
-    44/229 attacks were triggered by behind-only mobs and hit air while those mobs lived. A mob
-    within behind_tol px behind overlaps her body and still counts as ahead. Mobs ahead win.
+    Returns GATHER (push + AoE), FIRE (AoE only: near_edge), or WALK (no mob ahead within push
+    reach -> walk on / close in). Push and AoE both fire FORWARD and she keeps one direction per
+    segment (user), so mobs behind her (beyond behind_tol px, her body width) are left alone:
+    attacking forward for them hit air (live, 44/229 attacks). attack_range is kept for callers.
     mob_xs must already be same-platform filtered."""
     fwd = [(x - px) * heading for x in mob_xs]
     if any(-behind_tol <= d <= reach for d in fwd):
         return FIRE if near_edge else GATHER
-    if any(-attack_range <= d < -behind_tol for d in fwd):
-        return BACK
     return WALK
+
+
+def approach_x(target, heading, keys, kb, read_xy, sleep=lambda s: None, tol=2, back=6,
+               tap=0.045, poll=0.03, timeout=4.0):
+    """Stand on minimap x `target` ARRIVING MOVING IN `heading` (the portal-press side). The press
+    spot reads differently depending on the side she comes from; overshooting and correcting from
+    the other side made UP miss (live). If she is past the target, walk back until `back` px before
+    it, then approach in the heading with short taps (longer when far). True when within tol."""
+    fk = keys["right"] if heading > 0 else keys["left"]
+    bk = keys["left"] if heading > 0 else keys["right"]
+
+    def ahead():                                   # px still to go in the heading (<0: passed)
+        x = read_xy()[0]
+        return None if x is None or x < 0 else (target - x) * heading
+
+    waited = 0.0
+    for _ in range(3):
+        d = ahead()
+        if d is not None and d < -tol:             # passed it: back up past the approach point
+            kb.safe_press(bk)
+            while waited < timeout:
+                d = ahead()
+                if d is not None and d >= back:
+                    break
+                sleep(poll); waited += poll
+            kb.safe_release(bk)
+        for _ in range(40):
+            d = ahead()
+            if d is None:
+                sleep(poll); continue
+            if -tol <= d <= tol:
+                return True
+            if d < -tol:
+                break                              # overshot on a tap: back up again
+            kb.safe_press(fk); sleep(min(0.3, tap + 0.02 * d)); kb.safe_release(fk)
+            sleep(0.05)
+    return False
 
 
 def push_ready_or_walk(act, cd_left):

@@ -142,25 +142,16 @@ def test_route_attack_mob_overlapping_her_counts_as_ahead():
                               near_edge=False) == sweep.GATHER
 
 
-def test_route_attack_mob_only_behind_turns_back():
-    # 120 px behind, nothing ahead: push+AoE forward would hit air and leave it alive (live trace:
-    # 44/229 attacks were behind-only) -> BACK (turn, AoE, carry on)
+def test_route_attack_mob_only_behind_is_left_alone():
+    # push and AoE fire forward; turning back to hit it flips her direction (user: keep one
+    # direction), and attacking forward hits air -> walk on
     assert sweep.route_attack([380], px=500, heading=1, attack_range=200, reach=240,
-                              near_edge=False) == sweep.BACK
+                              near_edge=False) == sweep.WALK
 
 
 def test_route_attack_mobs_ahead_win_over_mobs_behind():
     assert sweep.route_attack([380, 600], px=500, heading=1, attack_range=200, reach=240,
                               near_edge=False) == sweep.GATHER
-
-
-def test_back_turns_aoes_and_keeps_the_route_heading():
-    kb = _KB()
-    h = sweep.apply_action(sweep.BACK, 1, KEYS, kb, attack_hold=1.05)
-    presses = [k for e, k in kb.events if e == "press"]
-    assert h == 1                                          # route heading unchanged
-    assert presses.index("L") < presses.index("x")         # face back first, then AoE
-    assert "z" not in presses                              # no push backwards
 
 
 def test_combo_presses_push_once_then_two_aoe():
@@ -380,3 +371,43 @@ def test_edge_jump_descent_started_is_not_cut_short_by_the_step_timer():
                               read_xy=_reader([(195, 55), (195, 57), (195, 58), (195, 59), (195, 60)]),
                               walk=0.06, poll=0.03, level=55)
     assert fell is True and ("press", "J") in kb.events
+
+
+
+# --- portal: the press spot reads differently depending on the side she arrives from (user).
+# Recorded presses were all walking LEFT into it; overshooting then walk_to_x-ing back RIGHT made UP
+# miss and retry (6-10 s per portal, live). approach_x always finishes moving in the heading.
+
+class _World:
+    """Tiny sim: holding a direction key moves minimap x at `speed` px/s while sleep() runs."""
+    def __init__(self, x, speed=14.0):
+        self.x, self.speed, self.held, self.events = float(x), speed, None, []
+    def safe_press(self, k): self.held = k; self.events.append(("press", k))
+    def safe_release(self, k):
+        if self.held == k: self.held = None
+        self.events.append(("release", k))
+    def safe_release_all(self): self.held = None
+    def sleep(self, dt):
+        if self.held in ("R", "L"):
+            self.x += self.speed * dt * (1 if self.held == "R" else -1)
+    def read(self): return (round(self.x), 106)
+
+
+def _last_dir(events):
+    return [k for e, k in events if e == "press" and k in ("R", "L")][-1]
+
+
+def test_approach_from_past_the_portal_backs_up_then_arrives_moving_left():
+    w = _World(209)                                  # overshot the 219 portal walking left
+    ok = sweep.approach_x(219, -1, KEYS, w, w.read, w.sleep, tol=2)
+    assert ok is True
+    assert ("press", "R") in w.events                # backed up past it
+    assert _last_dir(w.events) == "L"                # ...and came back in walking LEFT
+    assert 217 <= w.x <= 221
+
+
+def test_approach_from_the_right_side_only_moves_left():
+    w = _World(235)
+    assert sweep.approach_x(219, -1, KEYS, w, w.read, w.sleep, tol=2) is True
+    assert ("press", "R") not in w.events
+    assert 217 <= w.x <= 221
