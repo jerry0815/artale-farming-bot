@@ -144,8 +144,10 @@ def seg_done(seg, mmx, mmy=None, y_tol=6):
 def near_seg_end(seg, mmx, margin=25):
     """True when she is within `margin` minimap px of the segment's end (until_x) in its heading.
     Route segment ends are where the platform edge / portal / jump spot is, so a forward push
-    there would dash her past it -- the loop skips the push near here."""
-    return (seg["until_x"] - mmx) * seg_heading(seg) <= margin
+    there would dash her past it -- the loop skips the push near here. A segment may carry "edge_x"
+    when its platform edge is not its end point (e.g. it ends on landing, until_y)."""
+    end = seg.get("edge_x", seg["until_x"])      # the platform edge, when it isn't the end point
+    return (end - mmx) * seg_heading(seg) <= margin
 
 
 def route_attack(mob_xs, px, heading, attack_range, reach, near_edge, behind_tol=30):

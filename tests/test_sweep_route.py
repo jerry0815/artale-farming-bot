@@ -508,3 +508,14 @@ def test_aoe_without_keep_holding_is_the_fixed_hold():
     kb, slept = _KB(), []
     sweep.apply_action(sweep.FIRE, 1, KEYS, kb, sleep=slept.append, attack_hold=1.05)
     assert 1.05 in slept and [k for e, k in kb.events if e == "press"].count("x") == 1
+
+
+# --- edge_x: the platform edge is not always the segment end. flat_sweep segment 6 walks off the
+# upper floor's left edge at minimap x ~83 (recording, 3 laps) but ends on LANDING (until_y), with
+# until_x 45 only a fallback -- so the no-push zone must be measured from the edge, not until_x.
+
+def test_near_seg_end_uses_edge_x_when_given():
+    seg = {"dir": "left", "until_x": 45, "until_y": 99, "edge_x": 83}
+    assert sweep.near_seg_end(seg, 100, margin=18) is True      # 17 px before the real edge
+    assert sweep.near_seg_end(seg, 110, margin=18) is False
+    assert sweep.near_seg_end({"dir": "left", "until_x": 45}, 100, margin=18) is False
