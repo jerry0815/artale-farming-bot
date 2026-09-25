@@ -584,3 +584,11 @@ def test_landing_state_fell_below():
 
 def test_landing_state_gives_up_waiting():
     assert sweep.landing_state(2.5, 55, target_y=62) == "timeout"
+
+
+def test_segment_without_an_edge_never_blocks_the_push():
+    # flat_sweep segment 1 ends at a turnaround in the middle of the bottom floor (it continues to
+    # ~315): overshooting with a push is harmless, so no no-push zone before its end.
+    seg = {"dir": "right", "until_x": 275, "edge": False}
+    assert sweep.near_seg_end(seg, 274, margin=18) is False
+    assert sweep.near_seg_end({"dir": "right", "until_x": 275}, 274, margin=18) is True
