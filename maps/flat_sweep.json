@@ -128,6 +128,6 @@
       "interval_secs": 600
     }
   ],
-  "portal_settle_secs": 1.5,
-  "_anchor_reseed_note": "HP-bar tracker: after every transition it is re-seeded at her usual screen spot for the floor she is on (median of recent positions on that floor). A lock whose screen x moves >= 40 px AGAINST the heading for 2 beats while the minimap advances is scenery (a STOP-sign sliver) -> re-seed. After a portal she waits portal_settle_secs (1.5; mob positions were still shifting ~1.5 s after the teleport)."
+  "portal_settle_secs": 0.5,
+  "_anchor_reseed_note": "HP-bar tracker: after every transition it is re-seeded at her usual screen spot for the floor she is on (median of recent positions on that floor). A lock whose screen x moves >= 40 px AGAINST the heading for 2 beats while the minimap advances is scenery (a STOP-sign sliver) -> re-seed. After a portal she waits portal_settle_secs (0.5, trying shorter; the camera pan lasts ~1.5 s and the drift check catches a bad lock during the rest)."
 }
