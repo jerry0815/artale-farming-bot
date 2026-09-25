@@ -8,6 +8,11 @@ import os
 _MODEL_PATH = os.path.join("models", "lie_check_yolo.pt")
 _CLASS_NAMES = {0: "monster_check", 1: "curse", 2: "transparent_shape"}
 _model_cache = {}          # path -> model, or False for known-absent/failed
+# Minimum box width as a fraction of the frame, per class. Real monster_check popups are >= 18%
+# of the frame wide (111 training labels, median 23%); on flat_sweep the model boxed tall
+# skyscrapers as monster_check at 0.84-0.97 conf, 5-15% wide (the training set had no
+# popup-free background frames).
+_MIN_W_FRAC = {"monster_check": 0.17}
 
 
 def reset_cache():
@@ -44,8 +49,12 @@ def detect_lie_check_yolo(frame, conf=0.35, model_path=_MODEL_PATH, imgsz=1280):
         print(f"[lie-yolo] predict failed: {e}")
         return []
     out = []
+    fw = float(frame.shape[1])
     for b in r.boxes:
         cls = int(b.cls[0]); c = float(b.conf[0])
         x0, y0, x1, y1 = (float(v) for v in b.xyxy[0])
-        out.append((_CLASS_NAMES.get(cls, str(cls)), c, (x0, y0, x1, y1)))
+        name = _CLASS_NAMES.get(cls, str(cls))
+        if (x1 - x0) / fw < _MIN_W_FRAC.get(name, 0.0):
+            continue                                   # too narrow to be that popup
+        out.append((name, c, (x0, y0, x1, y1)))
     return out

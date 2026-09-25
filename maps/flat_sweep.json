@@ -55,7 +55,7 @@
       "dir": "left",
       "until_x": 215,
       "then": "up",
-      "attack": false,
+      "attack": true,
       "y": 106
     },
     {
