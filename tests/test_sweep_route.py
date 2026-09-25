@@ -519,3 +519,27 @@ def test_near_seg_end_uses_edge_x_when_given():
     assert sweep.near_seg_end(seg, 100, margin=18) is True      # 17 px before the real edge
     assert sweep.near_seg_end(seg, 110, margin=18) is False
     assert sweep.near_seg_end({"dir": "left", "until_x": 45}, 100, margin=18) is False
+
+
+# --- smooth edge walk: one continuous walk to the slope bottom that only stops when a mob comes
+# into range (interrupt), instead of 0.4 s steps with a full stop + detection beat between them.
+
+def test_edge_walk_stops_only_when_interrupted():
+    kb = _KB()
+    calls = iter([False, False, True])
+    fell = sweep.walk_to_edge(1, KEYS, kb, read_xy=_reader([(195, 55)]), walk=5.0, poll=0.05,
+                              level=55, interrupt=lambda: next(calls), check_every=0.1)
+    assert fell is False and ("press", "J") not in kb.events
+    assert kb.events[-1] == ("release", "R")               # stopped to fight
+
+
+def test_edge_walk_never_checks_mobs_once_on_the_slope():
+    kb = _KB()
+    checked = []
+    def interrupt():
+        checked.append(1); return False
+    # descent starts on the 2nd read: no mob checks may delay the jump after that
+    fell = sweep.walk_to_edge(1, KEYS, kb,
+                              read_xy=_reader([(195, 55), (195, 57), (195, 58), (195, 59), (195, 60)]),
+                              walk=5.0, poll=0.05, level=55, interrupt=interrupt, check_every=0.05)
+    assert fell is True and len(checked) <= 1

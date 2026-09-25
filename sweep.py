@@ -229,7 +229,7 @@ def _jump(keys, kb, sleep, land=1.0):
 
 def walk_to_edge(heading, keys, kb, read_xy, sleep=lambda s: None, walk=0.4, poll=0.03,
                  jump_dy=5, commit_dy=2, commit_max=1.0, x_win=12, land=1.0, base=None,
-                 level=None):
+                 level=None, interrupt=None, check_every=0.25):
     """Walk `heading` for up to `walk` s toward the edge_jump gap and jump at the SLOPE BOTTOM.
 
     The upper platform slopes down (minimap y 55 -> ~62) to the gap; recorded laps jump when the
@@ -240,12 +240,17 @@ def walk_to_edge(heading, keys, kb, read_xy, sleep=lambda s: None, walk=0.4, pol
     (y >= level + commit_dy) the step is not cut short by `walk` (up to commit_max more s).
     No trigger: release, return False WITHOUT jumping so the loop can check for mobs. Reads more
     than x_win px from base x are phantoms and ignored. level=None -> first good read's y.
-    read_xy must be FAST (single read)."""
+    read_xy must be FAST (single read).
+    interrupt: optional callable checked every check_every s while still on the flat part; True (a
+    mob came into range) -> stop and return False so the loop can fight. This makes the approach one
+    continuous walk instead of short steps with a full stop between them. Never checked once the
+    descent has started (the jump window is ~0.2 s; a detection must not delay it)."""
     face = keys["right"] if heading > 0 else keys["left"]
     kb.safe_press(face)
     x0 = base[0] if base is not None else None
     y_lvl = level if level is not None else (base[1] if base is not None else None)
     waited, limit, committed = 0.0, walk, False
+    next_check = check_every
     while waited < limit:
         x, y = read_xy()
         if x is not None and x >= 0 and y is not None and y >= 0:
@@ -260,6 +265,10 @@ def walk_to_edge(heading, keys, kb, read_xy, sleep=lambda s: None, walk=0.4, pol
                     return True
                 if not committed and y - y_lvl >= commit_dy:
                     committed, limit = True, waited + commit_max   # on the slope: finish it
+        if interrupt is not None and not committed and waited >= next_check:
+            next_check = waited + check_every
+            if interrupt():                           # a mob in range: stop and fight
+                break
         sleep(poll); waited += poll
     kb.safe_release(face)
     return False

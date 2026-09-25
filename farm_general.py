@@ -250,7 +250,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         return "ok"
 
     edge_wait = float(map_cfg.get("edge_wait_secs", 6.0))  # max stepping time hunting the edge
-    edge_step_secs = float(map_cfg.get("edge_step_secs", 0.4))
+    edge_step_secs = float(map_cfg.get("edge_step_secs", 3.0))  # one continuous walk (stops for mobs)
     zone_walk = [0.0]
     import collections as _col
     home_n = int(map_cfg.get("anchor_home_beats", 30))
@@ -348,13 +348,17 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                                 sleep=core.time.sleep, tol=portal_tol)
 
     def edge_step(heading, mmx, mmy):
-        """One short step toward the edge_jump edge; on the walk-off it air-jumps and the route
-        advances. Fast single reads tracked near her (a fall gives ~0.2 s to react)."""
+        """Walk on toward the edge_jump edge in ONE continuous walk (up to edge_step_secs) that only
+        stops when a mob comes into range; at the slope bottom it jumps and the route advances. Fast
+        single minimap reads tracked near her (the jump window is ~0.2 s)."""
+        t_walk = core.time.time()
         fell = sweep.walk_to_edge(heading, keys, core.kb,
                                   read_xy=lambda: core.get_character_color(near=(mmx, mmy)),
                                   sleep=core.time.sleep, walk=edge_step_secs, poll=0.03,
-                                  base=(mmx, mmy), level=route[seg_i[0]].get("y"))
-        zone_walk[0] += edge_step_secs
+                                  base=(mmx, mmy), level=route[seg_i[0]].get("y"),
+                                  interrupt=lambda: _still_in_range(heading, core.time.time()),
+                                  check_every=0.25)
+        zone_walk[0] += core.time.time() - t_walk
         if fell:
             print(f"[sweep] segment {seg_i[0] + 1}: slope bottom -> jump")
             return _advance(True, mmx)
