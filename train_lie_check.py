@@ -1,7 +1,8 @@
 """Train YOLO11n on the lie-check dataset -> models/lie_check_yolo.pt.
 
 Usage:  python train_lie_check.py [epochs]   # default 120
-Prereqs: run `python make_lie_check_data.py` first (datasets/lie_check_yolo/{images,labels}).
+Prereqs: run `python make_lie_check_data.py` first (datasets/lie_check_yolo/{images,labels});
+`python make_lie_check_data.py --backgrounds-only` refreshes just the popup-free negatives.
 """
 import os, sys, glob, shutil
 
@@ -28,8 +29,13 @@ def main():
     synth = sorted(glob.glob(os.path.join(DATA_ROOT, "images", "synth_*.png")))
     if not real and not synth:
         print(f"[train] no images in {DATA_ROOT}/images -- run make_lie_check_data.py first"); return
+    # Popup-free background negatives (bg_*, empty labels; make_lie_check_data.add_backgrounds):
+    # 1 in 5 also go to val so best.pt selection penalizes false boxes, not just misses.
+    bg = sorted(glob.glob(os.path.join(DATA_ROOT, "images", "bg_*.png")))
     train_real, val = assign_split(real)
-    train = train_real + synth
+    bg_train, bg_val = assign_split(bg)
+    train = train_real + synth + bg_train
+    val = val + bg_val
     _write_list(os.path.join(DATA_ROOT, "train.txt"), train)
     _write_list(os.path.join(DATA_ROOT, "val.txt"), val or train[:1])
 

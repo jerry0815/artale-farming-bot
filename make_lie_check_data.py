@@ -78,6 +78,58 @@ def _write(out_root, name, img, label_line):
         f.write(label_line)
 
 
+# Popup-free frames added as background negatives (empty labels). Without any, the model boxed the
+# Singapore city maps' tall skyscrapers as monster_check at 0.84-0.97 conf. (source dir, how many
+# diverse frames to take via farthest-point sampling). The rest of each source is held out for eval.
+BG_SOURCES = [("datasets/flat_sweep/images", 120),
+              ("datasets/mobs_real/images", 40)]
+NEGATIVES_DIR = "datasets/lie_check/negatives"      # known false-alarm frames: always included
+
+
+def pick_backgrounds(src_dir, n):
+    """Paths of the n most mutually different frames in src_dir (farthest-point sampling)."""
+    from select_diverse_frames import frame_feature, farthest_point_select
+    paths = sorted(glob.glob(os.path.join(src_dir, "*.png")))
+    feats = []
+    for p in paths:
+        img = cv2.imread(p)
+        feats.append(frame_feature(img) if img is not None else None)
+    ok = [i for i, f in enumerate(feats) if f is not None]
+    idx, _gaps = farthest_point_select([feats[i] for i in ok], n)
+    return [paths[ok[i]] for i in idx]
+
+
+def held_out_backgrounds(src_dir, n):
+    """The frames of src_dir NOT picked by pick_backgrounds(src_dir, n) -- an unseen eval set."""
+    picked = set(pick_backgrounds(src_dir, n))
+    return [p for p in sorted(glob.glob(os.path.join(src_dir, "*.png"))) if p not in picked]
+
+
+def add_backgrounds(out_root="datasets/lie_check_yolo", sources=None, negatives_dir=NEGATIVES_DIR):
+    """(Re)write bg_*.png popup-free frames with EMPTY label files into out_root, replacing any
+    previous bg_* (positives untouched). Returns how many were written."""
+    sources = BG_SOURCES if sources is None else sources
+    img_dir = os.path.join(out_root, "images"); lbl_dir = os.path.join(out_root, "labels")
+    os.makedirs(img_dir, exist_ok=True); os.makedirs(lbl_dir, exist_ok=True)
+    for f in glob.glob(os.path.join(img_dir, "bg_*")) + glob.glob(os.path.join(lbl_dir, "bg_*")):
+        os.remove(f)
+    paths = []
+    for src_dir, n in sources:
+        if os.path.isdir(src_dir):
+            paths += pick_backgrounds(src_dir, n)
+    if negatives_dir and os.path.isdir(negatives_dir):
+        paths += sorted(glob.glob(os.path.join(negatives_dir, "*.png")))
+    k = 0
+    for p in paths:
+        frame = cv2.imread(p)
+        if frame is None:
+            continue
+        _write(out_root, f"bg_{k:05d}", frame, "")
+        k += 1
+    print(f"[data] wrote {k} background (popup-free) frames to {out_root}")
+    return k
+
+
 def build(out_root="datasets/lie_check_yolo", n_synth=100, seed=0):
     random.seed(seed)
     img_dir = os.path.join(out_root, "images"); lbl_dir = os.path.join(out_root, "labels")
@@ -165,8 +217,12 @@ def build(out_root="datasets/lie_check_yolo", n_synth=100, seed=0):
                        to_yolo_label(box, img.shape[1], img.shape[0], CLASSES[cls_name]))
                 n += 1
     print(f"[data] wrote {n} labeled frames to {out_root}")
+    add_backgrounds(out_root)                          # popup-free negatives (kept on rebuild)
     return n
 
 
 if __name__ == "__main__":
-    build(n_synth=int(sys.argv[1]) if len(sys.argv) > 1 else 200)
+    if len(sys.argv) > 1 and sys.argv[1] == "--backgrounds-only":
+        add_backgrounds()                              # add negatives without regenerating positives
+    else:
+        build(n_synth=int(sys.argv[1]) if len(sys.argv) > 1 else 200)
