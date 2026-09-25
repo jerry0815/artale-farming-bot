@@ -10,12 +10,10 @@
     "min_h": 6,
     "max_h": 10,
     "max_w": 72,
-    "feet_band": [
-      0.5,
-      0.9
-    ]
+    "structure": true,
+    "frame_w": 68
   },
-  "_player_note": "HP-bar anchor shape for this map: your floating HP bar is ~7-8px tall (width varies with HP%, ~43-56 seen). The default accepted any red blob 2-16px tall, so near the map ends (camera clamped, you off-center) it grabbed STOP-sign mob parts, the red medal banner under your name (12px), bin signs and mob HP bars (4px), and damage numbers. Checked on the 646 captured frames. Remaining weak spot: big damage numbers covering your bar mid-attack. feet_band [0.5, 0.9]: her feet are never in the top half of the screen here (seen 0.62-0.86 of the height); at the start (no usual-spot history yet) the tracker locked a red object near the top (feet 365/1135) and she pushed at upper-floor mobs.",
+  "_player_note": "HP-bar anchor shape for this map: your floating HP bar is ~7-8px tall (width varies with HP%, ~43-56 seen). The default accepted any red blob 2-16px tall, so near the map ends (camera clamped, you off-center) it grabbed STOP-sign mob parts, the red medal banner under your name (12px), bin signs and mob HP bars (4px), and damage numbers. Checked on the 646 captured frames. Remaining weak spot: big damage numbers covering your bar mid-attack. structure+frame_w (2026-09-24): her floating HP bar is a black-bordered frame ~68 px wide (at this window size) with the red fill from its left border; a red blob inside such a frame wins outright, and with no framed bar visible only a blob next to her last lock may stand in. Replay of 646 frames: wrong pick when her bar was visible 97/482 -> 0, >300 px jumps 6 -> 0. Replaces the feet_band height restriction. frame_w only breaks ties (e.g. outlined damage digits).",
   "attack_key": "x",
   "_attack_key_note": "x = AoE attack (no cooldown).",
   "attack_range": 200,

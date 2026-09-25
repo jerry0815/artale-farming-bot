@@ -231,3 +231,56 @@ def test_feet_band_drops_candidates_high_on_screen():
 def test_no_feet_band_by_default():
     f = _frame([(800, 150, 40, 8)])
     assert player.find_player(f, cfg={"foot_offset": 135}) is not None
+
+
+# --- bar structure (flat_sweep): her floating HP bar is a black-bordered frame ~68 px wide with the
+# red fill starting at its left border and a dark empty part to the right. STOP-sign slivers and
+# damage digits are red but lack that frame (or the frame is too short).
+
+def _hp_bar(f, x_left, y_top, frame_w=68, fill=50, h=12):
+    f[y_top:y_top + h, x_left:x_left + frame_w] = (15, 15, 15)             # black frame
+    f[y_top + 2:y_top + h - 2, x_left + 2:x_left + frame_w - 2] = (90, 80, 90)   # empty part
+    f[y_top + 2:y_top + h - 2, x_left + 2:x_left + 2 + fill] = (30, 30, 230)      # red fill
+    return f
+
+
+def test_structure_keeps_the_framed_bar_and_drops_a_bare_sliver():
+    f = np.full((1000, 1600, 3), (200, 200, 200), np.uint8)             # light background
+    _hp_bar(f, 400, 594)                                                   # her bar (bar y ~600)
+    f[596:604, 780:810] = (30, 30, 230)                                    # bare red sliver
+    cands = player.bar_candidates(f, cfg={"min_h": 6, "max_h": 10})
+    ok = [c for c in cands if player.bar_structure_ok(f, c, frame_w=68)]
+    assert len(ok) == 1 and abs(ok[0][0] - 427) <= 4
+
+
+def test_structure_rejects_a_framed_blob_with_the_wrong_frame_length():
+    # a damage digit with a dark outline: framed, but the frame stops ~30 px, not 68
+    f = np.full((1000, 1600, 3), (200, 200, 200), np.uint8)
+    _hp_bar(f, 400, 594, frame_w=30, fill=26)
+    c = player.bar_candidates(f, cfg={"min_h": 6, "max_h": 10})
+    assert c and not player.bar_structure_ok(f, c[0], frame_w=68)
+
+
+def test_structure_low_hp_bar_still_passes():
+    f = np.full((1000, 1600, 3), (200, 200, 200), np.uint8)
+    _hp_bar(f, 400, 594, fill=18)                                          # ~28% HP (a fill < 2x its height was never a candidate)
+    c = player.bar_candidates(f, cfg={"min_h": 6, "max_h": 10, "min_w": 10})
+    assert c and player.bar_structure_ok(f, c[0], frame_w=68)
+
+
+def test_find_player_structure_cfg_ignores_the_sliver():
+    f = np.full((1000, 1600, 3), (200, 200, 200), np.uint8)
+    _hp_bar(f, 400, 594)
+    f[496:504, 785:815] = (30, 30, 230)                                    # sliver nearer center
+    p = player.find_player(f, cfg={"min_h": 6, "max_h": 10, "structure": True, "frame_w": 68})
+    assert abs(p[0] - 427) <= 4
+
+
+def test_structure_mode_covered_bar_waits_instead_of_grabbing_a_far_blob():
+    # her framed bar is covered (not visible); a bare sliver 400 px away -> None (ride last),
+    # not the sliver (live replay: the fallback flip-flopped 892 <-> 1294 px)
+    f = np.full((1000, 1600, 3), (200, 200, 200), np.uint8)
+    f[596:604, 830:860] = (30, 30, 230)
+    p = player.find_player(f, cfg={"min_h": 6, "max_h": 10, "structure": True, "frame_w": 68},
+                           near=(427, 735), home=(1020, 735))
+    assert p is None

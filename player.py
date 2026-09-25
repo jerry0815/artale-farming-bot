@@ -9,6 +9,8 @@ the game (operates on a passed frame); the geometry filters are unit-testable.
 Tunables live in a map config under "player" (all optional):
   {"foot_offset":135, "hue_lo":120, "region":[x0,y0,x1,y1],
    "min_w":18,"max_w":140,"min_h":2,"max_h":16, "feet_band":[lo, hi]}
+structure: keep only red blobs inside the HP-bar FRAME (bar_structure_ok) -- a dark border above,
+below and left of the fill, and (with frame_w) a top border frame_w +- frame_tol px long.
 feet_band: allowed feet y as fractions of the frame height (a candidate implying feet outside it is
 ignored) -- e.g. [0.5, 0.9] when the camera never shows the player in the top half.
 """
@@ -16,7 +18,8 @@ import time as _t
 import cv2
 import numpy as np
 
-DEFAULTS = dict(foot_offset=135, hue_lo=120, min_w=18, max_w=140, min_h=2, max_h=16, feet_band=None)
+DEFAULTS = dict(foot_offset=135, hue_lo=120, min_w=18, max_w=140, min_h=2, max_h=16, feet_band=None,
+                structure=False, frame_w=None, frame_tol=8)
 
 
 def _red_mask(bgr, sat_val_lo=120):
@@ -43,6 +46,44 @@ def bar_candidates(bgr, region=None, cfg=None):
         if c["min_w"] <= bw <= c["max_w"] and c["min_h"] <= bh <= c["max_h"] and bw >= bh * 2:
             out.append((int(cent[i][0]) + x0, int(cent[i][1]) + y0, bw, bh))
     return out
+
+
+def _frame_extent(v, x_left, y, dark, gap=2):
+    """Length of the dark run along row y starting at x_left (tolerates `gap` light pixels)."""
+    x, miss = x_left, 0
+    while x + 1 < v.shape[1] and miss <= gap:
+        x += 1
+        miss = 0 if v[y, x] < dark else miss + 1
+    return x - miss - x_left + 1
+
+
+def bar_structure_ok(bgr, cand, frame_w=None, frame_tol=8, dark=70, border=0.8):
+    """Is this red blob the fill of the floating HP bar? The bar is a black-bordered frame (the
+    same game UI element for every character): dark rows just above and below the red run and a
+    dark column just left of it (each >= `border` of its length), and -- given frame_w -- the top
+    border runs frame_w +- frame_tol px from the left border whatever the HP (the empty part sits
+    inside the same frame). STOP-sign slivers have no border; outlined damage digits have one that
+    stops at the digit. Measured on 646 flat_sweep frames: her bar scores 1.0/1.0/1.0 with a 68-69 px
+    frame; slivers fail a border, digit outlines run 30-51 px."""
+    cx, cy, w, h = cand
+    x0 = cx - w // 2; x1 = x0 + w - 1; y0 = cy - h // 2; y1 = y0 + h - 1
+    H, W = bgr.shape[:2]
+    if x0 - 4 < 0 or y0 - 4 < 0 or y1 + 4 >= H or x1 + 1 >= W:
+        return False
+    v = cv2.cvtColor(bgr[y0 - 4:y1 + 5], cv2.COLOR_BGR2HSV)[:, :, 2].astype(int)
+    oy = y0 - 4                                           # v's row 0 = frame row y0-4
+    rows_top = [(v[y - oy, x0:x1 + 1] < dark).mean() for y in range(y0 - 3, y0)]
+    rows_bot = [(v[y - oy, x0:x1 + 1] < dark).mean() for y in range(y1 + 1, y1 + 4)]
+    cols_left = [(v[y0 - oy:y1 - oy + 1, x] < dark).mean() for x in range(x0 - 3, x0)]
+    if min(max(rows_top), max(rows_bot), max(cols_left)) < border:
+        return False
+    if frame_w is None:
+        return True
+    ty = y0 - 3 + max(range(3), key=lambda i: rows_top[i])   # the top border row
+    xl = x0
+    while xl - 1 >= 0 and v[ty - oy, xl - 1] < dark:
+        xl -= 1
+    return abs(_frame_extent(v, xl, ty - oy, dark) - frame_w) <= frame_tol
 
 
 def pick_center(cands, frame_shape, y_weight=0.4, y_focus=0.45):
@@ -229,6 +270,31 @@ def find_player(bgr, region=None, cfg=None, debug=False, near=None, near_tol=130
     c = {**DEFAULTS, **(cfg or {})}
     fo = c["foot_offset"]
     cands = bar_candidates(bgr, region=region, cfg=c)
+    if c.get("structure") and cands:                  # a blob inside the HP-bar FRAME wins outright
+        framed = [b for b in cands if bar_structure_ok(bgr, b)]
+        if framed and c.get("frame_w") and len(framed) > 1:   # frame length breaks ties (digits)
+            sized = [b for b in framed if bar_structure_ok(bgr, b, c["frame_w"], c["frame_tol"])]
+            framed = sized or framed
+        if framed:
+            # strongest evidence: skip the height/home plausibility rules -- during a camera pan
+            # her real (framed) bar sits at an unusual height and those rules rejected it.
+            ref = near or home
+            bar = framed[0] if len(framed) == 1 else (
+                pick_near(framed, ref, fo) if ref else pick_center(framed, bgr.shape))
+            player = (bar[0], bar[1] + fo)
+            if debug:
+                return {"player": player, "bar": bar, "candidates": cands}
+            return player
+        # none framed (her border crossed by a damage number / effect): with a recent lock, only a
+        # blob right next to it may stand in; anything else waits for the framed bar to reappear
+        # (the loop rides her last position) -- the home re-acquire grabbed objects 400 px away.
+        if near is not None:
+            b = pick_near(cands, near, fo)
+            ok = abs(b[0] - near[0]) <= near_tol and abs((b[1] + fo) - near[1]) <= near_tol
+            player = (b[0], b[1] + fo) if ok else None
+            if debug:
+                return {"player": player, "bar": b if ok else None, "candidates": cands}
+            return player
     if c.get("feet_band"):                            # implausible screen height -> not her bar
         H = bgr.shape[0]
         lo, hi = c["feet_band"]
