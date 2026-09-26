@@ -272,3 +272,51 @@ def test_enemy_check_runs_at_most_once_per_second(monkeypatch):
     farm_general.farming_loop_general(cfg, enemy_check=lambda: calls.append(1) or False,
                                       max_seconds=3)
     assert 2 <= len(calls) <= 4                                # ~3 s of beats -> ~3 checks, not ~20+
+
+
+def test_a_single_mid_air_read_does_not_count_as_landed(monkeypatch, capsys):
+    """Live 2026-09-26: 'landed (y=59) 0.57s after the jump' from one read taken while she passed the
+    platform height mid-arc; the jump actually failed, she fell to the bottom, and the route
+    stayed on the platform segment. Landing now needs two in-range reads in a row."""
+    import sweep as sw
+    kb = core.kb
+    monkeypatch.setattr(kb, "pause", False, raising=False)
+    for k in ("safe_press", "safe_release"):
+        monkeypatch.setattr(kb, k, lambda key: None)
+    monkeypatch.setattr(kb, "safe_release_all", lambda: None)
+    clock = [1000.0]
+    reads = iter([(196, 55), (200, 50), (203, 59), (206, 70), (208, 90), (210, 106)])
+    def stable_char(n=3):
+        clock[0] += 0.3
+        return next(reads, (210, 106))
+    for name, fn in {"focus": lambda: True, "set_minimap": lambda *a: None,
+                     "ensure_game_focused": lambda **k: True, "lie_check_fast_tick": lambda: None,
+                     "is_lie_check_active": lambda: False, "capture": lambda: object(),
+                     "make_exp_tracker": lambda **k: (lambda: None), "stable_char": stable_char,
+                     "start_safety_monitor": lambda *a, **k: None,
+                     "make_active_timer": lambda: (lambda now: None, lambda now: None)}.items():
+        monkeypatch.setattr(core, name, fn, raising=False)
+    monkeypatch.setattr(core.time, "time", lambda: clock[0])
+    monkeypatch.setattr(core.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    import mob_detect
+    monkeypatch.setattr(mob_detect, "load_yolo", lambda p: object())
+    n = [0]
+    def detect(*a, **k):
+        n[0] += 1
+        if n[0] > 3:
+            core.STOP.set()
+        return ([], (0.9, 1000, 300, 40, 70))
+    monkeypatch.setattr(mob_detect, "yolo_detect", detect)
+    monkeypatch.setattr(sw, "walk_to_edge", lambda *a, **k: True)
+    route = [{"dir": "right", "until_x": 195, "then": "edge_jump", "attack": True, "y": 55},
+             {"dir": "right", "until_x": 320, "then": None, "attack": True, "y": 62, "until_y": 102},
+             {"dir": "left", "until_x": 215, "then": "up", "attack": True, "y": 106}]
+    cfg = {"loop": "sweep", "anchor": "yolo_player", "attack_key": "x",
+           "minimap": {"x": 0, "y": 0, "w": 10, "h": 10}, "route": route}
+    core.STOP.clear()
+    farm_general.farming_loop_general(cfg, max_seconds=30)
+    out = capsys.readouterr().out
+    # no false landing; the miss drops her on the bottom, which is where the platform leg ends
+    # (until_y) -> straight on to the bottom leg (the user's "should be segment 5")
+    assert "landed (" not in out and "jump fell short -- already at segment 2's end" in out, out
+    assert "-> segment 3: left to x=215" in out, out

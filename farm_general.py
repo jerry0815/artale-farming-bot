@@ -271,6 +271,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     edge_wait = float(map_cfg.get("edge_wait_secs", 6.0))  # max stepping time hunting the edge
     edge_step_secs = float(map_cfg.get("edge_step_secs", 3.0))  # one continuous walk (stops for mobs)
     air = [None]                    # (jump time, landing platform y) while airborne after a jump
+    land_hits = [0]                 # consecutive in-range reads (one mid-arc read is not a landing)
     zone_walk = [0.0]
     import collections as _col
     home_n = int(map_cfg.get("anchor_home_beats", 30))
@@ -451,7 +452,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             print(f"[sweep] segment {seg_i[0] + 1}: slope bottom -> jump")
             nxt = route[(seg_i[0] + 1) % len(route)]
             if nxt.get("y") is not None:                   # regular beats + a landing check
-                air[0] = (core.time.time(), nxt["y"])
+                air[0] = (core.time.time(), nxt["y"]); land_hits[0] = 0
             return _advance(True, mmx)
         return heading
 
@@ -476,6 +477,20 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 if air[0] is not None:                              # just jumped: landed yet?
                     t_j, ty = air[0]
                     st = sweep.landing_state(now - t_j, _mmy, ty)
+                    land_hits[0] = land_hits[0] + 1 if st == "landed" else 0
+                    if st == "fell" and sweep.seg_done(seg, mmx, _mmy):
+                        # the miss put her where this segment ends anyway (flat_sweep: the right-
+                        # platform leg ends on landing on the bottom) -> normal transition below
+                        print(f"[sweep] jump fell short -- already at segment {seg_i[0] + 1}'s end "
+                              f"(x={mmx} y={_mmy})")
+                        air[0] = None
+                        st = "done"
+                    if st == "landed" and land_hits[0] < 2:
+                        # one read at the platform height can be her passing it mid-arc (live:
+                        # "landed (y=59) 0.57s" and the jump had failed) -- confirm on the next beat
+                        sweep.apply_action(sweep.WALK, heading, keys, core.kb,
+                                           sleep=core.time.sleep)
+                        continue
                     if st == "landed":
                         print(f"[sweep] landed (y={_mmy}) {now - t_j:.2f}s after the jump")
                         air[0] = None
@@ -487,6 +502,8 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                         if h is not None:
                             heading = h
                         continue
+                    elif st == "done":
+                        pass
                     else:                              # in the air / still dropping: keep going
                         sweep.apply_action(sweep.WALK, heading, keys, core.kb,
                                            sleep=core.time.sleep)
