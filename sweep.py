@@ -72,7 +72,8 @@ def decide(mob_xs, px, heading, attack_range, gather=None, cd_ok=False, aoe_max=
 
 def apply_action(action, heading, keys, kb, sleep=lambda s: None,
                  burst=3, attack_dwell=0.2, face_gap=0.03, pull_settle=0.1, attack_hold=None,
-                 face_tap=True, pre_walk=0.0, keep_holding=None, hold_max=6.0, hold_poll=0.1):
+                 face_tap=True, pre_walk=0.0, keep_holding=None, hold_max=6.0, hold_poll=0.1,
+                 dash_press=None, moved=None, pre_walk_max=0.8, move_poll=0.03):
     """Translate a decide() action into key presses via the injected `kb` (dependency-injected
     so this stays pure/testable -- no core import). Returns the heading for the NEXT beat
     (flipped on ADVANCE so a route with no explicit segments ping-pongs the platform).
@@ -87,6 +88,9 @@ def apply_action(action, heading, keys, kb, sleep=lambda s: None,
     keep_holding: optional callable polled after the attack_hold minimum; while it returns True
     (a mob still in range -- the loop re-detects on a fresh frame) x stays held, up to hold_max s
     more. Releasing and re-deciding every hold left ~0.4 s dead gaps mid-fight (user).
+    dash_press: how long the push key is held (default face_gap, 0.03 s -- too short a tap, user).
+    moved: optional callable, True once the minimap shows her moving since the walk began; the
+    pre-walk then lasts until moved() (>= pre_walk, <= pre_walk_max).
     """
     face = keys["right"] if heading > 0 else keys["left"]
     if action == ADVANCE:
@@ -99,7 +103,11 @@ def apply_action(action, heading, keys, kb, sleep=lambda s: None,
     if action == GATHER and pre_walk > 0:                # push from a walk, not a standstill
         kb.safe_release(keys["left"] if heading > 0 else keys["right"])
         kb.safe_press(face); sleep(pre_walk)
-        kb.safe_press(keys["dash"]); sleep(face_gap); kb.safe_release(keys["dash"])
+        if moved is not None:                            # ...and until she is REALLY walking: an
+            waited = pre_walk                            # attack animation eats the walk for an
+            while waited < pre_walk_max and not moved():  # unknown time after the AoE (user)
+                sleep(move_poll); waited += move_poll
+        kb.safe_press(keys["dash"]); sleep(dash_press or face_gap); kb.safe_release(keys["dash"])
         kb.safe_release(face)
         sleep(pull_settle)                               # let the pull group them before the AoE
     else:
@@ -108,7 +116,7 @@ def apply_action(action, heading, keys, kb, sleep=lambda s: None,
         if face_tap:
             kb.safe_press(face); sleep(face_gap); kb.safe_release(face)
         if action == GATHER:
-            kb.safe_press(keys["dash"]); sleep(face_gap); kb.safe_release(keys["dash"])
+            kb.safe_press(keys["dash"]); sleep(dash_press or face_gap); kb.safe_release(keys["dash"])
             sleep(pull_settle)                           # let the pull group them before the AoE
     if attack_hold:                                      # one continuous AoE hold (casts repeat)
         kb.safe_press(keys["attack"]); sleep(attack_hold)
@@ -219,16 +227,22 @@ def approach_x(target, heading, keys, kb, read_xy, sleep=lambda s: None, tol=2, 
     return False
 
 
-def finish_or_move(mob_xs, px, heading, attack_range, rounds, max_rounds, behind_tol=30):
+def finish_or_move(mob_xs, px, heading, attack_range, rounds, max_rounds, behind_tol=30,
+                   reach=None, can_walk=False):
     """At a segment end: FIRE (AoE, no push -- the end is an edge / portal / turn) while a mob on
     her level is in AoE range ahead (or overlapping her), else ADVANCE to the transition. Reaching
     until_x mid-fight used to move her on with the mobs she was hitting still alive; overshooting
     the point a bit is fine. Capped at max_rounds so a respawn / false box can't pin her there.
+    can_walk + reach: a mob ahead beyond AoE range but within `reach` -> WALK toward it (the
+    floor goes on past the end point, e.g. middle_road2's portal at 296 on a floor to 311: the mobs
+    left there sat 280-450 px ahead and were skipped). The caller clears can_walk at the floor end.
     mob_xs must already be same-platform filtered."""
     if rounds >= max_rounds:
         return ADVANCE
     if any(-behind_tol <= (x - px) * heading <= attack_range for x in mob_xs):
         return FIRE
+    if can_walk and reach and any(attack_range < (x - px) * heading <= reach for x in mob_xs):
+        return WALK
     return ADVANCE
 
 
@@ -310,6 +324,16 @@ def landing_state(elapsed, mmy, target_y, min_air=0.55, tol=4, fall_dy=15, max_a
     return "air"
 
 
+def prewalk_secs(pre_walk, since_attack, recover=0.3):
+    """How long to walk before a push so that >= pre_walk s of it is REAL walking: right after an
+    attack the animation ignores movement for ~`recover` s. since_attack = s since the last attack
+    key was released (None = no attack yet). With the fast beat (~70 ms) the push came during that
+    window and the 0.1 s pre-walk was swallowed (user)."""
+    if since_attack is None:
+        return pre_walk
+    return pre_walk + max(0.0, recover - since_attack)
+
+
 def recheck_before_walk(act, last_act, rechecked):
     """True = don't walk yet, look again first: the beat right after an attack (FIRE / GATHER)
     decided WALK, and this is not already the second look. Right after the AoE her skill effects
@@ -332,7 +356,9 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
                      up_wait=2.5, poll=0.1, y_change=8, nudge=0.12, jump_gap=0.3, align=None,
                      edge_wait=4.0, jump_dy=5, x_win=12, land=1.0, level=None, climb_wait=5.0,
                      target_y=None, level_tol=6, climb_tries=3, run_takeoff=None, run_up=8,
-                     air_hold=0.3, align_to=None, fast_xy=None, run_timeout=3.0):
+                     air_hold=0.3, align_to=None, fast_xy=None, run_timeout=3.0, steady_reads=2,
+                     steady_secs=0.0, climb_land_tol=6, climb_finish=0.0, up_tries=2,
+                     drop_tries=2):
     """Run a segment's end-transition. Returns True when it (probably) worked.
 
     "up":   stop and press up (portal/ladder). Confirmed when the minimap y moves by >= y_change
@@ -392,7 +418,7 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
     if then == "up":
         _y = _timed_y
         y0 = _y()
-        for attempt in range(2):
+        for attempt in range(up_tries):
             if align is not None:
                 align()                           # line up exactly on the portal x first
             elif attempt == 1:                    # no aligner: overshot? step back and retry once
@@ -414,9 +440,12 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
 
         def arrived(y):                           # on the new level (target known: exactly it)
             if target_y is not None:
-                return abs(y - target_y) <= level_tol
+                # climb: the rope reads 52-57 just below the top floor (51), so near-enough is
+                # still ON the rope -- only within climb_land_tol counts as standing on the floor
+                tol = climb_land_tol if then == "climb" else level_tol
+                return abs(y - target_y) <= tol
             return (y - y0) * sign >= y_change
-        for attempt in range(climb_tries if then == "climb" else 2):
+        for attempt in range(climb_tries if then == "climb" else drop_tries):
             if then == "climb" and run_takeoff is not None:
                 # running jump: line up run_up px before the take-off, run in holding the heading,
                 # jump at run_takeoff with the arrow still held for air_hold s, then hold up
@@ -445,20 +474,32 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
                 kb.safe_press(keys["down"]); sleep(0.1)
                 kb.safe_press(keys["jump"]); sleep(0.05); kb.safe_release(keys["jump"])
                 sleep(0.1); kb.safe_release(keys["down"])
-            waited, moved, prev = 0.0, False, None; spent[0] = 0.0
+            waited, moved, recent = 0.0, False, []; spent[0] = 0.0
+            band = [None, 0.0]                    # [y the dot has stayed within 1 px of, since]
             while waited + spent[0] < (climb_wait if moved else up_wait):
                 y = _y()
                 if y0 is None:
                     y0 = y
                 elif y is not None:
                     moved = moved or abs(y - y0) >= 3
-                    steady = prev is not None and abs(y - prev) <= 1
+                    # steady = the last steady_reads reads within 1 px (fast reads come ~0.1 s
+                    # apart: 3 of them keep a jump's slow apex from passing as a landing)
+                    recent = (recent + [y])[-steady_reads:]
+                    steady = len(recent) == steady_reads and max(recent) - min(recent) <= 1
+                    # ...and held for steady_secs: on the rope the dot sits ~0.2-0.3 s on each
+                    # pixel, so a few quick equal reads happen mid-climb (live: 'climb ok' while
+                    # still hanging on middle_road2's rope)
+                    t_now = waited + spent[0]
+                    if band[0] is None or abs(y - band[0]) > 1:
+                        band[0], band[1] = y, t_now
+                    steady = steady and t_now - band[1] >= steady_secs
                     if steady and arrived(y):
+                        if then == "climb":
+                            sleep(climb_finish)   # keep UP a moment: step off the rope top
                         kb.safe_release(keys["up"])
                         return True               # on the new level and not moving any more
                     if steady and moved and abs(y - y0) <= 2:
                         break                     # jumped but missed the ladder: landed back
-                prev = y
                 sleep(poll); waited += poll
             kb.safe_release(keys["up"])
             if moved and y is not None and abs(y - y0) > 2 and not arrived(y):

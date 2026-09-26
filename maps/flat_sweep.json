@@ -25,7 +25,7 @@
     "grp": 90,
     "min": 3,
     "dash_gap": 50,
-    "cooldown": 1.5
+    "cooldown": 1.7
   },
   "_gather_note": "z = push/gather (path-scoop) skill, 1s cooldown: dashes forward and scoops mobs along the path into a clump within attack_range, doubling as forward locomotion. grp/min/dash_gap are starting guesses: grp=how spread mobs must be to bother scooping, min=fewest mobs worth a scoop, dash_gap=attack_range - dash reach. Tune live.",
   "minimap": {
@@ -54,7 +54,8 @@
       "keys": [
         "3"
       ],
-      "interval_secs": 600
+      "interval_secs": 600,
+      "potion": true
     },
     {
       "keys": [
@@ -66,7 +67,8 @@
       "keys": [
         "1"
       ],
-      "interval_secs": 600
+      "interval_secs": 600,
+      "potion": true
     }
   ],
   "_buff_note": "Same buff groups as deep_sea_2 (d 5min, 3 10min, g 15min, 1 10min); each group fires on its own interval. Re-enabled 2026-09-24 after testing.",

@@ -128,3 +128,26 @@ def test_floor_key_separates_upper_floor_and_right_platform():
     # flat_sweep: upper floor minimap y 55 (feet ~710) vs right platform y 62 (feet ~798)
     assert farm_general._floor_key(55) != farm_general._floor_key(62)
     assert farm_general._floor_key(99) != farm_general._floor_key(55)
+
+
+# --- wrong lock #2: a STATIC lock on a mob's HP bar (middle_road2, live 12:52-12:53): the minimap
+# went 120 -> 226 while "her" stayed at exactly (505, 831) -- her own bar was hidden under the AoE
+# effect. The camera centres her while it follows, and she MOVES on screen when it is clamped, so a
+# lock far from the centre that does not move while the minimap advances is not her.
+
+def test_static_off_centre_lock_while_advancing_is_wrong():
+    assert farm_general._static_off_centre((505, 120), (505, 164), heading=1, centre_x=970) is True
+
+
+def test_static_lock_near_the_centre_is_fine():
+    # camera following her: she stays ~centred on screen while the minimap advances
+    assert farm_general._static_off_centre((1030, 120), (1034, 164), heading=1, centre_x=970) is False
+
+
+def test_off_centre_lock_moving_with_the_heading_is_fine():
+    # camera clamped at the map edge: she walks across the screen
+    assert farm_general._static_off_centre((505, 60), (700, 80), heading=1, centre_x=970) is False
+
+
+def test_static_off_centre_lock_needs_the_minimap_to_advance():
+    assert farm_general._static_off_centre((505, 120), (505, 123), heading=1, centre_x=970) is False

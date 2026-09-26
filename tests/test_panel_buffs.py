@@ -78,3 +78,13 @@ def test_save_buffs_rejects_bad_groups(tmp_path):
     p.write_text("{}", encoding="utf-8")
     ok, msg = panel.save_buffs(str(p), [{"keys": [], "interval_secs": 300}], allowed_paths=[str(p)])
     assert ok is False
+
+
+def test_potion_flag_round_trips_through_the_panel():
+    cfg = {"buff_groups": [{"keys": ["d"], "interval_secs": 300},
+                           {"keys": ["1"], "interval_secs": 600, "potion": True}]}
+    groups = panel.normalize_buffs(cfg)
+    assert groups == [{"keys": ["d"], "interval_secs": 300},
+                      {"keys": ["1"], "interval_secs": 600, "potion": True}]
+    out = panel.apply_buffs({}, groups)
+    assert out["buff_groups"] == groups

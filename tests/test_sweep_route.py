@@ -1,3 +1,4 @@
+import pytest
 """Route mode for the sweep loop: a fixed list of segments (dir, until_x on the minimap,
 transition at the end, attack or just travel). Heading is fixed per segment -- no ping-pong."""
 import sweep
@@ -743,3 +744,126 @@ def test_minimap_dot_filter_ignores_darker_map_art():
     mm[103:110, 196:203] = (50, 246, 248)        # her dot
     blobs = core._char_blobs_from_mm(mm)
     assert [(x, y) for x, y, _a in blobs] == [(199, 106)]
+
+
+def test_climb_with_fast_reads_needs_three_steady_reads():
+    # transitions now poll fast minimap reads (~0.1 s apart): 2 equal reads can be a jump apex,
+    # so the loop asks for 3. A pause at 60 on the way up must not count, 51 x3 does.
+    kb = _KB()
+    seq = [(99, 96), (99, 80), (99, 60), (99, 60), (99, 55), (99, 51), (99, 51), (99, 51)]
+    n = [0]
+    rd = _reader(seq)
+    def read():
+        n[0] += 1
+        return rd()
+    ok = sweep.route_transition("climb", 1, 1, KEYS, kb, read_xy=read, poll=0.05, target_y=51,
+                                steady_reads=3)
+    assert ok is True and n[0] >= len(seq)       # did not stop before three 51s
+
+
+def test_climb_is_not_done_while_she_still_hangs_just_below_the_top():
+    # live: 'climb ok' but she hung on the rope. The rope reads 52-57 under the top floor (51) and
+    # the dot sits ~0.25 s per pixel, so quick equal reads at 55 looked like 'arrived + steady'.
+    kb = _KB()
+    seq = ([(99, 96), (99, 80), (99, 65)] + [(99, 55)] * 4 + [(99, 53)] * 4
+           + [(99, 51)] * 12)
+    ys = []
+    rd = _reader(seq)
+    def read():
+        p = rd(); ys.append(p[1]); return p
+    ok = sweep.route_transition("climb", 1, 1, KEYS, kb, read_xy=read, poll=0.05, target_y=51,
+                                steady_reads=3, steady_secs=0.4, climb_land_tol=1)
+    assert ok is True
+    assert ys[-1] == 51 and ys.count(51) >= 8          # waited ~0.4 s ON the floor, not at 55/53
+
+
+def test_push_prewalk_waits_out_the_attack_recovery():
+    # the beat got ~5x faster (3a2080a): a push now comes ~70 ms after the AoE ends, while the
+    # attack animation still eats movement, so the 0.1 s pre-walk did nothing (user). The walk is
+    # stretched so >= pre_walk of it falls after `recover` s since the last attack ended.
+    assert sweep.prewalk_secs(0.1, since_attack=0.05, recover=0.3) == pytest.approx(0.35)
+    assert sweep.prewalk_secs(0.1, since_attack=1.0, recover=0.3) == pytest.approx(0.1)
+    assert sweep.prewalk_secs(0.1, since_attack=None, recover=0.3) == pytest.approx(0.1)
+
+
+def test_portal_press_retries_up_to_up_tries():
+    kb = _KB()
+    ok = sweep.route_transition("up", -1, -1, KEYS, kb, read_xy=_reader([(214, 106)]),
+                                up_wait=0.3, poll=0.1, up_tries=3)
+    assert ok is False
+    assert [k for e, k in kb.events if e == "press"].count("U") == 3
+
+
+# --- segment-end finishing: walk on to mobs past the portal (middle_road2 segment 1: the portal
+# is at 296 but the floor runs to 311; the mobs left at the end sat 280-450 px ahead, beyond the
+# 200 px AoE, so finishing went straight into the portal and skipped them).
+
+def test_finish_walks_toward_mobs_ahead_beyond_aoe_when_the_floor_continues():
+    act = sweep.finish_or_move([505 + 300], 505, 1, 200, rounds=0, max_rounds=3,
+                               reach=450, can_walk=True)
+    assert act == sweep.WALK
+
+
+def test_finish_does_not_walk_past_the_floor_end():
+    act = sweep.finish_or_move([505 + 300], 505, 1, 200, rounds=0, max_rounds=3,
+                               reach=450, can_walk=False)
+    assert act == sweep.ADVANCE
+
+
+def test_finish_ignores_mobs_beyond_reach_and_still_fires_in_range():
+    assert sweep.finish_or_move([505 + 600], 505, 1, 200, 0, 3, reach=450,
+                                can_walk=True) == sweep.ADVANCE
+    assert sweep.finish_or_move([505 + 150, 505 + 300], 505, 1, 200, 0, 3, reach=450,
+                                can_walk=True) == sweep.FIRE
+
+
+def test_push_key_is_held_for_dash_press():
+    kb, slept = _KB(), []
+    sweep.apply_action(sweep.GATHER, 1, KEYS, kb, sleep=slept.append, attack_hold=1.05,
+                       pre_walk=0.1, dash_press=0.08)
+    ev = kb.events
+    zi = ev.index(("press", "z"))
+    assert ev[zi + 1] == ("release", "z") and 0.08 in slept
+
+
+def _timed_kb():
+    kb, t = _KB(), [0.0]
+    def sleep(d): t[0] += d
+    def at(ev):                                   # time of the first matching event
+        return kb.times[kb.events.index(ev)]
+    kb.times = []
+    orig_p, orig_r = kb.safe_press, kb.safe_release
+    kb.safe_press = lambda k: (orig_p(k), kb.times.append(t[0]))
+    kb.safe_release = lambda k: (orig_r(k), kb.times.append(t[0]))
+    kb.safe_release_all = lambda: (kb.events.append(("release_all", None)), kb.times.append(t[0]))
+    return kb, sleep, at
+
+
+def test_push_waits_until_the_minimap_shows_her_walking():
+    # user: the walk before the push was still swallowed (the attack animation runs longer than a
+    # fixed guess). Walk until she has actually moved, then push; capped by pre_walk_max.
+    kb, sleep, at = _timed_kb()
+    moves = iter([False, False, False, True])
+    sweep.apply_action(sweep.GATHER, 1, KEYS, kb, sleep=sleep, attack_hold=1.05,
+                       pre_walk=0.1, moved=lambda: next(moves, True), pre_walk_max=0.8)
+    walk = at(("press", "z")) - at(("press", "R"))
+    assert walk == pytest.approx(0.1 + 3 * 0.03)              # min walk + 3 polls until moved
+
+
+def test_push_prewalk_gives_up_waiting_at_pre_walk_max():
+    kb, sleep, at = _timed_kb()
+    sweep.apply_action(sweep.GATHER, 1, KEYS, kb, sleep=sleep, attack_hold=1.05,
+                       pre_walk=0.1, moved=lambda: False, pre_walk_max=0.4)
+    walk = at(("press", "z")) - at(("press", "R"))
+    assert 0.4 - 1e-9 <= walk <= 0.4 + 0.03
+
+
+def test_down_jump_retries_quickly_when_the_first_press_is_swallowed():
+    # live: segment 4's drop took 4.2-4.4 s -- the first down+jump (right after the AoE) was
+    # swallowed and the retry waited 2.5 s. drop_tries / a short up_wait retry sooner.
+    kb = _KB()
+    seq = [(232, 51)] * 12 + [(232, 60), (232, 80), (232, 96)] + [(232, 96)] * 12
+    ok = sweep.route_transition("down_jump", 1, -1, dict(KEYS, down="D"), kb, read_xy=_reader(seq),
+                                poll=0.1, up_wait=0.8, drop_tries=3, target_y=96)
+    assert ok is True
+    assert [k for e, k in kb.events if e == "press"].count("J") == 2

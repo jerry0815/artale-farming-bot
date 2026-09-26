@@ -131,3 +131,27 @@ def test_train_action_validates_without_launching():
     assert actions["train"]("grab_misses", "") == (False, "clip path required")
     ok, _ = actions["train"]("bogus_step")
     assert ok is False
+
+
+def test_enemy_check_toggle_turns_every_another_player_check_off(monkeypatch):
+    # panel checkbox (user): off -> no red-dot detection anywhere (fast safety scan, the loops'
+    # enemy_check via get_enemy, Free Market escape), and the status reports it
+    import numpy as np
+    import core
+    monkeypatch.setattr(core, "detect_red_dots", lambda *a, **k: [(5, 5)])
+    monkeypatch.setattr(core, "_enemy_shadow", lambda *a, **k: None)
+    silenced = []
+    monkeypatch.setattr(core, "enemy_alarm_silence", lambda: silenced.append(1))
+    frame = np.zeros((600, 600, 3), np.uint8)
+    _, c = _make()
+    try:
+        assert core._enemy_dots(frame) == [(5, 5)]
+        assert c.set_enemy_check(False) == (True, "another-player check OFF")
+        assert core._enemy_dots(frame) == []
+        assert silenced                                   # a sounding alarm stops too
+        assert panel._status_dict(c)["enemy_check"] is False
+        c.set_enemy_check(True)
+        assert core._enemy_dots(frame) == [(5, 5)]
+        assert panel._status_dict(c)["enemy_check"] is True
+    finally:
+        core._ENEMY_CHECK[0] = True

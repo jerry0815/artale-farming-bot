@@ -22,7 +22,7 @@
     "grp": 90,
     "min": 3,
     "dash_gap": 50,
-    "cooldown": 1.5
+    "cooldown": 1.7
   },
   "enemy_threshold": 0.75,
   "buff_groups": [
@@ -36,7 +36,8 @@
       "keys": [
         "3"
       ],
-      "interval_secs": 600
+      "interval_secs": 600,
+      "potion": true
     },
     {
       "keys": [
@@ -48,7 +49,8 @@
       "keys": [
         "1"
       ],
-      "interval_secs": 600
+      "interval_secs": 600,
+      "potion": true
     }
   ],
   "same_platform_band": 180,
@@ -59,7 +61,7 @@
   "portal_lead": 20,
   "portal_settle_secs": 0.1,
   "push_prewalk_secs": 0.1,
-  "finish_rounds": 3,
+  "finish_rounds": 6,
   "aoe_hold_max_secs": 6.0,
   "debug_log": true,
   "start_heading": 1,
@@ -83,14 +85,16 @@
       "until_x": 296,
       "then": "up",
       "attack": true,
-      "y": 156
+      "y": 156,
+      "floor_end": 311
     },
     {
       "dir": "left",
       "until_x": 90,
       "then": null,
       "attack": true,
-      "y": 96
+      "y": 96,
+      "floor_end": 70
     },
     {
       "dir": "right",
@@ -114,11 +118,13 @@
       "until_x": 88,
       "then": "down_jump",
       "attack": true,
-      "y": 96
+      "y": 96,
+      "floor_end": 70
     }
   ],
   "_route_note": "Lap: bottom floor right to the portal at the right end (UP at x~296, recorded 295-299; lands middle ~262) -> middle floor left, clearing to its left end (~80) -> back right to the ladder at x~99 and climb (jump + hold up, ~2.2 s) -> top floor right to ~228 and drop through (down+jump, recorded 223-241; top ends ~245) -> middle floor left again to ~76 and drop through to the bottom (recorded 71-80) -> repeat. Start the character at bottom-left. The ladder line-up uses the portal line-up (arrives moving right, portal_lead px early). 2026-09-25 (user): middle-floor left ends moved right -- segment 2 80->90, segment 5 76->88 -- she sometimes fell off the middle floor's left end (pushes/finish rounds carry her past until_x). Ladder (2026-09-25): on the ladder the minimap x reads 99 (175 of 184 recorded reads). Target 100 was too far right (user), 99 with tol 1 sometimes stopped at 98 (left) -> target 99 with climb_tol 0 (the line-up taps until the dot reads exactly 99).",
   "_mob_conf_note": "0.6 (same as flat_sweep) after retraining models/mob_generic.pt with 80 labeled middle_road2 frames (2026-09-25, datasets/middle_road2, pool 482 frames/2187 boxes, val mAP50 0.879). Held-out middle_road2 frames (78 mobs): recall 0.64 -> 0.86 at 0.6 with 1 false box (old model at 0.4: 0.72, 8 false). Old model kept as models/mob_generic_pre_mroad2.pt. v2 (2026-09-25): +37 uncertain/fly frames (pool 519 frames/2512 boxes, val mAP50 0.87). Held-out hard frames recall 0.66 -> 0.80 at 0.6; 6 of 8 'false' boxes on held-out middle_road2 were real mobs missing from the labels, 2 real false (truck wheel, loot text). v1 kept as models/mob_generic_mroad2_v1.pt.",
   "climb_tol": 0,
-  "_climb_note": "Segment 3 climbs with a RUNNING jump (ladder_test.py, 2026-09-25): line up at 84, run right, jump when the minimap reads 92 with right held 0.3 s more, hold up. Live tests: run@92 7/10 hit (misses mostly mob hits), stand@99 8/10, run@86 3/5; user found run@92 better in practice. Remove run_takeoff to go back to the standing jump at until_x (climb_tol)."
+  "_climb_note": "Segment 3 climbs with a RUNNING jump (ladder_test.py, 2026-09-25): line up at 84, run right, jump when the minimap reads 92 with right held 0.3 s more, hold up. Live tests: run@92 7/10 hit (misses mostly mob hits), stand@99 8/10, run@86 3/5; user found run@92 better in practice. Remove run_takeoff to go back to the standing jump at until_x (climb_tol).",
+  "_finish_note": "Segment 1 floor_end 311 (2026-09-26): the portal (296) is mid-floor and the bottom floor runs to 311 (recording: 82 reads past 297). Mobs left at the segment end sat 280-450 px ahead (beyond the 200 px AoE) and were skipped; finishing now walks toward mobs within finish_reach (450 px) up to floor_end - finish_edge_margin (6), AoEs them, then the portal line-up backs up and comes in moving right. Segments 2 and 5 (middle floor, heading left, end ~88-90): floor_end 70 -- the floor edge is ~66 (recording); finishing may walk on to ~76 (floor_end + finish_edge_margin) toward mobs 200-450 px ahead (live: the mob she had been hitting sat 242-312 px ahead at the left end and was left). finish_rounds 3 -> 6 (live: 3 AoE rounds at the segment 1 end, then the portal with mobs still at 190-376 px)."
 }

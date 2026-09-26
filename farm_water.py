@@ -201,7 +201,7 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
         print(f"[water] approach ON: detector={detector} range={_arange} band={_aband}")
 
     # Buff groups: each key set fires on its OWN interval (see core.parse_buff_groups).
-    buff_groups = core.parse_buff_groups(map_cfg, skill_interval)
+    buff_groups = core.buff_plan(map_cfg, skill_interval)       # [(keys, interval, potion)]
     # per-group next-cast time; each first fires ~5s in (staggered 1s so they don't collide)
     _next_buff = [core.time.time() + 5.0 + i for i in range(len(buff_groups))]
 
@@ -214,17 +214,14 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
         due = [i for i in range(len(buff_groups)) if now >= _next_buff[i]]
         if not due:
             return
-        # The attack skill ROOTS her (its animation eats a key pressed too soon), so drop all
-        # keys and let the root clear BEFORE casting -- otherwise the buff press is swallowed.
-        core.kb.safe_release_all()
-        core.time.sleep(_buff_settle)
         for i in due:
-            keys, iv = buff_groups[i]
+            keys, iv, potion = buff_groups[i]
             _next_buff[i] = now + iv
-            print(f"[water] buff -> press {keys} (next in {int(iv)}s)")
-            for k in keys:
-                core.kb.safe_press(k); core.time.sleep(0.3); core.kb.safe_release(k)
-                core.time.sleep(_buff_gap)          # let this cast's animation finish before the next
+            print(f"[water] {'potion' if potion else 'buff'} -> press {keys} (next in {int(iv)}s)")
+        # Potions are instant. SKILLS: the attack ROOTS her (its animation eats a key pressed too
+        # soon), so cast_buffs drops all keys, lets the root clear, and gaps each cast.
+        core.cast_buffs([(buff_groups[i][0], buff_groups[i][2]) for i in due], core.kb,
+                        core.time.sleep, settle=_buff_settle, gap=_buff_gap)
         core.STATUS["buff_at"] = core.time.time()
 
     # rotation: 'sweep' = farm the list in order (bottom->top) then reset via reset_node;

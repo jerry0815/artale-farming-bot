@@ -75,7 +75,8 @@
       "keys": [
         "3"
       ],
-      "interval_secs": 600
+      "interval_secs": 600,
+      "potion": true
     },
     {
       "keys": [
@@ -87,7 +88,8 @@
       "keys": [
         "1"
       ],
-      "interval_secs": 600
+      "interval_secs": 600,
+      "potion": true
     }
   ],
   "player": {

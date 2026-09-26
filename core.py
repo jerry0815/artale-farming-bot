@@ -127,6 +127,7 @@ _full_alarm = Alarm(freq=1000, beep_ms=350, gap_ms=150)
 _full_alert = AlertController(_full_alarm, trigger_consecutive=2, clear_consecutive=1)
 _last_fast_tick = [0.0]
 _last_full_tick = [0.0]
+_last_full_tpl = [0.0]      # last full-template pass (safety.lie_check_full_tick)
 if not _lie_enabled:
     print(f"[lie-check] '{_LIE_DIR}' 沒有模板，警報停用。")
 if notify.notifier().enabled:
@@ -160,6 +161,7 @@ _safety_thread = [None]
 
 # --- another-player alarm: a DISTINCT lower tone, sounds until 'm' acknowledges it ---
 _enemy_alarm = Alarm(freq=700, beep_ms=250, gap_ms=120)
+_ENEMY_CHECK = [True]   # panel toggle: False = no another-player (red dot) detection at all
 _ENEMY_PAUSE = [True]   # fast safety scan: red dot -> alarm + pause. False = the loop handles it
                         # (sweep other_player "wait": stop, wait, Free Market after N s -- no alarm)
 
@@ -1071,7 +1073,7 @@ kb.f10_callback = lambda: dump_frame("manual")   # F10 dumps the current frame f
 
 
 from char_config import (  # noqa: E402  (extracted; re-exported so core.<name> still works)
-    load_char, apply_character, parse_buff_groups,
+    load_char, apply_character, parse_buff_groups, buff_plan, cast_buffs,
 )
 
 

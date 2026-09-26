@@ -66,8 +66,11 @@ def lie_check_fast_tick(interval=0.8):
         core.enemy_alarm_on(); core.kb.safe_release_all(); core.kb.pause = True
 
 
-def lie_check_full_tick(interval=1.5):
-    """Full check for the slower screens (curse / monster). Loop top only."""
+def lie_check_full_tick(interval=1.5, template_every=15.0):
+    """Full check for the slower screens (curse / monster). The YOLO check (~16 ms) runs every
+    tick; the picture templates cost ~1.5 s of CPU per call (measured live 2026-09-26), which kept
+    a core busy non-stop next to the farm loop, so they only run every `template_every` s as a
+    backup (the monster popup that templates missed on middle_road2 scored 0.92 on YOLO)."""
     if not core._lie_enabled:
         return
     now = core.time.time()
@@ -80,8 +83,12 @@ def lie_check_full_tick(interval=1.5):
     # higher work_width keeps the curse banner/lock detail (fine 2-line text + icon)
     # so they clear threshold on smaller live windows; per-template thresholds apply.
     scores = {}
-    hits = core.detect_lie_check(f, templates_folder=core._LIE_DIR, template_filter=core._FULL_TEMPLATES,
-                            work_width=1000, scores=scores)
+    hits = []
+    if now - core._last_full_tpl[0] >= template_every:
+        core._last_full_tpl[0] = now
+        hits = core.detect_lie_check(f, templates_folder=core._LIE_DIR,
+                                     template_filter=core._FULL_TEMPLATES, work_width=1000,
+                                     scores=scores)
     yolo = core.detect_lie_check_yolo(f, conf=0.80)           # [] when the model file is absent
     #   conf 0.80: real popups score 0.978-0.991; worst false detection on normal frames was
     #   0.701 (a minimap-crop debug image) -- 0.80 clears positives with headroom for degraded
@@ -284,7 +291,7 @@ def _enemy_dots(frame):
     """Red dots (other players) in the minimap band of a captured BGR frame. TEMPLATE match is
     authoritative (drives the another-player alarm); detect_red_dots_color runs in shadow to
     validate the switch (see _enemy_shadow). Presence-only -> non-empty means escape."""
-    if frame is None:
+    if frame is None or not core._ENEMY_CHECK[0]:          # turned off in the panel
         return []
     ey = min(core.MM_Y + core.MM_H, frame.shape[0]); ex = min(core.MM_X + core.MM_W, frame.shape[1])
     mm = frame[core.MM_Y:ey, core.MM_X:ex]                  # FULL configured minimap band (lower platforms too)

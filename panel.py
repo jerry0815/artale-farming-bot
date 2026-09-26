@@ -176,6 +176,16 @@ class Controller:
         self.actions["pause_toggle"]()
         return True, "toggled"
 
+    def set_enemy_check(self, on):
+        """Panel checkbox: turn the another-player (red minimap dot) check on/off for every loop.
+        Off also silences a sounding another-player alarm."""
+        import core
+        core._ENEMY_CHECK[0] = bool(on)
+        if not on:
+            core.enemy_alarm_silence()
+        print(f"[panel] another-player check {'ON' if on else 'OFF'}")
+        return True, f"another-player check {'ON' if on else 'OFF'}"
+
     def stop(self):
         if self.mode == "recording":
             return self.record_stop()
@@ -487,7 +497,8 @@ def normalize_buffs(cfg):
     groups = cfg.get("buff_groups")
     if groups:
         return [{"keys": list(g.get("keys", [])),
-                 "interval_secs": int(g.get("interval_secs", 300))} for g in groups]
+                 "interval_secs": int(g.get("interval_secs", 300)),
+                 **({"potion": True} if g.get("potion") else {})} for g in groups]
     keys = cfg.get("buff_keys")
     if keys:
         return [{"keys": list(keys), "interval_secs": int(cfg.get("buff_interval_secs", 300))}]
@@ -499,8 +510,8 @@ def apply_buffs(cfg, groups):
     keys removed. Preserves every other field and key order (assumes groups already
     validated)."""
     out = dict(cfg)
-    out["buff_groups"] = [{"keys": list(g["keys"]), "interval_secs": int(g["interval_secs"])}
-                          for g in groups]
+    out["buff_groups"] = [{"keys": list(g["keys"]), "interval_secs": int(g["interval_secs"]),
+                           **({"potion": True} if g.get("potion") else {})} for g in groups]
     out.pop("buff_keys", None)
     out.pop("buff_interval_secs", None)
     return out
@@ -548,6 +559,7 @@ def _status_dict(controller):
     import core, time
     st = dict(core.STATUS)
     st["mode"] = controller.mode
+    st["enemy_check"] = bool(core._ENEMY_CHECK[0])
     st["recorder_marks"] = controller.recorder.marks if controller.recorder else 0
     ba = st.get("buff_at")
     st["buff_ago"] = int(time.time() - ba) if ba else None   # seconds since last buff (server clock)
@@ -620,6 +632,9 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      <div class=row>
        <button onclick="cmd('pause')">⏸ Pause / Resume</button>
        <button class=stop onclick="cmd('stop')">■ Stop</button>
+     </div>
+     <div class=row>
+       <label title="Red dot on the minimap = another player -> stop / alarm / Free Market. Untick to farm with other players around."><input type=checkbox id=enemychk checked onchange="setEnemyCheck(this.checked)"> another-player check</label>
      </div>
    </fieldset>
    <div class=row>
@@ -806,13 +821,15 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    }
  }
  function buffTarget(){ return document.getElementById('charsel').value || document.getElementById('mapsel').value; }
- function addBuffRow(keys, mins){
+ function addBuffRow(keys, mins, potion){
    const d=document.createElement('div'); d.className='row buffrow';
    d.innerHTML='keys <input class=bkeys placeholder="a,j" style="width:120px"> every '
      +'<input class=bmin type=number min=1 step=1 style="width:60px"> min '
+     +'<label title="Potion: instant, pressed without stopping. Unticked = skill: she stops, waits for the attack to finish, and leaves a gap between skills."><input type=checkbox class=bpot> potion</label> '
      +'<button onclick="this.parentNode.remove()">✕</button>';
    d.querySelector('.bkeys').value=(keys||[]).join(',');
    d.querySelector('.bmin').value=(mins!=null?mins:5);
+   d.querySelector('.bpot').checked=!!potion;
    document.getElementById('buffrows').appendChild(d);
  }
  async function loadBuffs(){
@@ -823,7 +840,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    const j=await (await fetch('/buffs?'+new URLSearchParams({file}))).json();
    if(!j.ok){ document.getElementById('bufffile').textContent='error: '+j.msg; return; }
    document.getElementById('bufffile').textContent='editing → '+j.file;
-   for(const g of j.groups){ addBuffRow(g.keys, Math.round(g.interval_secs/60)); }
+   for(const g of j.groups){ addBuffRow(g.keys, Math.round(g.interval_secs/60), g.potion); }
    if(!j.groups.length){ addBuffRow([], 5); }
  }
  async function saveBuffs(){
@@ -834,7 +851,9 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      const keys=r.querySelector('.bkeys').value.split(',').map(s=>s.trim()).filter(Boolean);
      const mins=parseFloat(r.querySelector('.bmin').value);
      if(!keys.length || !(mins>0)) continue;
-     groups.push({keys, interval_secs: Math.round(mins*60)});
+     const g={keys, interval_secs: Math.round(mins*60)};
+     if(r.querySelector('.bpot').checked) g.potion=true;
+     groups.push(g);
    }
    const j=await (await fetch('/buffs_save?'+new URLSearchParams({file, groups: JSON.stringify(groups)}))).json();
    const s=document.getElementById('buffstat'); s.textContent=j.msg; s.style.color=j.ok?'#7d7':'#f77';
@@ -847,9 +866,14 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    if(!j.ok) alert(j.msg);
  }
  let _tp, _tl, _ts;                        // poll timer handles -> re-kickable, never doubled
+ async function setEnemyCheck(on){
+   await fetch('/cmd?'+new URLSearchParams({action:'enemy_check', on: on ? '1' : '0'}));
+ }
  async function poll(){
    try{
      const s = await (await fetch('/status')).json();
+     const ec = document.getElementById('enemychk');
+     if (ec && typeof s.enemy_check === 'boolean' && document.activeElement !== ec) ec.checked = s.enemy_check;
      const lie = document.getElementById('lie');
      lie.className = s.lie ? 'bad' : 'ok';
      lie.textContent = s.lie ? '⚠ lie-check: NEEDS HUMAN' : 'lie-check: OK';
@@ -1004,6 +1028,8 @@ def make_handler(controller):
                                         char=q.get("char", [None])[0])
             if action == "pause":
                 return controller.pause()
+            if action == "enemy_check":
+                return controller.set_enemy_check(q.get("on", ["1"])[0] == "1")
             if action == "stop":
                 return controller.stop()
             if action == "quit":

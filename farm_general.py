@@ -64,6 +64,18 @@ def _against_heading(prev, cur, heading, min_mm=8, min_px=60, home_x=None, away=
     return abs(px1 - home_x) > away and abs(px1 - home_x) > abs(px0 - home_x)
 
 
+def _static_off_centre(prev, cur, heading, centre_x, min_mm=10, max_px=15, off=250):
+    """prev/cur = (screen x of the HP-bar lock, minimap x). True when the minimap advanced >= min_mm
+    in the heading but the lock's screen x barely moved (< max_px) while sitting > `off` px from the
+    screen centre. The camera centres her while it follows her, and when it is clamped at a map
+    edge she moves across the screen -- so a still, off-centre lock is something else: live on
+    middle_road2 it sat on a STOP-sign mob's HP bar at (505, 831) for 18 s (minimap 120 -> 226, her
+    own bar hidden under the AoE effect) and she pushed into empty space 12 times."""
+    (px0, mm0), (px1, mm1) = prev, cur
+    return ((mm1 - mm0) * heading >= min_mm and abs(px1 - px0) < max_px
+            and abs(px1 - centre_x) > off)
+
+
 def _floor_key(mmy):
     """Minimap y bucketed to its floor (5 px buckets) -- her usual screen spot differs per floor
     (the camera clamps vertically): feet ~710 upper (y 55), ~798 right platform (y 62) and bottom
@@ -190,6 +202,10 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     push_settle = float(map_cfg.get("push_settle_secs", 0.6))  # push animation before the AoE
     push_margin = int(map_cfg.get("push_edge_margin", 25))
     push_prewalk = float(map_cfg.get("push_prewalk_secs", 0.0))  # walk this long, push while moving
+    attack_recover = float(map_cfg.get("attack_recover_secs", 0.3))  # post-attack: moves ignored
+    push_press = float(map_cfg.get("push_press_secs", 0.08))   # hold the push key this long
+    push_prewalk_max = float(map_cfg.get("push_prewalk_max_secs", 0.8))  # cap on the pre-walk
+    attack_end = [None]                                        # when the last attack key came up
     portal_tol = int(map_cfg.get("portal_tol", 2))             # minimap px to stand on the portal
     portal_lead = int(map_cfg.get("portal_lead", 20))          # start the portal line-up this early
     climb_tol = int(map_cfg.get("climb_tol", portal_tol))      # ladder line-up tolerance (px)
@@ -197,7 +213,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     reach = sweep.dash_reach(attack_range, gcfg) if gcfg else attack_range
 
     # Buffs -- same scheme as farm_water (each group on its own interval).
-    buff_groups = core.parse_buff_groups(map_cfg, skill_interval)
+    buff_groups = core.buff_plan(map_cfg, skill_interval)       # [(keys, interval, potion)]
     _next_buff = [core.time.time() + 5.0 + i for i in range(len(buff_groups))]
     _buff_settle = float(map_cfg.get("buff_settle_secs", 0.6))
     _buff_gap = float(map_cfg.get("buff_gap_secs", 0.7))
@@ -207,13 +223,12 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         due = [i for i in range(len(buff_groups)) if now >= _next_buff[i]]
         if not due:
             return
-        core.kb.safe_release_all(); core.time.sleep(_buff_settle)   # let the attack root clear first
         for i in due:
-            k_list, iv = buff_groups[i]; _next_buff[i] = now + iv
-            print(f"[sweep] buff -> {k_list} (next {int(iv)}s)")
-            for k in k_list:
-                core.kb.safe_press(k); core.time.sleep(0.3); core.kb.safe_release(k)
-                core.time.sleep(_buff_gap)
+            k_list, iv, potion = buff_groups[i]; _next_buff[i] = now + iv
+            print(f"[sweep] {'potion' if potion else 'buff'} -> {k_list} (next {int(iv)}s)")
+        # potions: instant, no stop; skills: stop, let the attack root clear, gap between casts
+        core.cast_buffs([(buff_groups[i][0], buff_groups[i][2]) for i in due], core.kb,
+                        core.time.sleep, settle=_buff_settle, gap=_buff_gap)
         core.STATUS["buff_at"] = core.time.time()
 
     t_start = core.time.time()
@@ -398,6 +413,9 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         return any(-30 <= (x - pos[0]) * heading <= attack_range for x in xs)
 
     finish_max = int(map_cfg.get("finish_rounds", 3))   # AoE rounds allowed past a segment end
+    finish_reach = int(map_cfg.get("finish_reach", 450))  # finishing walks to mobs this far (px)
+    finish_edge_margin = int(map_cfg.get("finish_edge_margin", 6))  # stop walking this far (mm px)
+                                                        # before a segment's floor_end
     last_act, rechecked = [None], [False]               # walk-off re-look (recheck_before_walk)
     walk_recheck = float(map_cfg.get("walk_recheck_secs", 0.15))
     finish_n = [0]
@@ -405,22 +423,37 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     climb_fails = [0]
     climb_rounds = int(map_cfg.get("climb_rounds", 3))    # line-up+climb rounds before moving on
     climb_retry = float(map_cfg.get("climb_retry_secs", 1.0))  # no take-off this long -> re-jump
+    portal_retry = float(map_cfg.get("portal_retry_secs", 1.0))  # no teleport this long -> press again
+    drop_retry = float(map_cfg.get("drop_retry_secs", 0.8))      # not falling this long -> press again
 
     def _transition(seg, mmx, mmy):
         """Run the segment's end transition (portal / jump / ladder climb / drop-through / none)
         and advance. Returns heading."""
         nxt = route[(seg_i[0] + 1) % len(route)]
         print(f"[sweep] segment {seg_i[0] + 1} end at x={mmx} y={mmy}")
+        if seg.get("then") and attack_end[0] is not None:
+            # the fast beat starts the transition ~70 ms after the last attack, while its animation
+            # still swallows input: the portal UP was ignored and waited out up_wait (3-4.6 s
+            # portals, live) -- let the animation finish first
+            core.time.sleep(sweep.prewalk_secs(0.0, core.time.time() - attack_end[0],
+                                               attack_recover))
         t0 = core.time.time()
         ok = sweep.route_transition(seg.get("then"), sweep.seg_heading(seg),
                                     sweep.seg_heading(nxt), keys, core.kb,
-                                    read_xy=lambda: core.stable_char(2),
+                                    # fast tracked reads (~17 ms) instead of stable_char(2)
+                                    # (~267 ms each): landing/grab seen ~0.3-0.5 s sooner
+                                    read_xy=_fast_reader(mmx, mmy), poll=0.05, steady_reads=3,
+                                    steady_secs=0.4, climb_land_tol=1, climb_finish=0.3,
                                     sleep=core.time.sleep,
                                     align=lambda: _portal_align(seg, mmx, mmy),
                                     target_y=nxt.get("y"),   # climb/drop: must LAND on that floor
                                     # climb: no take-off within climb_retry_secs (hit before the
                                     # jump) -> line up and jump again (user: retry in ~1 s)
-                                    up_wait=climb_retry if seg.get("then") == "climb" else 2.5,
+                                    # no take-off / teleport / fall this long -> press again
+                                    # (a press right after an AoE is swallowed by its animation)
+                                    up_wait={"climb": climb_retry, "up": portal_retry,
+                                             "down_jump": drop_retry}.get(seg.get("then"), 2.5),
+                                    up_tries=3, drop_tries=3,
                                     # running ladder jump (segment "run_takeoff", ladder_test.py)
                                     run_takeoff=seg.get("run_takeoff"),
                                     run_up=int(seg.get("run_up", 8)),
@@ -463,6 +496,22 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 last[0] = (x, y)
             return x, y
         return read
+
+    def _moved_since(mmx, mmy, heading):
+        """moved() for the push pre-walk: True once a fast minimap read is >= 1 px past mmx in the
+        heading (she is really walking). No usable start read -> always True (plain pre_walk)."""
+        if mmx is None or mmx < 0:
+            return lambda: True
+        rd, t0 = _fast_reader(mmx, mmy), core.time.time()
+
+        def moved():
+            x = rd()[0]
+            ok = x >= 0 and (x - mmx) * heading >= 1
+            if ok:
+                core.dbg(f"[sweep] push pre-walk: moving after {core.time.time() - t0:.2f}s "
+                         f"(mm {mmx}->{x})")
+            return ok
+        return moved
 
     def _portal_align(seg, mmx, mmy, target=None):
         """Line up on the portal x (or `target`, e.g. a running jump's run-up start) arriving in
@@ -623,11 +672,24 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 # horizontally), so pool x across floors; y (camera clamp) is per floor.
                 xs = sorted(p[0] for d in recent_pos.values() for p in d)
                 home_x = xs[len(xs) // 2] if len(xs) >= 5 else None
-                if len(lock_win) >= 2 and _against_heading(lock_win[0], lock_win[-1], heading,
-                                                           home_x=home_x):
-                    # over the last few beats she advanced but "she" slid backwards: scenery
-                    print(f"[sweep] HP-bar lock drifting against the heading (x={px}) -> re-anchor")
-                    _reanchor(_anchor, list(recent_pos[_floor_key(_mmy)]))
+                drift = len(lock_win) >= 2 and _against_heading(lock_win[0], lock_win[-1], heading,
+                                                                home_x=home_x)
+                _shape = getattr(frame, "shape", None)       # (tests pass a dummy frame)
+                still = (len(lock_win) >= 2 and _shape is not None
+                         and _static_off_centre(lock_win[0], lock_win[-1], heading, _shape[1] / 2))
+                if drift or still:
+                    # over the last few beats she advanced but "she" slid backwards (scenery) or
+                    # sat still far off-centre (another bar, e.g. a mob's)
+                    why = "drifting against the heading" if drift else "stuck off-centre"
+                    print(f"[sweep] HP-bar lock {why} (x={px}) -> re-anchor"
+                          + (" -- is her HP bar shown in game? (it locked onto a mob's bar)"
+                             if still else ""))
+                    core.dbg(f"[sweep] HP-bar lock {why} (x={px}, mm {lock_win[0][1]}->{mmx}) "
+                             f"-> re-anchor")
+                    # a still lock also polluted her usual spot: re-seed from the screen centre
+                    _reanchor(_anchor, [] if still else list(recent_pos[_floor_key(_mmy)]))
+                    if still:
+                        recent_pos[_floor_key(_mmy)].clear()
                     lock_win.clear()
                     continue
                 recent_pos[_floor_key(_mmy)].append(pos)
@@ -637,9 +699,30 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                                          band_up=band_up, band_down=band_down)
             core.STATUS["count"] = len(mob_xs)
             if route and finishing:
-                act = sweep.finish_or_move(mob_xs, px, heading, attack_range, finish_n[0], finish_max)
+                # segment "floor_end": the floor goes on past the end point (a portal mid-floor):
+                # walk on to mobs out there, up to floor_end - finish_edge_margin, then come back
+                fe = seg.get("floor_end")
+                can_walk = (fe is not None and mmx >= 0
+                            and (fe - mmx) * heading > finish_edge_margin)
+                act = sweep.finish_or_move(mob_xs, px, heading, attack_range, finish_n[0], finish_max,
+                                           reach=finish_reach, can_walk=can_walk)
+                if act == sweep.ADVANCE and last_act[0] == sweep.FIRE and not rechecked[0]:
+                    rechecked[0] = True               # AoE effects hide mobs: look once more
+                    core.dbg("[sweep] finishing: nothing seen right after the AoE -> one more look")
+                    core.time.sleep(walk_recheck)
+                    continue
+                rechecked[0] = False
+                if _debug:
+                    core.dbg(f"[sweep] seg{seg_i[0] + 1} finish mm=({mmx},{_mmy}) p=({px},{pfeet}) "
+                             f"kept={mob_xs} -> {act} (round {finish_n[0]}, walk ok={can_walk})")
                 if act == sweep.ADVANCE:
                     heading = _transition(seg, mmx, _mmy)
+                    continue
+                if act == sweep.WALK:                 # close in on mobs past the end point
+                    last_act[0] = sweep.WALK
+                    sweep.apply_action(sweep.WALK, heading, keys, core.kb, sleep=core.time.sleep)
+                    progress.mark_walking()
+                    core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))
                     continue
                 if finish_n[0] == 0:
                     print(f"[sweep] segment {seg_i[0] + 1} end reached mid-fight -- finishing "
@@ -649,6 +732,8 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 sweep.apply_action(sweep.FIRE, heading, keys, core.kb, sleep=core.time.sleep,
                                    attack_hold=aoe_hold, face_tap=False,
                                    keep_holding=lambda: _still_in_range(_h, _t0), hold_max=60)
+                attack_end[0] = core.time.time()
+                last_act[0] = sweep.FIRE
                 continue
             if route:
                 # Route attack leg, fixed rhythm: one push (z) then hold x (AoE); no push within
@@ -690,13 +775,20 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 _t0, _h = core.time.time(), heading
                 sweep.apply_action(act, heading, keys, core.kb, sleep=core.time.sleep,
                                    attack_hold=aoe_hold, pull_settle=push_settle,
-                                   face_tap=not edge_zone, pre_walk=push_prewalk,
+                                   face_tap=not edge_zone, dash_press=push_press,
+                                   # walk >= push_prewalk AND until the minimap shows her moving
+                                   # forward: the AoE animation eats the walk for an unknown
+                                   # time (a fixed 0.3 s guess still got swallowed, user)
+                                   pre_walk=push_prewalk, moved=_moved_since(mmx, _mmy, heading),
+                                   pre_walk_max=push_prewalk_max,
                                    # AoE-until-clear only for AoE-only (FIRE); after a push the
                                    # AoE stays the fixed 2 casts (user)
                                    keep_holding=(lambda: _still_in_range(_h, _t0))
                                    if act == sweep.FIRE else None, hold_max=60)
                 if act == sweep.WALK:
                     progress.mark_walking()
+                else:
+                    attack_end[0] = core.time.time()
                 core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))
                 continue
             now = core.time.time()

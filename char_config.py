@@ -40,6 +40,53 @@ def apply_character(map_cfg, char_cfg):
     return merged
 
 
+def buff_plan(map_cfg, skill_interval):
+    """Like parse_buff_groups, plus each group's kind: [(keys, interval_secs, potion)]. A group
+    with "potion": true is instant (1, 3); the rest are SKILLS (d, g) that need the attack root to
+    clear and a gap between casts (see cast_buffs)."""
+    groups = map_cfg.get("buff_groups")
+    if groups:
+        plan = [(list(g.get("keys", [])), float(g.get("interval_secs", 300)), bool(g.get("potion")))
+                for g in groups]
+    else:
+        plan = [(k, iv, False) for k, iv in parse_buff_groups(map_cfg, skill_interval)]
+    return [(k, iv, p) for k, iv, p in plan if k]
+
+
+def cast_buffs(due, kb, sleep, settle=0.6, gap=0.7, press=0.3, potion_press=0.05,
+               potion_gap=0.05):
+    """Press the due buff groups: due = [(keys, potion)]. SKILLS need her stopped with the attack
+    root cleared (release all, `settle` s) and `gap` s after each cast so the next skill isn't
+    swallowed by its animation. POTIONS are instant and work during an attack or skill animation
+    (user), so they are interleaved, potion first: potion, skill, potion, skill ... -- the first
+    inside the settle wait (while the attack finishes), each next one inside the gap after a skill
+    (the waits keep their length). Potions left over follow quickly; with no skill due, potions are
+    pressed without stopping at all. Returns the keys pressed, in order."""
+    pots = [k for keys, potion in due if potion for k in keys]
+    skills = [k for keys, potion in due if not potion for k in keys]
+    order = []
+
+    def potion(k):
+        kb.safe_press(k); sleep(potion_press); kb.safe_release(k); sleep(potion_gap)
+        order.append(k)
+    if skills:
+        kb.safe_release_all()
+        used = 0.0
+        if pots:                                       # a potion while the attack finishes
+            potion(pots.pop(0)); used = potion_press + potion_gap
+        sleep(max(0.0, settle - used))
+        for k in skills:
+            kb.safe_press(k); sleep(press); kb.safe_release(k)
+            order.append(k)
+            used = 0.0
+            if pots:                                   # a potion during this skill's animation
+                potion(pots.pop(0)); used = potion_press + potion_gap
+            sleep(max(0.0, gap - used))
+    for k in pots:                                     # left over (or no skill due): quick
+        potion(k)
+    return order
+
+
 def parse_buff_groups(map_cfg, skill_interval):
     """Normalize a map config's buff spec into a list of (keys, interval_secs) tuples, each
     group firing on its OWN interval (e.g. 'd' every 5min and a slow 'G' every 15min run
