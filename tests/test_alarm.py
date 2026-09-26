@@ -53,3 +53,11 @@ def test_controller_single_false_positive_never_sounds():
     c.update(True)
     assert not a.active
     a.stop()
+
+
+def test_test_runs_are_silent():
+    """conftest.py: the real beep and the shared Discord notifier are disabled during tests."""
+    import notify
+    import winsound
+    assert winsound.Beep(1000, 50) is None                     # no-op, no sound
+    assert notify.send("another_player", "test") is False      # disabled: nothing posted
