@@ -8,17 +8,31 @@ def _minimap(np_img):
     return np_img[core.MM_Y:ey, core.MM_X:ex]
 
 
+def _char_blobs_from_mm(mm):
+    """Yellow character-dot-like blobs on a MINIMAP crop: [(x, y, area)]. Tight to the real dot's
+    signature (hue~29, sat~245, val~242); a translucent buff/heat-aura glow reads as lower
+    saturation/value -> excluded. Size ~54px; keep 15-120. Value floor 205: her dot is ~248
+    bright, while map art on some minimaps is the same hue but darker (flat_sweep's recycling-bin
+    graphic, V ~165, sat at (208, 63)) -- at a floor of 165 it passed as a second "dot" in 638/646
+    frames and the nearest-to-last tracker latched onto it. At 205: 1 blob in 731/796 frames
+    (flat_sweep + deep_sea_2), no dots lost."""
+    hsv = core.cv2.cvtColor(mm, core.cv2.COLOR_BGR2HSV)
+    mask = core.cv2.inRange(hsv, core.np.array([20, 165, 205]), core.np.array([36, 255, 255]))
+    num, labels, stats, cents = core.cv2.connectedComponentsWithStats(mask, 8)
+    return [(int(cents[i][0]), int(cents[i][1]), int(stats[i][4]))
+            for i in range(1, num) if 15 <= stats[i][4] <= 120]
+
+
+def char_blobs(np_img):
+    """All character-dot-like blobs in the minimap of a full BGR frame: [(x, y, area)]."""
+    mm = core._minimap(np_img)
+    return [] if mm is None else core._char_blobs_from_mm(mm)
+
+
 def _char_color_from_mm(mm, near=None):
     """Character (x,y) via COLOR (bright yellow blob) from a MINIMAP crop `mm`. Shared by
     get_character_color / get_character_full so each does exactly one grab. (-1,-1) if none."""
-    hsv = core.cv2.cvtColor(mm, core.cv2.COLOR_BGR2HSV)
-    # tight to the real dot's signature (hue~29, sat~245, val~242). A translucent buff/
-    # heat-aura glow reads as lower saturation/value -> excluded. Size ~54px; keep 15-120.
-    mask = core.cv2.inRange(hsv, core.np.array([20, 165, 165]), core.np.array([36, 255, 255]))
-    num, labels, stats, cents = core.cv2.connectedComponentsWithStats(mask, 8)
-    blobs = [(int(cents[i][0]), int(cents[i][1]), int(stats[i][4]))
-             for i in range(1, num) if 15 <= stats[i][4] <= 120]
-    pick = core._pick_char_blob(blobs, near)
+    pick = core._pick_char_blob(core._char_blobs_from_mm(mm), near)
     if pick is None:
         return -1, -1
     return pick[0], pick[1]

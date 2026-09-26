@@ -342,8 +342,9 @@ def test_resync_failed_jump_bottom_right_goes_to_the_bottom_portal_leg():
 
 
 def test_resync_skips_segments_already_past_their_end():
-    # on the bottom at x=200: seg 6 (left to 214) is already done -> seg 7 (left to 45)
-    assert sweep.resync_segment(ROUTE, 4, 200, 106) == 6
+    # on the bottom (y 106) at x=200: seg 6 (left to 214) is already done -> the next bottom-floor
+    # segment, seg 1 (right to 275). (Seg 7's floor, y 99 here, is a different floor from 106.)
+    assert sweep.resync_segment(ROUTE, 4, 200, 106) == 0
 
 
 def test_resync_none_when_no_segment_on_this_level():
@@ -721,3 +722,24 @@ def test_walk_right_after_an_attack_gets_one_second_look_first():
     assert sweep.recheck_before_walk(sweep.WALK, sweep.FIRE, rechecked=True) is False  # 2nd: go
     assert sweep.recheck_before_walk(sweep.WALK, sweep.WALK, rechecked=False) is False
     assert sweep.recheck_before_walk(sweep.FIRE, sweep.FIRE, rechecked=False) is False
+
+
+# --- resync by the NEAREST floor: level_tol 10 matched the upper floor (y 55) for a read of y 63
+# on the right platform (y 62) and ping-ponged segments 4 <-> 6.
+
+def test_resync_prefers_the_nearest_floor():
+    route = [{"dir": "right", "until_x": 320, "y": 62}, {"dir": "left", "until_x": 45, "y": 55}]
+    assert sweep.resync_segment(route, 1, 240, 63) == 0
+    assert sweep.resync_segment(route, 0, 240, 63) == 0
+
+
+def test_minimap_dot_filter_ignores_darker_map_art():
+    """flat_sweep's minimap has a yellow recycling-bin graphic (V ~165) the same hue as her dot
+    (V ~248); it passed as a second 'dot' and the tracker latched onto it."""
+    import numpy as np
+    import core
+    mm = np.full((150, 400, 3), 40, np.uint8)
+    mm[60:67, 205:212] = (12, 149, 165)          # bin graphic
+    mm[103:110, 196:203] = (50, 246, 248)        # her dot
+    blobs = core._char_blobs_from_mm(mm)
+    assert [(x, y) for x, y, _a in blobs] == [(199, 106)]

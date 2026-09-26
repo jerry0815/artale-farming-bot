@@ -499,15 +499,22 @@ class Progress:
         return self.walk >= self.stuck_secs
 
 
-def resync_segment(route, cur_i, mmx, mmy, level_tol=10):
+def resync_segment(route, cur_i, mmx, mmy, level_tol=10, same_floor=2):
     """Index of the segment to continue from when she is off-route: the next one in route order
-    (after cur_i, cyclic) on HER level (seg "y" within level_tol of mmy) whose until_x is still
-    ahead of her. None if no segment matches (segments without "y" never match)."""
+    (after cur_i, cyclic) on HER floor whose until_x is still ahead of her. Her floor = the segment
+    level(s) NEAREST her minimap y (within level_tol; levels within same_floor px of the nearest
+    count as the same floor) -- a plain +-10 window matched the upper floor (y 55) for a read of
+    y 63 on the right platform (y 62) and ping-ponged segments. None if nothing matches; segments
+    without "y" never match."""
+    ys = [abs(s["y"] - mmy) for s in route if s.get("y") is not None]
+    if not ys or min(ys) > level_tol:
+        return None
+    best = min(ys)
     n = len(route)
     for k in range(1, n + 1):
         i = (cur_i + k) % n
         seg = route[i]
-        if seg.get("y") is None or abs(seg["y"] - mmy) > level_tol:
+        if seg.get("y") is None or abs(seg["y"] - mmy) > best + same_floor:
             continue
         if not seg_done(seg, mmx):
             return i

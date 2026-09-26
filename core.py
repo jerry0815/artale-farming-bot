@@ -1086,7 +1086,7 @@ from focus_util import (  # noqa: E402  (extracted; re-exported so core.<name> s
 
 
 from charloc import (  # noqa: E402  (extracted; re-exported so core.<name> still works)
-    _minimap, _char_color_from_mm, get_character_color,
+    _minimap, _char_color_from_mm, _char_blobs_from_mm, char_blobs, get_character_color,
     _pick_char_blob, get_character_full, swim_read,
     minimap_scroll,
 )
