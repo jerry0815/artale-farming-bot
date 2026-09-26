@@ -226,6 +226,21 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                                      window_secs=float(map_cfg.get("exp_window_secs", 600)),
                                      max_exp_per_sec=float(map_cfg.get("exp_max_per_sec", 20000)))
 
+    # Another-player check costs ~65 ms (its own capture + template match): once per enemy_every s,
+    # not every beat.
+    enemy_every = float(map_cfg.get("enemy_check_secs", 1.0))
+    _last_enemy = [0.0]
+
+    def _mm_read(frame):
+        """Minimap (x, y) from the beat's OWN frame (~0.3 ms) -- stable_char(2) took ~267 ms (4
+        separate grabs + sleeps) every beat, the bulk of the ~0.5 s stall between actions. Tracks
+        the blob nearest the last accepted read; MinimapGate still drops phantom jumps. Falls back
+        to the colour+template read of the same frame."""
+        x, y = core.get_character_color(frame, near=gate.last)
+        if x < 0:
+            x, y = core.get_character_full(frame)
+        return x, y
+
     def guard():
         """Per-beat housekeeping: STOP/time-cap/pause/focus/lie-check/EXP/enemy. Mirrors farm_water."""
         now = core.time.time()
@@ -243,12 +258,14 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         core.STATUS["state"] = "farming"; active_tick(now)
         core.lie_check_fast_tick(); core.STATUS["lie"] = core.is_lie_check_active()
         exp_tick()
-        if enemy_check and enemy_check():
-            print("[sweep] another player -> ALARM + panic")
-            core.enemy_alarm_on()
-            if panic:
-                panic()
-            core.time.sleep(1); return "skip"
+        if enemy_check and now - _last_enemy[0] >= enemy_every:
+            _last_enemy[0] = now
+            if enemy_check():
+                print("[sweep] another player -> ALARM + panic")
+                core.enemy_alarm_on()
+                if panic:
+                    panic()
+                core.time.sleep(1); return "skip"
         return "ok"
 
     edge_wait = float(map_cfg.get("edge_wait_secs", 6.0))  # max stepping time hunting the edge
@@ -455,7 +472,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             if route:
                 seg = route[seg_i[0]]
                 now = core.time.time()
-                mmx, _mmy = gate.feed(*core.stable_char(2), now)
+                mmx, _mmy = gate.feed(*_mm_read(frame), now)
                 if air[0] is not None:                              # just jumped: landed yet?
                     t_j, ty = air[0]
                     st = sweep.landing_state(now - t_j, _mmy, ty)

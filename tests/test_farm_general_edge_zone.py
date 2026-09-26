@@ -9,6 +9,14 @@ import sweep
 farm_general = pytest.importorskip("farm_general")
 
 
+@pytest.fixture(autouse=True)
+def _beat_reads_follow_stable_char(monkeypatch):
+    """The loop reads the minimap from the beat's own frame (core.get_character_color(frame)); these
+    tests fake positions through core.stable_char, so route the per-frame reads through it."""
+    monkeypatch.setattr(core, "get_character_color", lambda *a, **k: core.stable_char(2))
+    monkeypatch.setattr(core, "get_character_full", lambda *a, **k: core.stable_char(2))
+
+
 def test_edge_zone_fights_then_steps_then_advances(monkeypatch):
     events = []
     kb = core.kb
@@ -229,3 +237,38 @@ def test_after_the_jump_regular_beats_with_a_landing_check(monkeypatch, capsys, 
     farm_general.farming_loop_general(cfg, max_seconds=30)
     out = capsys.readouterr().out
     assert "slope bottom -> jump" in out and expect in out
+
+
+def test_enemy_check_runs_at_most_once_per_second(monkeypatch):
+    """~65 ms per call; it ran every beat. Now throttled to enemy_check_secs (1.0)."""
+    clock = [1000.0]
+    kb = core.kb
+    monkeypatch.setattr(kb, "pause", False, raising=False)
+    monkeypatch.setattr(kb, "safe_press", lambda k: None)
+    monkeypatch.setattr(kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(kb, "safe_release_all", lambda: None)
+    for name, fn in {"focus": lambda: True, "set_minimap": lambda *a: None,
+                     "ensure_game_focused": lambda **k: True, "lie_check_fast_tick": lambda: None,
+                     "is_lie_check_active": lambda: False, "capture": lambda: object(),
+                     "make_exp_tracker": lambda **k: (lambda: None),
+                     "stable_char": lambda n=3: (100, 106),
+                     "start_safety_monitor": lambda *a, **k: None,
+                     "make_active_timer": lambda: (lambda now: None, lambda now: None)}.items():
+        monkeypatch.setattr(core, name, fn, raising=False)
+    monkeypatch.setattr(core.time, "time", lambda: clock[0])
+    monkeypatch.setattr(core.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    import mob_detect
+    monkeypatch.setattr(mob_detect, "load_yolo", lambda p: object())
+
+    def detect(*a, **k):
+        clock[0] += 0.1                                      # a beat takes ~0.1 s now
+        return ([], (0.9, 480, 300, 40, 70))
+    monkeypatch.setattr(mob_detect, "yolo_detect", detect)
+    calls = []
+    cfg = {"loop": "sweep", "anchor": "yolo_player", "attack_key": "x",
+           "minimap": {"x": 0, "y": 0, "w": 10, "h": 10},
+           "route": [{"dir": "right", "until_x": 275, "then": None, "attack": True, "y": 106}]}
+    core.STOP.clear()
+    farm_general.farming_loop_general(cfg, enemy_check=lambda: calls.append(1) or False,
+                                      max_seconds=3)
+    assert 2 <= len(calls) <= 4                                # ~3 s of beats -> ~3 checks, not ~20+

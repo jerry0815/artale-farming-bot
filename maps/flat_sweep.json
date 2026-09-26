@@ -19,7 +19,7 @@
   "attack_range": 200,
   "aoe_max": 6,
   "start_heading": 1,
-  "beat_gap": 0.05,
+  "beat_gap": 0.02,
   "gather": {
     "key": "z",
     "grp": 90,
