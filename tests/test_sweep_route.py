@@ -47,6 +47,9 @@ def test_transition_none_is_a_noop_success():
     kb = _KB()
     assert sweep.route_transition(None, 1, 1, KEYS, kb, read_xy=_reader([(0, 0)])) is True
     assert not [e for e in kb.events if e[0] == "press"]
+    # ...but it lets go of the walk key: WALK holds the arrow until released, so a held LEFT
+    # carried her off middle_road2's middle floor after segment 2 ended (live).
+    assert ("release_all", None) in kb.events
 
 
 def test_transition_up_confirms_on_level_change():
@@ -82,6 +85,49 @@ def test_transition_up_ignores_failed_minimap_reads():
     ok = sweep.route_transition("up", -1, -1, KEYS, kb, read_xy=_reader([(214, 106), (-1, -1)]),
                                 up_wait=0.3, poll=0.1)
     assert ok is False
+
+
+KEYS_D = dict(KEYS, down="D")
+
+
+def test_transition_down_jump_holds_down_and_jumps_and_waits_for_the_landing():
+    # middle_road2: middle floor y 96 -> drop through -> bottom floor y 156
+    kb = _KB()
+    ok = sweep.route_transition("down_jump", -1, 1, KEYS_D, kb,
+                                read_xy=_reader([(78, 96), (78, 98), (78, 130), (78, 156),
+                                                 (78, 156), (78, 156)]), poll=0.1)
+    presses = [k for e, k in kb.events if e == "press"]
+    assert ok is True
+    assert presses.index("D") < presses.index("J")
+    assert ("release", "D") in kb.events
+
+
+def test_transition_down_jump_reports_failure_when_she_never_drops():
+    kb = _KB()
+    ok = sweep.route_transition("down_jump", -1, 1, KEYS_D, kb, read_xy=_reader([(78, 96)]),
+                                up_wait=0.3, poll=0.1)
+    assert ok is False
+
+
+def test_transition_climb_jumps_holds_up_until_she_stands_on_the_floor_above():
+    # middle_road2 ladder at x~99: y 96 -> climbs -> 51, stays there
+    kb = _KB()
+    seq = [(99, 96), (99, 90), (99, 80), (99, 70), (99, 60), (99, 51), (99, 51), (99, 51)]
+    ok = sweep.route_transition("climb", 1, 1, KEYS, kb, read_xy=_reader(seq), poll=0.1)
+    presses = [k for e, k in kb.events if e == "press"]
+    assert ok is True
+    assert presses.index("J") < presses.index("U")
+    assert ("release", "U") in kb.events
+
+
+def test_transition_climb_retries_after_aligning_when_she_misses_the_ladder():
+    kb = _KB()
+    aligned = []
+    ok = sweep.route_transition("climb", 1, 1, KEYS, kb, read_xy=_reader([(99, 96)]),
+                                up_wait=0.3, poll=0.1, align=lambda: aligned.append(1))
+    presses = [k for e, k in kb.events if e == "press"]
+    assert ok is False
+    assert presses.count("J") == 3 and len(aligned) == 3      # climb_tries default 3
 
 
 # --- same-platform filter: decide() is x-only, so mobs on another LEVEL must be dropped first ---
@@ -413,6 +459,19 @@ def test_approach_from_the_right_side_only_moves_left():
     assert 217 <= w.x <= 221
 
 
+def test_approach_from_far_walks_in_one_hold_then_taps():
+    # the line-up used to TAP the whole way (0.3 s tap + stop each), ~5 s from 20 px out = the
+    # stall at the start of middle_road2's portal/ladder legs. Far away: one continuous walk.
+    w = _World(79)
+    t = [0.0]
+    def sleep(dt):
+        t[0] += dt; w.sleep(dt)
+    assert sweep.approach_x(99, 1, KEYS, w, w.read, sleep, tol=1) is True
+    assert 98 <= w.x <= 100
+    assert [k for e, k in w.events if e == "press"].count("R") <= 6     # 1 walk + a few taps
+    assert t[0] < 2.2                                 # 20 px at 14 px/s = 1.4 s of walking
+
+
 # --- push from a walk: pushing from a standstill sometimes glitches (user) -> walk >= pre_walk s
 # in the heading first and push while still moving (the recording holds the arrow through z).
 
@@ -592,3 +651,73 @@ def test_segment_without_an_edge_never_blocks_the_push():
     seg = {"dir": "right", "until_x": 275, "edge": False}
     assert sweep.near_seg_end(seg, 274, margin=18) is False
     assert sweep.near_seg_end({"dir": "right", "until_x": 275}, 274, margin=18) is True
+
+
+def test_transition_waits_count_the_time_spent_reading_the_minimap():
+    # live read_xy is stable_char(2) (~0.27 s); up_wait 2.5 s used to last ~9 s of real time
+    import time
+    def slow_read():
+        time.sleep(0.05)
+        return (99, 96)
+    t0 = time.monotonic()
+    ok = sweep.route_transition("climb", 1, 1, KEYS, _KB(), read_xy=slow_read, up_wait=0.3, poll=0.01)
+    assert ok is False
+    assert time.monotonic() - t0 < 1.0            # ~2 x 0.3 s; counting only polls: ~2 x 1.5 s
+
+
+def test_hop_jumps_while_walking_the_heading():
+    # stuck recovery: middle_road2 dropped her on a low step (x 57, y 103) left of the middle
+    # floor; walking right just pushed into the step for 100 s. A jump in the heading climbs it.
+    kb = _KB()
+    sweep.hop(1, KEYS, kb)
+    ev = kb.events
+    assert ev.index(("press", "R")) < ev.index(("press", "J"))
+    assert ("release", "R") in ev[ev.index(("press", "J")):]
+
+
+def test_climb_with_target_level_retries_after_a_jump_that_misses_the_ladder():
+    # live: a jump that didn't grab (y 96 -> 88 -> 96) was reported as a climb
+    kb = _KB()
+    aligned = []
+    seq = [(99, 96), (99, 88), (99, 96), (99, 96),                  # attempt 1: jump, land back
+           (99, 96), (99, 80), (99, 65), (99, 51), (99, 51)]        # attempt 2: climbs
+    ok = sweep.route_transition("climb", 1, 1, KEYS, kb, read_xy=_reader(seq), poll=0.1,
+                                target_y=51, align=lambda: aligned.append(1))
+    presses = [k for e, k in kb.events if e == "press"]
+    assert ok is True
+    assert presses.count("J") == 2 and len(aligned) == 2
+
+
+def test_climb_with_target_level_fails_when_she_never_reaches_it():
+    kb = _KB()
+    seq = [(99, 96), (99, 88), (99, 96), (99, 96)]
+    ok = sweep.route_transition("climb", 1, 1, KEYS, kb, read_xy=_reader(seq), poll=0.1,
+                                up_wait=0.5, target_y=51)
+    assert ok is False
+    assert [k for e, k in kb.events if e == "press"].count("J") == 3
+
+
+def test_climb_run_mode_runs_in_and_jumps_at_the_takeoff_holding_the_arrow():
+    # ladder_test.py (live): a running jump taken off at x=92 grabbed middle_road2's ladder most
+    # reliably. Line up at takeoff - runup, hold the heading, jump when the dot reaches takeoff.
+    kb = _KB()
+    targets = []
+    fast = _reader([(84, 96), (88, 96), (91, 96), (92, 96)])
+    seq = [(92, 96), (96, 80), (99, 65), (99, 51), (99, 51)]
+    ok = sweep.route_transition("climb", 1, 1, KEYS, kb, read_xy=_reader(seq), poll=0.1,
+                                target_y=51, align_to=targets.append, fast_xy=fast,
+                                run_takeoff=92, run_up=8, air_hold=0.3)
+    ev = kb.events
+    assert ok is True and targets == [84]
+    assert ev.index(("press", "R")) < ev.index(("press", "J")) < ev.index(("press", "U"))
+    assert ev.index(("release", "R")) > ev.index(("press", "J"))     # held through the air
+
+
+def test_walk_right_after_an_attack_gets_one_second_look_first():
+    # middle_road2 (user): she walked off mobs still in front of her -- right after the AoE her
+    # skill effects hide them from the detector for a frame. One re-look before walking away.
+    assert sweep.recheck_before_walk(sweep.WALK, sweep.GATHER, rechecked=False) is True
+    assert sweep.recheck_before_walk(sweep.WALK, sweep.FIRE, rechecked=False) is True
+    assert sweep.recheck_before_walk(sweep.WALK, sweep.FIRE, rechecked=True) is False  # 2nd: go
+    assert sweep.recheck_before_walk(sweep.WALK, sweep.WALK, rechecked=False) is False
+    assert sweep.recheck_before_walk(sweep.FIRE, sweep.FIRE, rechecked=False) is False

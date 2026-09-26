@@ -162,7 +162,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     gather = map_cfg.get("gather")
     keys = {"attack": attack_key, "dash": (gather or {}).get("key", "z"),
             "right": core.Key.right, "left": core.Key.left,
-            "up": core.Key.up, "jump": core.JUMP}
+            "up": core.Key.up, "down": core.Key.down, "jump": core.JUMP}
 
     # Route mode: a recorded, cyclic list of segments (build_sweep_route.py). Heading is fixed per
     # segment; a segment ends when the minimap x reaches its until_x, then its transition ("up"
@@ -192,6 +192,8 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     push_prewalk = float(map_cfg.get("push_prewalk_secs", 0.0))  # walk this long, push while moving
     portal_tol = int(map_cfg.get("portal_tol", 2))             # minimap px to stand on the portal
     portal_lead = int(map_cfg.get("portal_lead", 20))          # start the portal line-up this early
+    climb_tol = int(map_cfg.get("climb_tol", portal_tol))      # ladder line-up tolerance (px)
+    portal_brake = int(map_cfg.get("portal_brake", 8))         # line-up: walk until this close, then tap
     reach = sweep.dash_reach(attack_range, gcfg) if gcfg else attack_range
 
     # Buffs -- same scheme as farm_water (each group on its own interval).
@@ -263,9 +265,10 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     gate = sweep.MinimapGate(max_jump=int(map_cfg.get("mm_max_jump", 40)))
     progress = sweep.Progress(stuck_secs=float(map_cfg.get("stuck_secs", 4.0)))
 
-    def _reanchor_here():
-        """Re-seed the HP-bar lock at her usual screen spot for the floor she is on NOW."""
-        x, y = core.stable_char(2)
+    def _reanchor_here(y_hint=None):
+        """Re-seed the HP-bar lock at her usual screen spot for the floor she is on NOW. y_hint
+        (the next segment's floor y) skips the ~0.27 s stable_char read after a transition."""
+        y = y_hint if y_hint is not None else core.stable_char(2)[1]
         _reanchor(_anchor, list(recent_pos[_floor_key(y)]) if y >= 0 else [])
         lock_win.clear()
 
@@ -274,10 +277,17 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         heading, or None if no segment matches (keep going; the stuck clock restarts)."""
         progress.reset()
         j = sweep.resync_segment(route, seg_i[0], mmx, mmy)
-        if j is None:
-            print(f"[sweep] {why} at x={mmx} y={mmy} -- no route segment on this level")
-            return None
+        if j is None or j == seg_i[0]:
+            # no other segment fits: she is on an odd spot (middle_road2: a low step left of the
+            # middle floor, y 103) walking into a step/wall -> jump in the heading to get over it
+            print(f"[sweep] {why} at x={mmx} y={mmy} -- "
+                  f"{'no route segment on this level' if j is None else 'same segment'}: hop")
+            core.dbg(f"[sweep] {why} at x={mmx} y={mmy} -> hop")
+            h = sweep.seg_heading(route[seg_i[0]])
+            sweep.hop(h, keys, core.kb, sleep=core.time.sleep)
+            return h
         print(f"[sweep] {why} at x={mmx} y={mmy} -> resync to segment {j + 1}")
+        core.dbg(f"[sweep] {why} at x={mmx} y={mmy} -> resync to segment {j + 1}")
         core.kb.safe_release_all()
         seg_i[0] = j; zone_walk[0] = 0.0; finish_n[0] = 0
         _reanchor_here()
@@ -293,11 +303,21 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         nxt = route[seg_i[0]]
         zone_walk[0] = 0.0; finish_n[0] = 0
         gate.reset(); progress.reset()                 # a transition may teleport her (portal)
-        _reanchor_here()                               # the camera moved: re-seed the HP-bar lock
+        last_act[0] = None                             # no walk-off re-look at a segment start
+        h = sweep.seg_heading(nxt)
+        # start walking the new heading NOW: the first beat (minimap read + capture + YOLO) takes
+        # ~1 s, and she stood still through it at every segment start (user). The beat takes over.
+        # Not when the new leg is a portal/ladder line-up she is already close to (middle_road2:
+        # segment 2 ends 9 px from the ladder) -- a blind ~1 s walk carried her past the ladder.
+        if not (nxt.get("then") in ("up", "climb") and mmx is not None and mmx >= 0
+                and sweep.near_seg_end(nxt, mmx, portal_lead)):
+            sweep.apply_action(sweep.WALK, h, keys, core.kb, sleep=core.time.sleep)
+            progress.mark_walking()
+        _reanchor_here(nxt.get("y"))                   # the camera moved: re-seed the HP-bar lock
         core.STATUS["node"] = f"seg{seg_i[0] + 1}"
         print(f"[sweep] -> segment {seg_i[0] + 1}: {nxt['dir']} to x={nxt['until_x']}"
               f"{' (travel)' if not nxt.get('attack', True) else ''}")
-        return sweep.seg_heading(nxt)
+        return h
 
     aoe_hold_max = float(map_cfg.get("aoe_hold_max_secs", 6.0))  # cap on one AoE-until-clear hold
 
@@ -320,24 +340,63 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         return any(-30 <= (x - pos[0]) * heading <= attack_range for x in xs)
 
     finish_max = int(map_cfg.get("finish_rounds", 3))   # AoE rounds allowed past a segment end
+    last_act, rechecked = [None], [False]               # walk-off re-look (recheck_before_walk)
+    walk_recheck = float(map_cfg.get("walk_recheck_secs", 0.15))
     finish_n = [0]
 
+    climb_fails = [0]
+    climb_rounds = int(map_cfg.get("climb_rounds", 3))    # line-up+climb rounds before moving on
+    climb_retry = float(map_cfg.get("climb_retry_secs", 1.0))  # no take-off this long -> re-jump
+
     def _transition(seg, mmx, mmy):
-        """Run the segment's end transition (portal / jump / none) and advance. Returns heading."""
+        """Run the segment's end transition (portal / jump / ladder climb / drop-through / none)
+        and advance. Returns heading."""
         nxt = route[(seg_i[0] + 1) % len(route)]
         print(f"[sweep] segment {seg_i[0] + 1} end at x={mmx} y={mmy}")
+        t0 = core.time.time()
         ok = sweep.route_transition(seg.get("then"), sweep.seg_heading(seg),
                                     sweep.seg_heading(nxt), keys, core.kb,
                                     read_xy=lambda: core.stable_char(2),
                                     sleep=core.time.sleep,
-                                    align=lambda: _portal_align(seg, mmx, mmy))
+                                    align=lambda: _portal_align(seg, mmx, mmy),
+                                    target_y=nxt.get("y"),   # climb/drop: must LAND on that floor
+                                    # climb: no take-off within climb_retry_secs (hit before the
+                                    # jump) -> line up and jump again (user: retry in ~1 s)
+                                    up_wait=climb_retry if seg.get("then") == "climb" else 2.5,
+                                    # running ladder jump (segment "run_takeoff", ladder_test.py)
+                                    run_takeoff=seg.get("run_takeoff"),
+                                    run_up=int(seg.get("run_up", 8)),
+                                    air_hold=float(seg.get("air_hold", 0.3)),
+                                    align_to=lambda x: _portal_align(seg, mmx, mmy, target=x),
+                                    fast_xy=_fast_reader(mmx, mmy))
+        t1 = core.time.time()
         if seg.get("then") == "up":
             core.time.sleep(portal_settle)                 # let the camera finish panning first
-        return _advance(ok, mmx)
+        if not ok and seg.get("then") == "climb":
+            # knocked OFF the ladder's floor (a mob hit dropped her to the floor below): retrying
+            # the line-up there is pointless -- continue from the route segment for that floor
+            y_now = core.stable_char(2)[1]
+            if y_now >= 0 and seg.get("y") is not None and abs(y_now - seg["y"]) > 10:
+                climb_fails[0] = 0
+                h = _resync(core.stable_char(2)[0], y_now, f"segment {seg_i[0] + 1} climb knocked off")
+                if h is not None:
+                    return h
+        if not ok and seg.get("then") == "climb" and climb_fails[0] < climb_rounds - 1:
+            # never got onto the ladder: stay on this leg and line up again -- advancing ran the
+            # top-floor leg on the middle floor (live). climb_rounds caps it (then move on/resync).
+            climb_fails[0] += 1
+            print(f"[sweep] segment {seg_i[0] + 1}: climb failed ({climb_fails[0]}) -- retrying")
+            core.dbg(f"[sweep] climb failed ({climb_fails[0]}) at x={mmx} -> retry the leg")
+            progress.reset()
+            return sweep.seg_heading(seg)
+        climb_fails[0] = 0
+        h = _advance(ok, mmx)
+        core.dbg(f"[sweep] transition '{seg.get('then')}' ok={ok}: {t1 - t0:.2f}s, settle+reanchor "
+                 f"{core.time.time() - t1:.2f}s")
+        return h
 
-    def _portal_align(seg, mmx, mmy):
-        """Line up on the portal x arriving in the segment's heading (the recorded press side);
-        fast single minimap reads, tracked near her last position."""
+    def _fast_reader(mmx, mmy):
+        """Fast single minimap reads (~17 ms), tracked near her last position."""
         last = [(mmx, mmy)]
 
         def read():
@@ -345,8 +404,19 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             if x >= 0:
                 last[0] = (x, y)
             return x, y
-        return sweep.approach_x(seg["until_x"], sweep.seg_heading(seg), keys, core.kb, read,
-                                sleep=core.time.sleep, tol=portal_tol)
+        return read
+
+    def _portal_align(seg, mmx, mmy, target=None):
+        """Line up on the portal x (or `target`, e.g. a running jump's run-up start) arriving in
+        the segment's heading (the recorded press side)."""
+        exact = seg.get("then") == "climb" and target is None
+        return sweep.approach_x(seg["until_x"] if target is None else target,
+                                sweep.seg_heading(seg), keys, core.kb, _fast_reader(mmx, mmy),
+                                sleep=core.time.sleep,
+                                tol=climb_tol if exact else portal_tol,
+                                # the ladder grab needs a precise spot: tap the whole line-up
+                                # (the walk-then-tap line-up landed off the ladder, user)
+                                brake=10 ** 6 if exact else portal_brake)
 
     def edge_step(heading, mmx, mmy):
         """Walk on toward the edge_jump edge in ONE continuous walk (up to edge_step_secs) that only
@@ -370,6 +440,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
 
     print(f"[sweep] start: range={attack_range} aoe_max={aoe_max} heading={heading} "
           f"gather={('%s@%.1fs' % (keys['dash'], gather_cd)) if gcfg else 'off'} bounds={bounds}")
+    core.start_safety_monitor()        # curse/monster popups (guard() only runs the fast captcha check)
     try:
         while True:
             g = guard()
@@ -409,10 +480,11 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                     if h is not None:
                         heading = h
                     continue
-                # Portal legs hand over to the line-up portal_lead px early: walking reads come
+                # Portal/ladder legs hand over to the line-up portal_lead px early: walking reads come
                 # ~0.3 s apart, so she overshot the spot and had to come back from the wrong side.
                 done = mmx >= 0 and (sweep.seg_done(seg, mmx, _mmy) or (
-                    seg.get("then") == "up" and sweep.near_seg_end(seg, mmx, portal_lead)))
+                    seg.get("then") in ("up", "climb")
+                    and sweep.near_seg_end(seg, mmx, portal_lead)))
                 # edge_jump segments: until_x is only where the minimap dot PINS (the minimap scrolls
                 # on), not the edge -- so past it she keeps fighting and walks on in short steps
                 # (edge_step) until she actually walks off, instead of one blind walk to the edge.
@@ -522,6 +594,13 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                                 if (m[1] + m[3] // 2) in mob_xs]
                         _dump_attack(frame, mobs, kept, (px, pfeet), act, seg_i[0] + 1, mmx,
                                      attack_range, reach, heading)
+                if sweep.recheck_before_walk(act, last_act[0], rechecked[0]):
+                    rechecked[0] = True                   # one fresh look before walking off
+                    core.dbg("[sweep] WALK right after an attack -> one more look first")
+                    core.time.sleep(walk_recheck)          # let the AoE effects fade a little
+                    continue
+                rechecked[0] = False
+                last_act[0] = act
                 if edge_zone and act == sweep.WALK:
                     heading = edge_step(heading, mmx, _mmy)
                     continue
@@ -561,4 +640,5 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             heading = sweep.apply_action(action, heading, keys, core.kb, sleep=core.time.sleep)
             core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))
     finally:
+        core.stop_safety_monitor()
         core.kb.safe_release_all()

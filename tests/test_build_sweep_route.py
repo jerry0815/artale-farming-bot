@@ -92,3 +92,25 @@ def test_segments_carry_their_level_y_ignoring_phantoms():
     recs.sort(key=lambda r: r["t"])
     segs = bsr.extract_segments(recs, 0.0, 2.0)
     assert segs[0]["y"] == 55
+
+
+def test_down_plus_jump_is_a_down_jump_drop_through():
+    # middle_road2: hold down, press jump -> drop through the floor to the level below
+    recs = (_walk(0, 3, 240, 80, 96) + [_key(0, "left", "down"), _key(3, "left", "up"),
+            _key(3.5, "down", "down"), _key(3.6, "alt_l", "down"), _key(3.8, "alt_l", "up"),
+            _key(3.85, "down", "up")] + _walk(4.5, 6, 78, 150, 156)
+            + [_key(4.5, "right", "down"), _key(6, "right", "up")])
+    segs = bsr.extract_segments(sorted(recs, key=lambda r: r["t"]), 0, 7)
+    assert [s["then"] for s in segs] == ["down_jump", None]
+    assert abs(segs[0]["until_x"] - 80) <= 6
+
+
+def test_jump_then_up_is_a_ladder_climb():
+    # middle_road2: jump at the ladder, then hold up to climb to the floor above
+    recs = (_walk(0, 3, 40, 100, 96) + [_key(0, "right", "down"), _key(3, "right", "up"),
+            _key(3.2, "alt_l", "down"), _key(3.35, "alt_l", "up"),
+            _key(3.4, "up", "down"), _key(5.6, "up", "up")]
+            + _walk(5.7, 8, 100, 200, 51) + [_key(5.7, "right", "down"), _key(8, "right", "up")])
+    segs = bsr.extract_segments(sorted(recs, key=lambda r: r["t"]), 0, 9)
+    assert [s["then"] for s in segs] == ["climb", None]
+    assert abs(segs[0]["until_x"] - 100) <= 6

@@ -38,6 +38,16 @@ def _intervals(recs, t_end):
     return sorted(out, key=lambda a: a[1])
 
 
+def _jump_kind(iv, t, climb_gap=0.6):
+    """What a jump press at t was: down held -> "down_jump" (drop through the floor); up pressed
+    right after -> "climb" (jump onto a ladder/rope, hold up to the floor above); else "jump"."""
+    if any(k == "down" and a <= t <= b for k, a, b in iv):
+        return "down_jump"
+    if any(k == "up" and t < a <= t + climb_gap for k, a, _ in iv):
+        return "climb"
+    return "jump"
+
+
 def extract_segments(recs, t0, t1, y_min=48, min_run=0.15, gather_key="z"):
     """Segments for the cycle in [t0, t1]: [{"dir","until_x","then","attack","y"}, ...]; y = the
     level's minimap y (used to resync after a failed jump/portal).
@@ -68,7 +78,7 @@ def extract_segments(recs, t0, t1, y_min=48, min_run=0.15, gather_key="z"):
         if k in TRANSITIONS:
             done = [r for r in runs if r[2] <= a + 0.05]
             if done and done[-1][3] is None:
-                done[-1][3] = TRANSITIONS[k]
+                done[-1][3] = _jump_kind(iv, a) if k == "alt_l" else TRANSITIONS[k]
                 if k == "up":
                     done[-1].append(a)            # remember WHEN up was pressed (portal spot)
     segs = []

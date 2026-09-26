@@ -13,6 +13,8 @@ clump within attack range (path-scoop), so one AoE then hits them. It doubles as
 travel, so it is the preferred locomotion when enabled and worthwhile; when it is not
 configured for a loop (gather=None) decide() degrades to a plain walk-and-kill sweep.
 """
+import time as _time
+
 
 # Actions (strings, like navmap's STAND_SHOOT/WALK_SHOOT/ROTATE).
 ADVANCE = "ADVANCE"   # nothing ahead -> move to the next route segment
@@ -123,8 +125,9 @@ def apply_action(action, heading, keys, kb, sleep=lambda s: None,
 
 # --- Route mode --------------------------------------------------------------------------
 # A route is an ordered, cyclic list of segments recorded from a human run
-# (build_sweep_route.py): {"dir": "right"|"left", "until_x": <minimap x>, "then": "up"|"jump"|null,
-# "attack": bool, optional "until_y": end on reaching that floor}. Heading is FIXED for the whole segment; the segment ends when the minimap x
+# (build_sweep_route.py): {"dir": "right"|"left", "until_x": <minimap x>,
+#   "then": "up"|"jump"|"edge_jump"|"climb"|"down_jump"|null, "attack": bool,
+#   optional "until_y": end on reaching that floor}. Heading is FIXED for the whole segment; the segment ends when the minimap x
 # reaches until_x, then its transition runs and the next segment starts.
 
 def seg_heading(seg):
@@ -168,11 +171,13 @@ def route_attack(mob_xs, px, heading, attack_range, reach, near_edge, behind_tol
 
 
 def approach_x(target, heading, keys, kb, read_xy, sleep=lambda s: None, tol=2, back=6,
-               tap=0.045, poll=0.03, timeout=4.0):
+               tap=0.045, poll=0.03, timeout=4.0, brake=8):
     """Stand on minimap x `target` ARRIVING MOVING IN `heading` (the portal-press side). The press
     spot reads differently depending on the side she comes from; overshooting and correcting from
     the other side made UP miss (live). If she is past the target, walk back until `back` px before
-    it, then approach in the heading with short taps (longer when far). True when within tol."""
+    it, then approach in the heading: one continuous walk while more than `brake` px out (tapping
+    the whole way stalled ~5 s per portal/ladder leg), short taps for the last few px. True when
+    within tol."""
     fk = keys["right"] if heading > 0 else keys["left"]
     bk = keys["left"] if heading > 0 else keys["right"]
 
@@ -199,6 +204,16 @@ def approach_x(target, heading, keys, kb, read_xy, sleep=lambda s: None, tol=2, 
                 return True
             if d < -tol:
                 break                              # overshot on a tap: back up again
+            if d > brake:                          # far: ONE continuous walk to the brake point
+                kb.safe_press(fk)
+                while waited < timeout:
+                    d = ahead()
+                    if d is not None and d <= brake:
+                        break
+                    sleep(poll); waited += poll
+                kb.safe_release(fk)
+                sleep(0.05)
+                continue
             kb.safe_press(fk); sleep(min(0.3, tap + 0.02 * d)); kb.safe_release(fk)
             sleep(0.05)
     return False
@@ -295,9 +310,29 @@ def landing_state(elapsed, mmy, target_y, min_air=0.55, tol=4, fall_dy=15, max_a
     return "air"
 
 
+def recheck_before_walk(act, last_act, rechecked):
+    """True = don't walk yet, look again first: the beat right after an attack (FIRE / GATHER)
+    decided WALK, and this is not already the second look. Right after the AoE her skill effects
+    cover the mobs and the detector misses them for a frame, so she walked off mobs still alive in
+    front of her (middle_road2, user). The second look walks if it still sees nothing in range."""
+    return act == WALK and last_act in (FIRE, GATHER) and not rechecked
+
+
+def hop(heading, keys, kb, sleep=lambda s: None, hold=0.5):
+    """Stuck recovery: walk the heading and jump (climbs a step / ledge she keeps walking into)."""
+    face = keys["right"] if heading > 0 else keys["left"]
+    kb.safe_release_all()
+    kb.safe_press(face); sleep(0.1)
+    kb.safe_press(keys["jump"]); sleep(0.05); kb.safe_release(keys["jump"])
+    sleep(hold)
+    kb.safe_release(face)
+
+
 def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=lambda s: None,
                      up_wait=2.5, poll=0.1, y_change=8, nudge=0.12, jump_gap=0.3, align=None,
-                     edge_wait=4.0, jump_dy=5, x_win=12, land=1.0, level=None):
+                     edge_wait=4.0, jump_dy=5, x_win=12, land=1.0, level=None, climb_wait=5.0,
+                     target_y=None, level_tol=6, climb_tries=3, run_takeoff=None, run_up=8,
+                     air_hold=0.3, align_to=None, fast_xy=None, run_timeout=3.0):
     """Run a segment's end-transition. Returns True when it (probably) worked.
 
     "up":   stop and press up (portal/ladder). Confirmed when the minimap y moves by >= y_change
@@ -308,15 +343,25 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
             y >= level + jump_dy), jump once and hold the direction `land` s to cross the gap. For
             where the minimap dot is pinned by scrolling, so x can't find the edge. Never reached
             within edge_wait -> jump anyway and report failure. Pass a FAST read_xy.
+    "climb": (align on the ladder x) jump, hold up until she stands on the level above (minimap y
+            up by >= y_change, then steady); no grab within up_wait -> re-align and retry ONCE.
+            climb_wait caps the climb once it started. keys needs "up" and "jump". With target_y
+            (the next segment's floor y) success means standing on THAT level: a plain jump
+            that doesn't grab the ladder used to count as a climb (live). A miss (she lands back
+            on the start level) re-aligns and retries, up to climb_tries attempts. run_takeoff =
+            RUNNING jump instead (ladder_test.py): align_to(run_takeoff - heading*run_up), hold
+            the heading, jump when fast_xy() reaches run_takeoff, arrow held air_hold s more.
+    "down_jump": hold down + jump (drop through the floor), confirmed when she lands on a lower
+            level (y down by >= y_change, then steady). keys needs "down".
     None:   nothing to do.
     cur_heading: the segment just finished (portal-overshoot nudge goes against it);
     next_heading: the segment about to start (the jump faces it).
     keys: {"up","jump","right","left"}; read_xy() -> (minimap x, y).
     align: optional callback run before EACH up press to stand exactly on the portal x (the loop
     passes core.walk_to_x); without it the retry does a blind one-step nudge back."""
+    kb.safe_release_all()                         # WALK holds the arrow: stop at the end point
     if not then:
         return True
-    kb.safe_release_all()
     if then == "jump":
         face = keys["right"] if next_heading > 0 else keys["left"]
         kb.safe_press(face)
@@ -335,10 +380,17 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
         _jump(keys, kb, sleep, land=land)
         kb.safe_release(face)
         return False
+    spent = [0.0]                                 # real time spent inside read_xy: stable_char(2) takes
+                                                  # ~0.27 s, so counting only the poll sleeps
+                                                  # made up_wait 2.5 s last ~9 s
+
+    def _timed_y():                               # (-1,-1) = no minimap read -> not a level change
+        t = _time.monotonic()
+        y = read_xy()[1]
+        spent[0] += _time.monotonic() - t
+        return y if (y is not None and y >= 0) else None
     if then == "up":
-        def _y():                                 # (-1,-1) = no minimap read -> not a level change
-            y = read_xy()[1]
-            return y if (y is not None and y >= 0) else None
+        _y = _timed_y
         y0 = _y()
         for attempt in range(2):
             if align is not None:
@@ -347,14 +399,70 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
                 back = keys["left"] if cur_heading > 0 else keys["right"]
                 kb.safe_press(back); sleep(nudge); kb.safe_release(back)
             kb.safe_press(keys["up"]); sleep(0.25); kb.safe_release(keys["up"])
-            waited = 0.0
-            while waited < up_wait:
+            waited = 0.0; spent[0] = 0.0
+            while waited + spent[0] < up_wait:
                 y = _y()
                 if y0 is None:
                     y0 = y                            # no baseline yet: take the first good read
                 elif y is not None and abs(y - y0) >= y_change:
                     return True
                 sleep(poll); waited += poll
+        return False
+    if then in ("climb", "down_jump"):
+        _y = _timed_y
+        sign = -1 if then == "climb" else 1       # climbing: y falls; dropping: y rises
+
+        def arrived(y):                           # on the new level (target known: exactly it)
+            if target_y is not None:
+                return abs(y - target_y) <= level_tol
+            return (y - y0) * sign >= y_change
+        for attempt in range(climb_tries if then == "climb" else 2):
+            if then == "climb" and run_takeoff is not None:
+                # running jump: line up run_up px before the take-off, run in holding the heading,
+                # jump at run_takeoff with the arrow still held for air_hold s, then hold up
+                face = keys["right"] if cur_heading > 0 else keys["left"]
+                if align_to is not None:
+                    align_to(run_takeoff - cur_heading * run_up)
+                y0 = _y()
+                kb.safe_press(face)
+                t_run = 0.0
+                while t_run < run_timeout:
+                    x = (fast_xy or read_xy)()[0]
+                    if x is not None and x >= 0 and (x - run_takeoff) * cur_heading >= 0:
+                        break
+                    sleep(0.01); t_run += 0.01
+                kb.safe_press(keys["jump"]); sleep(0.05); kb.safe_release(keys["jump"])
+                kb.safe_press(keys["up"])
+                sleep(air_hold); kb.safe_release(face)
+            elif then == "climb":                 # standing jump onto the ladder, then hold up
+                if align is not None:
+                    align()                       # stand on the ladder x first
+                y0 = _y()
+                kb.safe_press(keys["jump"]); sleep(0.05); kb.safe_release(keys["jump"])
+                kb.safe_press(keys["up"])
+            else:                                 # hold down + jump = drop through the floor
+                y0 = _y()
+                kb.safe_press(keys["down"]); sleep(0.1)
+                kb.safe_press(keys["jump"]); sleep(0.05); kb.safe_release(keys["jump"])
+                sleep(0.1); kb.safe_release(keys["down"])
+            waited, moved, prev = 0.0, False, None; spent[0] = 0.0
+            while waited + spent[0] < (climb_wait if moved else up_wait):
+                y = _y()
+                if y0 is None:
+                    y0 = y
+                elif y is not None:
+                    moved = moved or abs(y - y0) >= 3
+                    steady = prev is not None and abs(y - prev) <= 1
+                    if steady and arrived(y):
+                        kb.safe_release(keys["up"])
+                        return True               # on the new level and not moving any more
+                    if steady and moved and abs(y - y0) <= 2:
+                        break                     # jumped but missed the ladder: landed back
+                prev = y
+                sleep(poll); waited += poll
+            kb.safe_release(keys["up"])
+            if moved and y is not None and abs(y - y0) > 2 and not arrived(y):
+                return False                      # stuck mid-way (on the ladder?): don't retry
         return False
     raise ValueError(f"unknown route transition {then!r}")
 
