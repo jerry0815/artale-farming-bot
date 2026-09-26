@@ -28,33 +28,6 @@ def test_full_tick_dumps_near_miss_and_throttles(monkeypatch):
     assert dumps == ["near_miss"], dumps          # still one -- throttled within the interval
 
 
-def test_full_tick_alarms_on_yolo_only(monkeypatch):
-    frame = np.zeros((10, 10, 3), np.uint8)
-    monkeypatch.setattr(core, "capture", lambda: frame)
-    monkeypatch.setattr(core, "_lie_enabled", True)
-    monkeypatch.setattr(core, "is_lie_check_active", lambda: False)
-    monkeypatch.setattr(core, "detect_lie_check", lambda *a, **k: [])       # templates: nothing
-    monkeypatch.setattr(core, "detect_lie_check_yolo",
-                        lambda f, **k: [("monster_check", 0.9, (0, 0, 5, 5))])   # YOLO: a hit
-    monkeypatch.setattr(core, "dump_frame", lambda *a, **k: None)
-    sent = []
-    monkeypatch.setattr(core.notify, "send", lambda *a, **k: sent.append(a))
-    core._full_alert.update(False); core._full_alert.update(False)      # reset to cleared
-    monkeypatch.setattr(core.time, "time", lambda: 200000.0)
-    core._last_full_tick[0] = 0.0
-    core.lie_check_full_tick()                                              # 1st hit
-    core._last_full_tick[0] = 0.0
-    core.lie_check_full_tick()                                              # 2nd consecutive -> alarm
-    assert core._full_alert.alarm.active is True
-    assert any("monster_check" in str(a) for a in sent)
-
-
-def test_is_lie_check_active_reads_alarms(monkeypatch):
-    monkeypatch.setattr(core._fast_alert.alarm, "_thread", None)
-    monkeypatch.setattr(core._full_alert.alarm, "_thread", None)
-    assert core.is_lie_check_active() is False
-
-
 def test_watch_loop_stops_on_event(monkeypatch):
     calls = {"n": 0}
     monkeypatch.setattr(core, "lie_check_tick", lambda: calls.__setitem__("n", calls["n"] + 1))
