@@ -27,6 +27,7 @@ SOURCES = [
     ("datasets/mobs_real/labels", "datasets/mobs_real/images", "real_"),
     ("datasets/dragons/labels", "datasets/dragons/images", "dragon_"),
     ("datasets/flat_sweep/labels", "datasets/flat_sweep/images", "flat_"),
+    ("datasets/middle_road2/labels", "datasets/middle_road2/images", "mroad2_"),
 ]
 
 # Empty label files are SKIPPED, not treated as negatives: in this project an empty label means

@@ -1,0 +1,124 @@
+{
+  "_scaffold_note": "2nd route-sweep map (2026-09-25). Farming knobs copied from flat_sweep (same character/window); route recorded from a human run (routes/middle_road2.capture.jsonl, 5 laps ~78 s each) and hand-cleaned from laps 2-3. Mob detection on this map's 2 extra mob types NOT yet verified.",
+  "loop": "sweep",
+  "detector": "mob_yolo",
+  "mob_model": "models/mob_generic.pt",
+  "mob_conf": 0.6,
+  "mob_imgsz": 640,
+  "anchor": "hpbar",
+  "player": {
+    "min_h": 6,
+    "max_h": 10,
+    "max_w": 72,
+    "structure": true,
+    "frame_w": 68
+  },
+  "attack_key": "x",
+  "attack_range": 200,
+  "aoe_max": 6,
+  "beat_gap": 0.05,
+  "gather": {
+    "key": "z",
+    "grp": 90,
+    "min": 3,
+    "dash_gap": 50,
+    "cooldown": 1.5
+  },
+  "enemy_threshold": 0.75,
+  "buff_groups": [
+    {
+      "keys": [
+        "d"
+      ],
+      "interval_secs": 300
+    },
+    {
+      "keys": [
+        "3"
+      ],
+      "interval_secs": 600
+    },
+    {
+      "keys": [
+        "g"
+      ],
+      "interval_secs": 900
+    },
+    {
+      "keys": [
+        "1"
+      ],
+      "interval_secs": 600
+    }
+  ],
+  "same_platform_band": 180,
+  "push_edge_margin": 18,
+  "aoe_hold_secs": 1.05,
+  "push_settle_secs": 0.3,
+  "portal_tol": 1,
+  "portal_lead": 20,
+  "portal_settle_secs": 0.1,
+  "push_prewalk_secs": 0.1,
+  "finish_rounds": 3,
+  "aoe_hold_max_secs": 6.0,
+  "debug_log": true,
+  "start_heading": 1,
+  "minimap": {
+    "x": 20,
+    "y": 172,
+    "w": 352,
+    "h": 176
+  },
+  "_minimap_note": "Measured from a screenshot: the whole map fits in the minimap (no scrolling/pinning, unlike flat_sweep). Recording had no phantom reads (0 x-jumps > 40 px in 8031 reads).",
+  "map_box": [
+    30,
+    330,
+    44,
+    165
+  ],
+  "_map_box_note": "Floors: top y~51, middle y~96, bottom y~156 (x 41-311 seen).",
+  "route": [
+    {
+      "dir": "right",
+      "until_x": 296,
+      "then": "up",
+      "attack": true,
+      "y": 156
+    },
+    {
+      "dir": "left",
+      "until_x": 90,
+      "then": null,
+      "attack": true,
+      "y": 96
+    },
+    {
+      "dir": "right",
+      "until_x": 99,
+      "then": "climb",
+      "attack": false,
+      "y": 96,
+      "run_takeoff": 92,
+      "run_up": 8,
+      "air_hold": 0.3
+    },
+    {
+      "dir": "right",
+      "until_x": 228,
+      "then": "down_jump",
+      "attack": true,
+      "y": 51
+    },
+    {
+      "dir": "left",
+      "until_x": 88,
+      "then": "down_jump",
+      "attack": true,
+      "y": 96
+    }
+  ],
+  "_route_note": "Lap: bottom floor right to the portal at the right end (UP at x~296, recorded 295-299; lands middle ~262) -> middle floor left, clearing to its left end (~80) -> back right to the ladder at x~99 and climb (jump + hold up, ~2.2 s) -> top floor right to ~228 and drop through (down+jump, recorded 223-241; top ends ~245) -> middle floor left again to ~76 and drop through to the bottom (recorded 71-80) -> repeat. Start the character at bottom-left. The ladder line-up uses the portal line-up (arrives moving right, portal_lead px early). 2026-09-25 (user): middle-floor left ends moved right -- segment 2 80->90, segment 5 76->88 -- she sometimes fell off the middle floor's left end (pushes/finish rounds carry her past until_x). Ladder (2026-09-25): on the ladder the minimap x reads 99 (175 of 184 recorded reads). Target 100 was too far right (user), 99 with tol 1 sometimes stopped at 98 (left) -> target 99 with climb_tol 0 (the line-up taps until the dot reads exactly 99).",
+  "_mob_conf_note": "0.6 (same as flat_sweep) after retraining models/mob_generic.pt with 80 labeled middle_road2 frames (2026-09-25, datasets/middle_road2, pool 482 frames/2187 boxes, val mAP50 0.879). Held-out middle_road2 frames (78 mobs): recall 0.64 -> 0.86 at 0.6 with 1 false box (old model at 0.4: 0.72, 8 false). Old model kept as models/mob_generic_pre_mroad2.pt. v2 (2026-09-25): +37 uncertain/fly frames (pool 519 frames/2512 boxes, val mAP50 0.87). Held-out hard frames recall 0.66 -> 0.80 at 0.6; 6 of 8 'false' boxes on held-out middle_road2 were real mobs missing from the labels, 2 real false (truck wheel, loot text). v1 kept as models/mob_generic_mroad2_v1.pt.",
+  "climb_tol": 0,
+  "_climb_note": "Segment 3 climbs with a RUNNING jump (ladder_test.py, 2026-09-25): line up at 84, run right, jump when the minimap reads 92 with right held 0.3 s more, hold up. Live tests: run@92 7/10 hit (misses mostly mob hits), stand@99 8/10, run@86 3/5; user found run@92 better in practice. Remove run_takeoff to go back to the standing jump at until_x (climb_tol)."
+}
