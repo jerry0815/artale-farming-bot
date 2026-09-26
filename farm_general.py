@@ -230,6 +230,38 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     # not every beat.
     enemy_every = float(map_cfg.get("enemy_check_secs", 1.0))
     _last_enemy = [0.0]
+    # other_player {"action": "wait", "wait_secs": 20}: another player on the map -> no alarm/pause;
+    # release keys and wait, resume by herself if they leave, click Free Market (and stop) if they
+    # are still there after wait_secs. Default (no block): the old alarm + panic.
+    _op = map_cfg.get("other_player") or {}
+    wait_mode = _op.get("action") == "wait"
+    wait_secs = float(_op.get("wait_secs", 20))
+    enemy_since = [None]
+    core._ENEMY_PAUSE[0] = not wait_mode              # the fast safety scan leaves it to us
+    if map_cfg.get("free_market_button_xy"):
+        core._FM_XY[0] = tuple(map_cfg["free_market_button_xy"])
+
+    def _other_player(now):
+        """wait mode: 'wait' (keep waiting), 'escape' (clicked Free Market -> stop) or None."""
+        if enemy_since[0] is not None and now - _last_enemy[0] < enemy_every:
+            return "wait"                             # between checks: keep waiting, don't farm
+        _last_enemy[0] = now
+        if not enemy_check():
+            if enemy_since[0] is not None:
+                print(f"[sweep] other player left after {now - enemy_since[0]:.0f}s -> resume")
+                enemy_since[0] = None
+            return None
+        if enemy_since[0] is None:
+            enemy_since[0] = now
+            core.kb.safe_release_all()
+            print(f"[sweep] another player on the map -> stop and wait "
+                  f"(Free Market if still here after {wait_secs:g}s)")
+            return "wait"
+        if now - enemy_since[0] >= wait_secs:
+            print(f"[sweep] other player still here after {now - enemy_since[0]:.0f}s -> Free Market")
+            core.click_free_market()
+            return "escape"
+        return "wait"
 
     def _mm_read(frame):
         """Minimap (x, y) from the beat's OWN frame (~0.3 ms) -- stable_char(2) took ~267 ms (4
@@ -258,7 +290,15 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         core.STATUS["state"] = "farming"; active_tick(now)
         core.lie_check_fast_tick(); core.STATUS["lie"] = core.is_lie_check_active()
         exp_tick()
-        if enemy_check and now - _last_enemy[0] >= enemy_every:
+        if enemy_check and wait_mode:
+            op = _other_player(now)
+            if op == "escape":
+                core.kb.safe_release_all(); _freeze_active(now); core.STATUS["state"] = "idle"
+                return "stop"
+            if op == "wait":
+                _freeze_active(now); core.STATUS["state"] = "waiting (other player)"
+                core.time.sleep(0.2); return "skip"
+        elif enemy_check and now - _last_enemy[0] >= enemy_every:
             _last_enemy[0] = now
             if enemy_check():
                 print("[sweep] another player -> ALARM + panic")
@@ -676,3 +716,4 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     finally:
         core.stop_safety_monitor()
         core.kb.safe_release_all()
+        core._ENEMY_PAUSE[0] = True                   # other loops keep the alarm + pause

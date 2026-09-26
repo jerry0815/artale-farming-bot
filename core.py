@@ -160,6 +160,8 @@ _safety_thread = [None]
 
 # --- another-player alarm: a DISTINCT lower tone, sounds until 'm' acknowledges it ---
 _enemy_alarm = Alarm(freq=700, beep_ms=250, gap_ms=120)
+_ENEMY_PAUSE = [True]   # fast safety scan: red dot -> alarm + pause. False = the loop handles it
+                        # (sweep other_player "wait": stop, wait, Free Market after N s -- no alarm)
 
 
 # --- auto-escape: if another player stays and the alarm is left un-acknowledged, click the

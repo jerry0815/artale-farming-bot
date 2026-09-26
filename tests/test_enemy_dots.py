@@ -118,3 +118,24 @@ def test_sample_dumps_are_off_by_default(monkeypatch, tmp_path):
     assert not (tmp_path / "samples").exists()
     monkeypatch.setattr(core, "_ENEMY_SAMPLE_DUMPS", True)
     assert core._dump_enemy_sample(np.zeros((10, 10, 3), np.uint8), "x") is not None
+
+
+def test_fast_tick_leaves_the_other_player_to_the_loop_when_told(monkeypatch):
+    """other_player 'wait' mode: the loop handles a red dot (stop, wait, Free Market after N s);
+    the fast safety scan must not also beep + pause."""
+    calls = []
+    monkeypatch.setattr(core, "_last_fast_tick", [0.0])
+    monkeypatch.setattr(core, "_lie_enabled", False)
+    monkeypatch.setattr(core, "capture", lambda: np.zeros((50, 50, 3), np.uint8))
+    monkeypatch.setattr(core, "_enemy_dots", lambda f: [[5, 5]])
+    monkeypatch.setattr(core, "enemy_alarm_on", lambda: calls.append("alarm"))
+    monkeypatch.setattr(core.notify, "send", lambda *a, **k: calls.append("notify"))
+    monkeypatch.setattr(core.kb, "pause", False, raising=False)
+    monkeypatch.setattr(core.kb, "safe_release_all", lambda: None)
+    monkeypatch.setattr(core, "_ENEMY_PAUSE", [False])
+    core.lie_check_fast_tick()
+    assert calls == [] and core.kb.pause is False
+    monkeypatch.setattr(core, "_last_fast_tick", [0.0])
+    monkeypatch.setattr(core, "_ENEMY_PAUSE", [True])            # default: old alarm + pause
+    core.lie_check_fast_tick()
+    assert "alarm" in calls and core.kb.pause is True

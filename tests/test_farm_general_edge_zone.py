@@ -320,3 +320,56 @@ def test_a_single_mid_air_read_does_not_count_as_landed(monkeypatch, capsys):
     # (until_y) -> straight on to the bottom leg (the user's "should be segment 5")
     assert "landed (" not in out and "jump fell short -- already at segment 2's end" in out, out
     assert "-> segment 3: left to x=215" in out, out
+
+
+def _wait_mode_harness(monkeypatch, seen_until):
+    """Loop with other_player 'wait': enemy_check reports a player until clock >= seen_until."""
+    clock = [1000.0]
+    ev = []
+    kb = core.kb
+    monkeypatch.setattr(kb, "pause", False, raising=False)
+    monkeypatch.setattr(kb, "safe_press", lambda k: None)
+    monkeypatch.setattr(kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(kb, "safe_release_all", lambda: ev.append("release_all"))
+    for name, fn in {"focus": lambda: True, "set_minimap": lambda *a: None,
+                     "ensure_game_focused": lambda **k: True, "lie_check_fast_tick": lambda: None,
+                     "is_lie_check_active": lambda: False, "capture": lambda: object(),
+                     "make_exp_tracker": lambda **k: (lambda: None),
+                     "stable_char": lambda n=3: (100, 106),
+                     "start_safety_monitor": lambda *a, **k: None,
+                     "enemy_alarm_on": lambda: ev.append("ALARM"),
+                     "click_free_market": lambda *a, **k: ev.append("free_market"),
+                     "make_active_timer": lambda: (lambda now: None, lambda now: None)}.items():
+        monkeypatch.setattr(core, name, fn, raising=False)
+    monkeypatch.setattr(core.time, "time", lambda: clock[0])
+    monkeypatch.setattr(core.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    import mob_detect
+    monkeypatch.setattr(mob_detect, "load_yolo", lambda p: object())
+    def detect(*a, **k):
+        clock[0] += 0.1
+        ev.append("beat")
+        return ([], (0.9, 480, 300, 40, 70))
+    monkeypatch.setattr(mob_detect, "yolo_detect", detect)
+    cfg = {"loop": "sweep", "anchor": "yolo_player", "attack_key": "x",
+           "minimap": {"x": 0, "y": 0, "w": 10, "h": 10},
+           "other_player": {"action": "wait", "wait_secs": 20},
+           "route": [{"dir": "right", "until_x": 275, "then": None, "attack": True, "y": 106}]}
+    core.STOP.clear()
+    farm_general.farming_loop_general(cfg, enemy_check=lambda: clock[0] < seen_until,
+                                      panic=lambda: ev.append("PANIC"), max_seconds=40)
+    return ev
+
+
+def test_other_player_leaves_within_the_wait_resumes_without_alarm(monkeypatch, capsys):
+    ev = _wait_mode_harness(monkeypatch, seen_until=1008.0)       # gone after ~8 s
+    out = capsys.readouterr().out
+    assert "ALARM" not in ev and "PANIC" not in ev and "free_market" not in ev
+    assert "stop and wait" in out and "other player left after" in out
+    assert ev.count("beat") > 50                                   # farming resumed afterwards
+
+
+def test_other_player_stays_20s_goes_to_free_market(monkeypatch, capsys):
+    ev = _wait_mode_harness(monkeypatch, seen_until=10 ** 9)       # never leaves
+    assert "ALARM" not in ev and "PANIC" not in ev
+    assert ev.count("free_market") == 1
+    assert ev.count("beat") <= 2                                   # no farming while waiting

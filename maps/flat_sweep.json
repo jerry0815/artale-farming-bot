@@ -140,5 +140,14 @@
   "push_prewalk_secs": 0.1,
   "finish_rounds": 3,
   "aoe_hold_max_secs": 6.0,
-  "edge_step_secs": 3.0
+  "edge_step_secs": 3.0,
+  "other_player": {
+    "action": "wait",
+    "wait_secs": 20
+  },
+  "free_market_button_xy": [
+    1452,
+    1092
+  ],
+  "_other_player_note": "Another player on the map: no alarm/pause -- release keys and wait; resume by herself if they leave; still there after wait_secs (20) -> click 自由市場 (Free Market, free_market_button_xy = its center in the capture frame, same UI as deep_sea_2) and stop. Checked once a second."
 }
