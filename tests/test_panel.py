@@ -27,6 +27,7 @@ def _make():
         "pause_toggle": lambda: log.append("pause"),
         "stop": lambda: log.append("stop"),
         "exp_record": lambda label: log.append(("exp_record", label)),
+        "hop": lambda max_hops, settle: log.append(("hop", max_hops, settle)),
     })
     return log, c
 
@@ -154,3 +155,22 @@ def test_enemy_mode_off_notify_stop(monkeypatch):
         assert c.set_enemy_mode("bogus")[0] is False
     finally:
         core._ENEMY_MODE[0] = "notify"
+
+
+def test_hop_start_dispatches_and_is_single_worker():
+    log, c = _make()
+    ok, mode = c.hop_start("12", "4")
+    assert ok is True and mode == "hopping"
+    assert ("hop", 12, 4.0) in log
+    assert c.hop_start("12", "4")[0] is False                              # busy
+    assert c.start("farm", map_path="maps/deep_sea_2.json")[0] is False    # busy for others too
+    c.finish()                                                              # worker done -> idle
+    assert c.mode == "idle"
+
+
+def test_hop_start_rejects_bad_numbers():
+    log, c = _make()
+    assert c.hop_start("0", "3")[0] is False
+    assert c.hop_start("x", "3")[0] is False
+    assert c.hop_start("5", "-1")[0] is False
+    assert c.mode == "idle" and not any(e[0] == "hop" for e in log if isinstance(e, tuple))

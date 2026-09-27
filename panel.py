@@ -118,7 +118,7 @@ class Controller:
 
     def __init__(self, actions):
         self.actions = actions
-        self.mode = "idle"           # idle|farming|watching|recovering|recording
+        self.mode = "idle"           # idle|farming|watching|recovering|recording|hopping
         self.recorder = None
 
     _MODE_NAME = {"farm": "farming", "watch": "watching", "recover": "recovering"}
@@ -137,6 +137,21 @@ class Controller:
         self.mode = self._MODE_NAME[mode]
         self.actions[mode]()
         return True, self.mode
+
+    def hop_start(self, max_hops="30", settle="3"):
+        """Channel tab: hop random channels until one has no other player on the map (one general
+        minimap box, no map needed); the worker calls finish() when done."""
+        if self.mode != "idle":
+            return False, f"busy ({self.mode})"
+        try:
+            max_hops, settle = int(max_hops), float(settle)
+        except (TypeError, ValueError):
+            return False, "max hops / settle must be numbers"
+        if max_hops < 1 or settle < 0:
+            return False, "max hops >= 1, settle >= 0"
+        self.mode = "hopping"
+        self.actions["hop"](max_hops, settle)
+        return True, "hopping"
 
     def record_start(self, mapname):
         if self.mode != "idle":
@@ -199,8 +214,8 @@ class Controller:
         return True, "stopped"
 
     def finish(self):
-        """Called by a one-shot worker (recover) when it completes."""
-        if self.mode in ("recovering",):
+        """Called by a one-shot worker (recover / channel hop) when it completes."""
+        if self.mode in ("recovering", "hopping"):
             self.mode = "idle"
 
 
@@ -293,6 +308,17 @@ def _build_actions(controller_ref):
         core.STATUS["state"] = "recovering"
         _run_bg(_go)
 
+    def hop(max_hops, settle):
+        import channel_hop
+        def _go():
+            try:
+                channel_hop.run(max_hops=max_hops, settle=settle)
+            except Exception as e:
+                print(f"[hop] error: {e}")
+            finally:
+                controller_ref[0].finish()
+        _run_bg(_go)
+
     def make_recorder(mapname):
         rec = record_route.RouteRecorder(mapname)
         core.STATUS["state"] = "recording"
@@ -309,7 +335,7 @@ def _build_actions(controller_ref):
 
     return {"farm": farm, "watch": watch, "recover": recover, "train": train,
             "make_recorder": make_recorder, "pause_toggle": pause_toggle, "stop": stop,
-            "exp_record": exp_record}
+            "exp_record": exp_record, "hop": hop}
 
 
 def detect_frame(map_path=None, scale=None, thr=None, per=None, species=None, roi=None, max_w=900,
@@ -624,6 +650,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    <button id=tab-b-control class="tab active" onclick="showTab('control')">Control</button>
    <button id=tab-b-setup class=tab onclick="showTab('setup')">Setup</button>
    <button id=tab-b-exp class=tab onclick="showTab('exp')">EXP</button>
+   <button id=tab-b-hop class=tab onclick="showTab('hop')">Channel</button>
  </div>
 
  <div id=tab-control class=pane>
@@ -713,6 +740,23 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    </table>
  </div>
 
+ <div id=tab-hop class="pane hidden">
+   <fieldset><legend>Channel hop — random channels until the map has no other player</legend>
+     <div class=row>
+       max hops <input id=hopmax value="30" style="width:50px">
+       <label title="Seconds to wait after landing before reading the minimap">settle s
+         <input id=hopsettle value="3" style="width:44px"></label>
+     </div>
+     <div class=row>
+       <button class=go onclick="startHop()">▶ Find empty channel</button>
+       <button class=stop onclick="cmd('stop')">■ Stop</button>
+     </div>
+     <div id=hopstat class=sub style="font-family:ui-monospace,monospace">idle</div>
+     <div class=sub>Start from inside the map. Each hop: 目錄 → 頻道 → random → 確定 → 登入 → 選擇角色 (~35 s).
+       It checks the current channel first, then stops at the first channel with no red dot. Progress → Log.</div>
+   </fieldset>
+ </div>
+
  <fieldset id=detprev><legend>Detection preview</legend>
    <div class=row>
      scale <input id=dscale placeholder="auto" style="width:56px">
@@ -745,11 +789,11 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    if(!j.ok) alert(j.msg);
  }
  function showTab(name){
-   for(const t of ['control','setup','exp']){
+   for(const t of ['control','setup','exp','hop']){
      document.getElementById('tab-'+t).classList.toggle('hidden', t!==name);
      document.getElementById('tab-b-'+t).classList.toggle('active', t===name);
    }
-   document.getElementById('detprev').classList.toggle('hidden', name==='exp');  // preview irrelevant while recording EXP
+   document.getElementById('detprev').classList.toggle('hidden', name==='exp' || name==='hop');  // preview irrelevant there
  }
  async function quitPanel(){
    if(!confirm('Quit the panel? This stops any running farm and shuts down the server.')) return;
@@ -817,9 +861,12 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
  }
  async function loadMaps(){
    const maps = await (await fetch('/maps')).json();
-   const sel = document.getElementById('mapsel');
-   sel.innerHTML = maps.length ? '' : '<option value="">(no maps/*.json)</option>';
-   for(const m of maps){ const o=document.createElement('option'); o.value=m.path; o.textContent=m.name; sel.appendChild(o); }
+   for(const id of ['mapsel']){
+     const sel = document.getElementById(id), keep = sel.value;
+     sel.innerHTML = maps.length ? '' : '<option value="">(no maps/*.json)</option>';
+     for(const m of maps){ const o=document.createElement('option'); o.value=m.path; o.textContent=m.name; sel.appendChild(o); }
+     if(keep) sel.value = keep;
+   }
  }
  async function loadChars(){
    const chars = await (await fetch('/chars')).json();
@@ -875,6 +922,12 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    const j = await (await fetch('/cmd?'+new URLSearchParams({action:'start',mode:'farm',map,char}))).json();
    if(!j.ok) alert(j.msg);
  }
+ async function startHop(){
+   const q = new URLSearchParams({action:'hop_start',
+     max_hops:document.getElementById('hopmax').value.trim(), settle:document.getElementById('hopsettle').value.trim()});
+   const j = await (await fetch('/cmd?'+q)).json();
+   if(!j.ok) alert(j.msg);
+ }
  let _tp, _tl, _ts;                        // poll timer handles -> re-kickable, never doubled
  async function setEnemyMode(mode){
    await fetch('/cmd?'+new URLSearchParams({action:'enemy_mode', mode}));
@@ -904,13 +957,16 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      const rec = s.state==='exp_record', es = document.getElementById('expstat');
      es.textContent = rec ? ('● recording — '+hms(s.run_secs)) : 'not recording';
      es.style.color = rec ? '#7fdd7f' : '#9a9';
+     const hs = document.getElementById('hopstat');
+     hs.textContent = s.mode==='hopping' ? ('● hopping — '+dash(s.node)) : 'idle';
+     hs.style.color = s.mode==='hopping' ? '#7fdd7f' : '#9a9';
    }catch(e){}
    clearTimeout(_tp); _tp=setTimeout(poll, 500);
  }
  let logCursor=0;
  function logClass(s){ s=s.replace(/^\\d\\d:\\d\\d:\\d\\d\\.\\d\\d\\d /,'');   // drop timestamp prefix
    if(s.startsWith('[exp]'))return'exp'; if(s.startsWith('[approach'))return'app';
-   if(s.startsWith('[water')||s.startsWith('[nav'))return'wtr'; return''; }
+   if(s.startsWith('[water')||s.startsWith('[nav')||s.startsWith('[hop'))return'wtr'; return''; }
  async function pollLog(){
    try{
      const j = await (await fetch('/log?since='+logCursor)).json();
@@ -1050,6 +1106,8 @@ def make_handler(controller):
                 # exit off-thread so this request can return 200 first (pythonw has no console to Ctrl+C)
                 threading.Thread(target=lambda: (time.sleep(0.4), os._exit(0)), daemon=True).start()
                 return True, "panel shutting down"
+            if action == "hop_start":
+                return controller.hop_start(q.get("max_hops", ["30"])[0], q.get("settle", ["3"])[0])
             if action == "record_start":
                 return controller.record_start(q.get("map", [""])[0])
             if action == "record_mark":
