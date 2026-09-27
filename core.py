@@ -1088,6 +1088,7 @@ from focus_util import (  # noqa: E402  (extracted; re-exported so core.<name> s
     focus, is_focused, ensure_game_focused,
     focus_ok_or_bail, stable_char,
 )
+kb.focus_check = is_focused   # n/m/F10 only while the game is in front (the listener is global)
 
 
 from charloc import (  # noqa: E402  (extracted; re-exported so core.<name> still works)

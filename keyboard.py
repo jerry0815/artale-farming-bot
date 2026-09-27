@@ -39,10 +39,14 @@ def wait_with_pause(duration):
 
 f9_callback = None   # set by core.py to silence alarms on 'm' (was F9)
 f10_callback = None  # set by core.py to dump the current frame on F10
+focus_check = None   # set by core.py (is_focused): the listener is GLOBAL, so hotkeys only act
+                     # while the game is in front -- typing 'n' in a browser/chat toggled pause
 
 
 def on_press(key):
     global pause
+    if focus_check is not None and not focus_check():
+        return
     try:
         ch = getattr(key, "char", None)          # letter/number keys expose .char; special keys -> None
         ch = ch.lower() if ch else ch
