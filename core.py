@@ -161,9 +161,10 @@ _safety_thread = [None]
 
 # --- another-player alarm: a DISTINCT lower tone, sounds until 'm' acknowledges it ---
 _enemy_alarm = Alarm(freq=700, beep_ms=250, gap_ms=120)
-_ENEMY_CHECK = [True]   # panel toggle: False = no another-player (red dot) detection at all
-_ENEMY_PAUSE = [True]   # fast safety scan: red dot -> alarm + pause. False = the loop handles it
-                        # (sweep other_player "wait": stop, wait, Free Market after N s -- no alarm)
+# Another player on the map (panel dropdown; never an alarm):
+#   "notify" = Discord note, keep farming | "off" = no check at all |
+#   "stop"   = note + the loop stops and waits; still there after N s -> Free Market (sweep loop)
+_ENEMY_MODE = ["notify"]
 
 
 # --- auto-escape: if another player stays and the alarm is left un-acknowledged, click the

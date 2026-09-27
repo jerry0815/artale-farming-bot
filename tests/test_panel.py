@@ -133,9 +133,8 @@ def test_train_action_validates_without_launching():
     assert ok is False
 
 
-def test_enemy_check_toggle_turns_every_another_player_check_off(monkeypatch):
-    # panel checkbox (user): off -> no red-dot detection anywhere (fast safety scan, the loops'
-    # enemy_check via get_enemy, Free Market escape), and the status reports it
+def test_enemy_mode_off_notify_stop(monkeypatch):
+    # panel another-player mode: off -> no red-dot detection anywhere; notify / stop -> detected
     import numpy as np
     import core
     monkeypatch.setattr(core, "detect_red_dots", lambda *a, **k: [(5, 5)])
@@ -145,13 +144,13 @@ def test_enemy_check_toggle_turns_every_another_player_check_off(monkeypatch):
     frame = np.zeros((600, 600, 3), np.uint8)
     _, c = _make()
     try:
-        assert core._enemy_dots(frame) == [(5, 5)]
-        assert c.set_enemy_check(False) == (True, "another-player check OFF")
-        assert core._enemy_dots(frame) == []
-        assert silenced                                   # a sounding alarm stops too
-        assert panel._status_dict(c)["enemy_check"] is False
-        c.set_enemy_check(True)
-        assert core._enemy_dots(frame) == [(5, 5)]
-        assert panel._status_dict(c)["enemy_check"] is True
+        assert c.set_enemy_mode("off")[0] is True
+        assert core._enemy_dots(frame) == [] and silenced
+        assert panel._status_dict(c)["enemy_mode"] == "off"
+        for m in ("notify", "stop"):
+            assert c.set_enemy_mode(m)[0] is True
+            assert core._enemy_dots(frame) == [(5, 5)]
+            assert panel._status_dict(c)["enemy_mode"] == m
+        assert c.set_enemy_mode("bogus")[0] is False
     finally:
-        core._ENEMY_CHECK[0] = True
+        core._ENEMY_MODE[0] = "notify"

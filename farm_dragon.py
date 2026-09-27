@@ -124,9 +124,8 @@ def farming_loop_nav(exp_check=None, enemy_check=None, panic=None,
             continue
 
         # safety
-        if enemy_check and enemy_check():
-            print("[nav] another player -> ALARM + panic ('m' to silence)")
-            core.enemy_alarm_on()
+        if enemy_check and core._ENEMY_MODE[0] == "stop" and enemy_check():
+            print("[nav] another player -> stop (pause, no alarm; 'n' resumes)")
             if panic: panic()
             core.time.sleep(1); continue
         if exp_check and exp_check():

@@ -51,6 +51,12 @@
       ],
       "interval_secs": 600,
       "potion": true
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "interval_secs": 300
     }
   ],
   "same_platform_band": 180,
@@ -115,7 +121,7 @@
     },
     {
       "dir": "left",
-      "until_x": 88,
+      "until_x": 84,
       "then": "down_jump",
       "attack": true,
       "y": 96,
@@ -126,5 +132,7 @@
   "_mob_conf_note": "0.6 (same as flat_sweep) after retraining models/mob_generic.pt with 80 labeled middle_road2 frames (2026-09-25, datasets/middle_road2, pool 482 frames/2187 boxes, val mAP50 0.879). Held-out middle_road2 frames (78 mobs): recall 0.64 -> 0.86 at 0.6 with 1 false box (old model at 0.4: 0.72, 8 false). Old model kept as models/mob_generic_pre_mroad2.pt. v2 (2026-09-25): +37 uncertain/fly frames (pool 519 frames/2512 boxes, val mAP50 0.87). Held-out hard frames recall 0.66 -> 0.80 at 0.6; 6 of 8 'false' boxes on held-out middle_road2 were real mobs missing from the labels, 2 real false (truck wheel, loot text). v1 kept as models/mob_generic_mroad2_v1.pt.",
   "climb_tol": 0,
   "_climb_note": "Segment 3 climbs with a RUNNING jump (ladder_test.py, 2026-09-25): line up at 84, run right, jump when the minimap reads 92 with right held 0.3 s more, hold up. Live tests: run@92 7/10 hit (misses mostly mob hits), stand@99 8/10, run@86 3/5; user found run@92 better in practice. Remove run_takeoff to go back to the standing jump at until_x (climb_tol).",
-  "_finish_note": "Segment 1 floor_end 311 (2026-09-26): the portal (296) is mid-floor and the bottom floor runs to 311 (recording: 82 reads past 297). Mobs left at the segment end sat 280-450 px ahead (beyond the 200 px AoE) and were skipped; finishing now walks toward mobs within finish_reach (450 px) up to floor_end - finish_edge_margin (6), AoEs them, then the portal line-up backs up and comes in moving right. Segments 2 and 5 (middle floor, heading left, end ~88-90): floor_end 70 -- the floor edge is ~66 (recording); finishing may walk on to ~76 (floor_end + finish_edge_margin) toward mobs 200-450 px ahead (live: the mob she had been hitting sat 242-312 px ahead at the left end and was left). finish_rounds 3 -> 6 (live: 3 AoE rounds at the segment 1 end, then the portal with mobs still at 190-376 px)."
+  "_finish_note": "Segment 1 floor_end 311 (2026-09-26): the portal (296) is mid-floor and the bottom floor runs to 311 (recording: 82 reads past 297). Mobs left at the segment end sat 280-450 px ahead (beyond the 200 px AoE) and were skipped; finishing now walks toward mobs within finish_reach (450 px) up to floor_end - finish_edge_margin (6), AoEs them, then the portal line-up backs up and comes in moving right. Segments 2 and 5 (middle floor, heading left, end ~88-90): floor_end 70 -- the floor edge is ~66 (recording); finishing may walk on to ~76 (floor_end + finish_edge_margin) toward mobs 200-450 px ahead (live: the mob she had been hitting sat 242-312 px ahead at the left end and was left). finish_rounds 3 -> 6 (live: 3 AoE rounds at the segment 1 end, then the portal with mobs still at 190-376 px). Segment 5 drop point 88 -> 84 (user: a bit too right); good drops were 84-88, x=74 landed on the low step.",
+  "floor_tol": 15,
+  "_floor_tol_note": "Floors are not flat: the bottom reads 148 on its raised left block, 143 on the car, 156 elsewhere. floor_tol 15 (floors are 45+ px apart) so those count as the bottom floor when checking/resyncing after a transition."
 }

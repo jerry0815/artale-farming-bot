@@ -245,21 +245,19 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     # not every beat.
     enemy_every = float(map_cfg.get("enemy_check_secs", 1.0))
     _last_enemy = [0.0]
-    # other_player {"action": "wait", "wait_secs": 20}: another player on the map -> no alarm/pause;
-    # release keys and wait, resume by herself if they leave, click Free Market (and stop) if they
-    # are still there after wait_secs. Default (no block): the old alarm + panic.
-    _op = map_cfg.get("other_player") or {}
-    wait_mode = _op.get("action") == "wait"
-    wait_secs = float(_op.get("wait_secs", 20))
+    # Another player on the map -> the panel's mode (core._ENEMY_MODE, read every beat so it can
+    # change mid-run; never an alarm): "stop" = release keys and wait, resume by herself if they
+    # leave, click Free Market (and stop) if still there after wait_secs; "notify" / "off" = keep
+    # farming (the fast safety scan sends the Discord note). other_player.wait_secs overrides 20.
+    wait_secs = float((map_cfg.get("other_player") or {}).get("wait_secs", 20))
     enemy_since = [None]
-    core._ENEMY_PAUSE[0] = not wait_mode              # the fast safety scan leaves it to us
     if map_cfg.get("free_market_button_xy"):
         core._FM_XY[0] = tuple(map_cfg["free_market_button_xy"])
 
     def _other_player(now):
         """wait mode: 'wait' (keep waiting), 'escape' (clicked Free Market -> stop) or None."""
-        if enemy_since[0] is not None and now - _last_enemy[0] < enemy_every:
-            return "wait"                             # between checks: keep waiting, don't farm
+        if now - _last_enemy[0] < enemy_every:        # ~65 ms per check: once per enemy_every s
+            return "wait" if enemy_since[0] is not None else None   # waiting: don't farm
         _last_enemy[0] = now
         if not enemy_check():
             if enemy_since[0] is not None:
@@ -305,7 +303,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         core.STATUS["state"] = "farming"; active_tick(now)
         core.lie_check_fast_tick(); core.STATUS["lie"] = core.is_lie_check_active()
         exp_tick()
-        if enemy_check and wait_mode:
+        if enemy_check and core._ENEMY_MODE[0] == "stop":
             op = _other_player(now)
             if op == "escape":
                 core.kb.safe_release_all(); _freeze_active(now); core.STATUS["state"] = "idle"
@@ -313,14 +311,8 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             if op == "wait":
                 _freeze_active(now); core.STATUS["state"] = "waiting (other player)"
                 core.time.sleep(0.2); return "skip"
-        elif enemy_check and now - _last_enemy[0] >= enemy_every:
-            _last_enemy[0] = now
-            if enemy_check():
-                print("[sweep] another player -> ALARM + panic")
-                core.enemy_alarm_on()
-                if panic:
-                    panic()
-                core.time.sleep(1); return "skip"
+        elif enemy_since[0] is not None:              # switched away from "stop" mid-wait
+            enemy_since[0] = None
         return "ok"
 
     edge_wait = float(map_cfg.get("edge_wait_secs", 6.0))  # max stepping time hunting the edge
@@ -345,20 +337,39 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         _reanchor(_anchor, list(recent_pos[_floor_key(y)]) if y >= 0 else [])
         lock_win.clear()
 
+    rescue_n = [0]                                  # consecutive stuck-rescue moves (rescue_move)
+    below_n = [0]                                   # consecutive reads below the segment's floor
+
     def _resync(mmx, mmy, why):
         """Continue from the next route segment on the level she is actually on. Returns the new
         heading, or None if no segment matches (keep going; the stuck clock restarts)."""
         progress.reset()
-        j = sweep.resync_segment(route, seg_i[0], mmx, mmy)
+        j = sweep.resync_segment(route, seg_i[0], mmx, mmy, level_tol=floor_tol)
         if j is None or j == seg_i[0]:
-            # no other segment fits: she is on an odd spot (middle_road2: a low step left of the
-            # middle floor, y 103) walking into a step/wall -> jump in the heading to get over it
-            print(f"[sweep] {why} at x={mmx} y={mmy} -- "
-                  f"{'no route segment on this level' if j is None else 'same segment'}: hop")
-            core.dbg(f"[sweep] {why} at x={mmx} y={mmy} -> hop")
+            # no other segment fits: she is on an odd spot (middle_road2: the low step left of the
+            # middle floor, y 103-111). Floor needed BELOW her -> drop / walk off the ledge first;
+            # otherwise (a step up or a wall) -> hop over it. Cycles on repeated stucks.
             h = sweep.seg_heading(route[seg_i[0]])
-            sweep.hop(h, keys, core.kb, sleep=core.time.sleep)
+            move = sweep.rescue_move(route[seg_i[0]].get("y"), mmy, rescue_n[0])
+            rescue_n[0] += 1
+            print(f"[sweep] {why} at x={mmx} y={mmy} -- "
+                  f"{'no route segment on this level' if j is None else 'same segment'}: {move}")
+            core.dbg(f"[sweep] {why} at x={mmx} y={mmy} -> {move}")
+            if move == "down_jump":
+                core.kb.safe_release_all()
+                core.kb.safe_press(keys["down"]); core.time.sleep(0.1)
+                core.kb.safe_press(keys["jump"]); core.time.sleep(0.05)
+                core.kb.safe_release(keys["jump"]); core.time.sleep(0.1)
+                core.kb.safe_release(keys["down"]); core.time.sleep(0.8)
+            elif move == "walk_back":
+                back = keys["left"] if h > 0 else keys["right"]
+                core.kb.safe_release_all()
+                core.kb.safe_press(back); core.time.sleep(1.0); core.kb.safe_release(back)
+                core.time.sleep(0.5)
+            else:
+                sweep.hop(h, keys, core.kb, sleep=core.time.sleep)
             return h
+        rescue_n[0] = 0
         print(f"[sweep] {why} at x={mmx} y={mmy} -> resync to segment {j + 1}")
         core.dbg(f"[sweep] {why} at x={mmx} y={mmy} -> resync to segment {j + 1}")
         core.kb.safe_release_all()
@@ -414,6 +425,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
 
     finish_max = int(map_cfg.get("finish_rounds", 3))   # AoE rounds allowed past a segment end
     finish_reach = int(map_cfg.get("finish_reach", 450))  # finishing walks to mobs this far (px)
+    finish_step = float(map_cfg.get("finish_step_secs", 0.12))  # one finishing walk step (s)
     finish_edge_margin = int(map_cfg.get("finish_edge_margin", 6))  # stop walking this far (mm px)
                                                         # before a segment's floor_end
     last_act, rechecked = [None], [False]               # walk-off re-look (recheck_before_walk)
@@ -425,18 +437,29 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     climb_retry = float(map_cfg.get("climb_retry_secs", 1.0))  # no take-off this long -> re-jump
     portal_retry = float(map_cfg.get("portal_retry_secs", 1.0))  # no teleport this long -> press again
     drop_retry = float(map_cfg.get("drop_retry_secs", 0.8))      # not falling this long -> press again
+    drop_tol = int(map_cfg.get("drop_overshoot_px", 3))          # past the drop point -> walk back
+    floor_tol = int(map_cfg.get("floor_tol", 10))   # minimap px: "on that floor" (floors aren't flat)
 
     def _transition(seg, mmx, mmy):
         """Run the segment's end transition (portal / jump / ladder climb / drop-through / none)
         and advance. Returns heading."""
         nxt = route[(seg_i[0] + 1) % len(route)]
         print(f"[sweep] segment {seg_i[0] + 1} end at x={mmx} y={mmy}")
+        # stop NOW: a WALK holds the arrow until released, and the waits below (attack recovery)
+        # kept her walking -- off middle_road2's middle floor onto the start platform (live)
+        core.kb.safe_release_all()
         if seg.get("then") and attack_end[0] is not None:
             # the fast beat starts the transition ~70 ms after the last attack, while its animation
             # still swallows input: the portal UP was ignored and waited out up_wait (3-4.6 s
             # portals, live) -- let the animation finish first
             core.time.sleep(sweep.prewalk_secs(0.0, core.time.time() - attack_end[0],
                                                attack_recover))
+        if sweep.drop_overshoot(seg, mmx, drop_tol):
+            # finishing carried her past the drop point: walk back to it (a drop from farther on
+            # can land on another ledge)
+            core.dbg(f"[sweep] drop point {seg['until_x']} overshot (x={mmx}) -> walk back first")
+            sweep.walk_back_to(seg["until_x"], -sweep.seg_heading(seg), keys, core.kb,
+                               _fast_reader(mmx, mmy), sleep=core.time.sleep, tol=1)
         t0 = core.time.time()
         ok = sweep.route_transition(seg.get("then"), sweep.seg_heading(seg),
                                     sweep.seg_heading(nxt), keys, core.kb,
@@ -482,6 +505,16 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             return sweep.seg_heading(seg)
         climb_fails[0] = 0
         h = _advance(ok, mmx)
+        if seg.get("then"):
+            # is she on the new segment's floor? (live: a swallowed drop + a mob hit knocked her
+            # onto the low step; a drop fell through two floors) -- if not, continue from her real
+            # floor, or rescue toward this segment's floor. After ANY transition: a drop now
+            # counts on any lower landing. One fast read (~17 ms; stable_char is ~267 ms).
+            x_now, y_now = core.get_character_full()
+            if sweep.off_expected_floor(route[seg_i[0]], y_now, tol=floor_tol):
+                h2 = _resync(x_now, y_now, f"segment {seg_i[0] + 1} not on its floor")
+                if h2 is not None:
+                    h = h2
         core.dbg(f"[sweep] transition '{seg.get('then')}' ok={ok}: {t1 - t0:.2f}s, settle+reanchor "
                  f"{core.time.time() - t1:.2f}s")
         return h
@@ -598,6 +631,17 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                                            sleep=core.time.sleep)
                         progress.mark_walking()
                         continue
+                # fell off her segment's floor mid-segment (2 reads in a row, not one bad read) ->
+                # continue from the floor she is on (live: walked off the middle floor onto the
+                # start platform, then kept walking segment 5 left into the wall)
+                below_n[0] = below_n[0] + 1 if (air[0] is None and sweep.fell_below(
+                    seg, _mmy, floor_tol)) else 0
+                if below_n[0] >= 2:
+                    below_n[0] = 0
+                    h = _resync(mmx, _mmy, f"segment {seg_i[0] + 1} fell off its floor")
+                    if h is not None:
+                        heading = h
+                    continue
                 if progress.update(now, mmx, heading):              # walking, going nowhere
                     h = _resync(mmx, _mmy, f"segment {seg_i[0] + 1} stuck")
                     if h is not None:
@@ -709,6 +753,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 if act == sweep.ADVANCE and last_act[0] == sweep.FIRE and not rechecked[0]:
                     rechecked[0] = True               # AoE effects hide mobs: look once more
                     core.dbg("[sweep] finishing: nothing seen right after the AoE -> one more look")
+                    core.kb.safe_release_all()        # never keep walking while just looking
                     core.time.sleep(walk_recheck)
                     continue
                 rechecked[0] = False
@@ -719,8 +764,12 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                     heading = _transition(seg, mmx, _mmy)
                     continue
                 if act == sweep.WALK:                 # close in on mobs past the end point
+                    # SHORT steps, not a held walk: past the end point the floor edge is near and
+                    # a held arrow kept walking through the next beat's waits (walked off, live)
                     last_act[0] = sweep.WALK
-                    sweep.apply_action(sweep.WALK, heading, keys, core.kb, sleep=core.time.sleep)
+                    face = keys["right"] if heading > 0 else keys["left"]
+                    core.kb.safe_press(face); core.time.sleep(finish_step)
+                    core.kb.safe_release(face)
                     progress.mark_walking()
                     core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))
                     continue
@@ -808,4 +857,3 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     finally:
         core.stop_safety_monitor()
         core.kb.safe_release_all()
-        core._ENEMY_PAUSE[0] = True                   # other loops keep the alarm + pause

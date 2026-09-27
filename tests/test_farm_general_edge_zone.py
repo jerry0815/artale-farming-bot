@@ -105,7 +105,7 @@ def test_failed_jump_stuck_on_bottom_resyncs_to_the_bottom_leg(monkeypatch, caps
     farm_general.farming_loop_general(cfg, max_seconds=60)
     out = capsys.readouterr().out
     # real segment 5 stuck at the bottom wall -> real segment 6 (left to the bottom portal)
-    assert "segment 1 stuck at x=285 y=106 -> resync to segment 2" in out
+    assert "segment 1 fell off its floor at x=285 y=106 -> resync to segment 2" in out
     assert core.STATUS["node"] == "seg2"
 
 
@@ -240,7 +240,9 @@ def test_after_the_jump_regular_beats_with_a_landing_check(monkeypatch, capsys, 
 
 
 def test_enemy_check_runs_at_most_once_per_second(monkeypatch):
-    """~65 ms per call; it ran every beat. Now throttled to enemy_check_secs (1.0)."""
+    """~65 ms per call; it ran every beat. Now throttled to enemy_check_secs (1.0). (The loop only
+    checks itself in the panel's "stop" mode; notify/off leave it to the safety scan.)"""
+    monkeypatch.setattr(core, "_ENEMY_MODE", ["stop"])
     clock = [1000.0]
     kb = core.kb
     monkeypatch.setattr(kb, "pause", False, raising=False)
@@ -322,8 +324,10 @@ def test_a_single_mid_air_read_does_not_count_as_landed(monkeypatch, capsys):
     assert "-> segment 3: left to x=215" in out, out
 
 
-def _wait_mode_harness(monkeypatch, seen_until):
-    """Loop with other_player 'wait': enemy_check reports a player until clock >= seen_until."""
+def _wait_mode_harness(monkeypatch, seen_until, mode="stop"):
+    """Loop with the panel's another-player `mode` (default 'stop'): enemy_check reports a player
+    until clock >= seen_until."""
+    monkeypatch.setattr(core, "_ENEMY_MODE", [mode])
     clock = [1000.0]
     ev = []
     kb = core.kb
@@ -352,7 +356,6 @@ def _wait_mode_harness(monkeypatch, seen_until):
     monkeypatch.setattr(mob_detect, "yolo_detect", detect)
     cfg = {"loop": "sweep", "anchor": "yolo_player", "attack_key": "x",
            "minimap": {"x": 0, "y": 0, "w": 10, "h": 10},
-           "other_player": {"action": "wait", "wait_secs": 20},
            "route": [{"dir": "right", "until_x": 275, "then": None, "attack": True, "y": 106}]}
     core.STOP.clear()
     farm_general.farming_loop_general(cfg, enemy_check=lambda: clock[0] < seen_until,
@@ -373,3 +376,10 @@ def test_other_player_stays_20s_goes_to_free_market(monkeypatch, capsys):
     assert "ALARM" not in ev and "PANIC" not in ev
     assert ev.count("free_market") == 1
     assert ev.count("beat") <= 2                                   # no farming while waiting
+
+
+def test_other_player_notify_mode_keeps_farming(monkeypatch, capsys):
+    ev = _wait_mode_harness(monkeypatch, seen_until=10 ** 9, mode="notify")
+    assert "ALARM" not in ev and "PANIC" not in ev and "free_market" not in ev
+    assert ev.count("beat") > 50                                   # never stopped
+

@@ -60,10 +60,12 @@ def lie_check_fast_tick(interval=0.8):
     dots = core._enemy_dots(f)                                  # another player -> alarm + pause
     if core.dbg_on():
         core.dbg(f"[enemy] scan -> {len(dots)} red dot(s)" + (f" at {dots}" if dots else ""))
-    if dots and core._ENEMY_PAUSE[0]:                           # else the loop handles it (wait mode)
-        print("[water] another player -> ALARM + PAUSE ('m' silence, 'n' resume)")
-        core.notify.send("another_player", "⚠️ Another player entered the map — bot PAUSED ('m' silence, 'n' resume)")
-        core.enemy_alarm_on(); core.kb.safe_release_all(); core.kb.pause = True
+    if dots:                                                    # panel mode (never an alarm):
+        stop = core._ENEMY_MODE[0] == "stop"                    # the LOOP stops / Free Markets
+        msg = ("⚠️ Another player on the map — bot stopped, Free Market if they stay"
+               if stop else "ℹ️ Another player on the map — still farming")
+        if core.notify.send("another_player", msg):             # notify: <= 1 post / 120 s
+            print(f"[enemy] another player on the map -> {'stop' if stop else 'notify only'}")
 
 
 def lie_check_full_tick(interval=1.5, template_every=15.0):
@@ -291,7 +293,7 @@ def _enemy_dots(frame):
     """Red dots (other players) in the minimap band of a captured BGR frame. TEMPLATE match is
     authoritative (drives the another-player alarm); detect_red_dots_color runs in shadow to
     validate the switch (see _enemy_shadow). Presence-only -> non-empty means escape."""
-    if frame is None or not core._ENEMY_CHECK[0]:          # turned off in the panel
+    if frame is None or core._ENEMY_MODE[0] == "off":       # turned off in the panel
         return []
     ey = min(core.MM_Y + core.MM_H, frame.shape[0]); ex = min(core.MM_X + core.MM_W, frame.shape[1])
     mm = frame[core.MM_Y:ey, core.MM_X:ex]                  # FULL configured minimap band (lower platforms too)

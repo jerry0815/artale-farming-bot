@@ -342,6 +342,58 @@ def recheck_before_walk(act, last_act, rechecked):
     return act == WALK and last_act in (FIRE, GATHER) and not rechecked
 
 
+def walk_back_to(target, heading, keys, kb, read_xy, sleep=lambda s: None, tol=1, timeout=2.0,
+                 poll=0.03):
+    """ONE straight walk in `heading` until the minimap x is within `tol` of target (or past it),
+    capped at `timeout` s. For a spot that needs no precise line-up (a drop point): approach_x's
+    tap-overshoot-back-up cycles took ~13 s here (live). True when reached."""
+    key = keys["right"] if heading > 0 else keys["left"]
+    kb.safe_press(key)
+    waited, ok = 0.0, False
+    while waited < timeout:
+        x = read_xy()[0]
+        if x is not None and x >= 0 and (target - x) * heading <= tol:
+            ok = True
+            break
+        sleep(poll); waited += poll
+    kb.safe_release(key)
+    return ok
+
+
+def drop_overshoot(seg, mmx, tol=3):
+    """True when a down_jump segment's end finds her more than `tol` minimap px PAST its drop point
+    (until_x) -- finishing can walk her on toward mobs, and a drop from there may land somewhere
+    else (middle_road2: from x=74 she landed on the low step at (51, 111), not the bottom floor;
+    every good drop started at 84-88). The caller walks her back to until_x first."""
+    if seg.get("then") != "down_jump" or mmx is None or mmx < 0:
+        return False
+    return (mmx - seg["until_x"]) * seg_heading(seg) > tol
+
+
+def rescue_move(seg_y, mmy, attempt, below=10):
+    """Stuck-rescue step when no route segment fits where she is. If the current segment's floor is
+    BELOW her (> `below` minimap px), try to get down: drop through (down_jump), then walk back the
+    other way (off a ledge), then hop; cycling with `attempt`. Otherwise hop (a step up / over a
+    ledge). Live 14:23: knocked onto middle_road2's low step (y 111) with the bottom floor (156) as
+    the target, the hop-only rescue took her UP onto the middle floor."""
+    if seg_y is not None and mmy is not None and mmy >= 0 and seg_y - mmy > below:
+        return ("down_jump", "walk_back", "hop")[attempt % 3]
+    return "hop"
+
+
+def fell_below(seg, mmy, tol=10):
+    """True when her minimap y is more than `tol` BELOW the segment's floor: she fell off it
+    mid-segment (walked / was knocked off an edge) -- the loop resyncs by her real floor at once
+    instead of walking the old segment's heading into a wall until the stuck timer fires."""
+    return seg.get("y") is not None and mmy is not None and mmy >= 0 and mmy - seg["y"] > tol
+
+
+def off_expected_floor(seg, mmy, tol=10):
+    """After a transition that was NOT confirmed: True when she is clearly not on the segment's
+    floor (then resync by her real floor instead of blindly advancing)."""
+    return seg.get("y") is not None and mmy is not None and mmy >= 0 and abs(mmy - seg["y"]) > tol
+
+
 def hop(heading, keys, kb, sleep=lambda s: None, hold=0.5):
     """Stuck recovery: walk the heading and jump (climbs a step / ledge she keeps walking into)."""
     face = keys["right"] if heading > 0 else keys["left"]
@@ -438,12 +490,13 @@ def route_transition(then, cur_heading, next_heading, keys, kb, read_xy, sleep=l
         _y = _timed_y
         sign = -1 if then == "climb" else 1       # climbing: y falls; dropping: y rises
 
-        def arrived(y):                           # on the new level (target known: exactly it)
-            if target_y is not None:
-                # climb: the rope reads 52-57 just below the top floor (51), so near-enough is
-                # still ON the rope -- only within climb_land_tol counts as standing on the floor
-                tol = climb_land_tol if then == "climb" else level_tol
-                return abs(y - target_y) <= tol
+        def arrived(y):
+            # climb with a target: exactly on it -- the rope reads 52-57 just below the top floor
+            # (51), so near-enough is still ON the rope. A drop: any LOWER landing -- floors are not
+            # flat (middle_road2's bottom reads 148 on its raised left block, 143 on the car, 156
+            # elsewhere); the caller checks which floor she is on afterwards.
+            if then == "climb" and target_y is not None:
+                return abs(y - target_y) <= climb_land_tol
             return (y - y0) * sign >= y_change
         for attempt in range(climb_tries if then == "climb" else drop_tries):
             if then == "climb" and run_takeoff is not None:

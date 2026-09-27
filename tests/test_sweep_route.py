@@ -867,3 +867,69 @@ def test_down_jump_retries_quickly_when_the_first_press_is_swallowed():
                                 poll=0.1, up_wait=0.8, drop_tries=3, target_y=96)
     assert ok is True
     assert [k for e, k in kb.events if e == "press"].count("J") == 2
+
+
+def test_drop_from_past_the_drop_point_walks_back_first():
+    # live 14:23: finishing walked her to x=74 on middle_road2's middle floor; dropping there landed
+    # on the low step (51, 111) instead of the bottom floor. Every good drop started at 84-88.
+    seg = {"dir": "left", "until_x": 88, "then": "down_jump", "y": 96}
+    assert sweep.drop_overshoot(seg, 74, tol=3) is True
+    assert sweep.drop_overshoot(seg, 86, tol=3) is False          # at / near the drop point
+    assert sweep.drop_overshoot(seg, 95, tol=3) is False          # not there yet
+    assert sweep.drop_overshoot(dict(seg, then="up"), 74, tol=3) is False
+    assert sweep.drop_overshoot(seg, -1, tol=3) is False          # no read
+
+
+# --- stuck rescue that knows up from down (live 14:23: knocked off middle_road2's middle floor
+# onto the low step (42-51, 111); segment 1 is the bottom floor (156) BELOW her, but the rescue
+# always hopped -- up onto the middle floor, where she ran the bottom route).
+
+def test_rescue_drops_first_when_the_segment_floor_is_below_her():
+    assert sweep.rescue_move(seg_y=156, mmy=111, attempt=0) == "down_jump"
+    assert sweep.rescue_move(seg_y=156, mmy=111, attempt=1) == "walk_back"
+    assert sweep.rescue_move(seg_y=156, mmy=111, attempt=2) == "hop"
+    assert sweep.rescue_move(seg_y=156, mmy=111, attempt=3) == "down_jump"      # cycles
+
+
+def test_rescue_hops_when_the_segment_floor_is_level_or_above():
+    assert sweep.rescue_move(seg_y=96, mmy=103, attempt=0) == "hop"
+    assert sweep.rescue_move(seg_y=51, mmy=96, attempt=1) == "hop"
+    assert sweep.rescue_move(seg_y=None, mmy=111, attempt=0) == "hop"
+
+
+def test_after_a_failed_transition_check_the_floor():
+    # she is not on the next segment's floor -> resync instead of blindly advancing
+    assert sweep.off_expected_floor({"y": 156}, 111) is True
+    assert sweep.off_expected_floor({"y": 156}, 153) is False
+    assert sweep.off_expected_floor({"y": 156}, -1) is False       # no read: can't tell
+    assert sweep.off_expected_floor({}, 111) is False
+
+
+def test_down_jump_counts_any_lower_landing():
+    # live: the bottom floor reads 148 on the raised block at its left end (and 143 on the car),
+    # not 156 -- a drop landing there was "not confirmed" and retried
+    kb = _KB()
+    seq = [(80, 96), (80, 110), (70, 130), (60, 148)] + [(60, 148)] * 12
+    ok = sweep.route_transition("down_jump", -1, 1, dict(KEYS, down="D"), kb, read_xy=_reader(seq),
+                                poll=0.1, target_y=156, steady_secs=0.4)
+    assert ok is True
+    assert [k for e, k in kb.events if e == "press"].count("J") == 1
+
+
+def test_walk_back_to_is_one_capped_walk():
+    w = _World(74, speed=28.0)
+    t = [0.0]
+    def sleep(d): t[0] += d; w.sleep(d)
+    assert sweep.walk_back_to(84, 1, KEYS, w, w.read, sleep, tol=1, timeout=2.0) is True
+    assert 83 <= w.x <= 87 and t[0] < 1.0
+    assert [k for e, k in w.events if e == "press"] == ["R"]          # one walk, no taps
+
+
+def test_fell_below_the_segment_floor():
+    # live: walked off middle_road2's middle floor (96) onto the start platform (148) mid-segment 5
+    seg = {"dir": "left", "until_x": 84, "then": "down_jump", "y": 96}
+    assert sweep.fell_below(seg, 148, tol=15) is True
+    assert sweep.fell_below(seg, 104, tol=15) is False        # a slope / a small step
+    assert sweep.fell_below(seg, 51, tol=15) is False         # ABOVE is not a fall
+    assert sweep.fell_below(seg, -1, tol=15) is False
+    assert sweep.fell_below({"dir": "left", "until_x": 84}, 148, tol=15) is False

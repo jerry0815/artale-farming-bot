@@ -264,9 +264,10 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
         active_tick(now)                                   # advance ACTIVE farm time
         core.lie_check_fast_tick(); core.STATUS["lie"] = core.is_lie_check_active()   # FULL runs in the monitor thread
         exp_tick()
-        if enemy_check and enemy_check():
-            print("[water] another player -> ALARM + panic ('m' to silence)")
-            core.enemy_alarm_on()
+        # another player: only the panel's "stop" mode pauses (no alarm); "notify" is the safety
+        # scan's Discord note, "off" never sees a dot
+        if enemy_check and core._ENEMY_MODE[0] == "stop" and enemy_check():
+            print("[water] another player -> stop (pause, no alarm; 'n' resumes)")
             if panic: panic()
             core.time.sleep(1); return "skip"
         return "ok"

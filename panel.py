@@ -176,15 +176,20 @@ class Controller:
         self.actions["pause_toggle"]()
         return True, "toggled"
 
-    def set_enemy_check(self, on):
-        """Panel checkbox: turn the another-player (red minimap dot) check on/off for every loop.
-        Off also silences a sounding another-player alarm."""
+    ENEMY_MODES = {"notify": "notify, keep farming", "off": "off",
+                   "stop": "notify + stop, Free Market after 20 s"}
+
+    def set_enemy_mode(self, mode):
+        """Panel dropdown: what to do when another player (red minimap dot) is on the map, for
+        every loop -- notify / off / stop (see core._ENEMY_MODE). Never an alarm; switching also
+        silences one that is sounding."""
         import core
-        core._ENEMY_CHECK[0] = bool(on)
-        if not on:
-            core.enemy_alarm_silence()
-        print(f"[panel] another-player check {'ON' if on else 'OFF'}")
-        return True, f"another-player check {'ON' if on else 'OFF'}"
+        if mode not in self.ENEMY_MODES:
+            return False, f"unknown another-player mode {mode}"
+        core._ENEMY_MODE[0] = mode
+        core.enemy_alarm_silence()
+        print(f"[panel] another player -> {self.ENEMY_MODES[mode]}")
+        return True, f"another player: {self.ENEMY_MODES[mode]}"
 
     def stop(self):
         if self.mode == "recording":
@@ -559,7 +564,7 @@ def _status_dict(controller):
     import core, time
     st = dict(core.STATUS)
     st["mode"] = controller.mode
-    st["enemy_check"] = bool(core._ENEMY_CHECK[0])
+    st["enemy_mode"] = core._ENEMY_MODE[0]
     st["recorder_marks"] = controller.recorder.marks if controller.recorder else 0
     ba = st.get("buff_at")
     st["buff_ago"] = int(time.time() - ba) if ba else None   # seconds since last buff (server clock)
@@ -634,7 +639,12 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
        <button class=stop onclick="cmd('stop')">■ Stop</button>
      </div>
      <div class=row>
-       <label title="Red dot on the minimap = another player -> stop / alarm / Free Market. Untick to farm with other players around."><input type=checkbox id=enemychk checked onchange="setEnemyCheck(this.checked)"> another-player check</label>
+       <label title="Red dot on the minimap = another player. Never an alarm.">another player
+         <select id=enemymode onchange="setEnemyMode(this.value)">
+           <option value=notify>notify, keep farming</option>
+           <option value=off>off (no check)</option>
+           <option value=stop>notify + stop, Free Market after 20 s</option>
+         </select></label>
      </div>
    </fieldset>
    <div class=row>
@@ -866,14 +876,14 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    if(!j.ok) alert(j.msg);
  }
  let _tp, _tl, _ts;                        // poll timer handles -> re-kickable, never doubled
- async function setEnemyCheck(on){
-   await fetch('/cmd?'+new URLSearchParams({action:'enemy_check', on: on ? '1' : '0'}));
+ async function setEnemyMode(mode){
+   await fetch('/cmd?'+new URLSearchParams({action:'enemy_mode', mode}));
  }
  async function poll(){
    try{
      const s = await (await fetch('/status')).json();
-     const ec = document.getElementById('enemychk');
-     if (ec && typeof s.enemy_check === 'boolean' && document.activeElement !== ec) ec.checked = s.enemy_check;
+     const em = document.getElementById('enemymode');
+     if (em && s.enemy_mode && document.activeElement !== em) em.value = s.enemy_mode;
      const lie = document.getElementById('lie');
      lie.className = s.lie ? 'bad' : 'ok';
      lie.textContent = s.lie ? '⚠ lie-check: NEEDS HUMAN' : 'lie-check: OK';
@@ -1028,8 +1038,8 @@ def make_handler(controller):
                                         char=q.get("char", [None])[0])
             if action == "pause":
                 return controller.pause()
-            if action == "enemy_check":
-                return controller.set_enemy_check(q.get("on", ["1"])[0] == "1")
+            if action == "enemy_mode":
+                return controller.set_enemy_mode(q.get("mode", [""])[0])
             if action == "stop":
                 return controller.stop()
             if action == "quit":
