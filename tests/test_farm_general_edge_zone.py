@@ -383,3 +383,43 @@ def test_other_player_notify_mode_keeps_farming(monkeypatch, capsys):
     assert "ALARM" not in ev and "PANIC" not in ev and "free_market" not in ev
     assert ev.count("beat") > 50                                   # never stopped
 
+
+
+def test_kite_engage_walks_shooting_and_stands_when_a_mob_is_close(monkeypatch):
+    """engage 'kite' (archer): route attack legs call apply_kite instead of the push + AoE rhythm --
+    a far mob ahead -> walk on shooting, a mob inside kite_safe_dist -> stand and shoot; no push."""
+    import sweep as sw
+    calls, pushed = [], []
+    monkeypatch.setattr(sw, "apply_kite", lambda act, h, keys, kb, **k: calls.append(act) or h)
+    monkeypatch.setattr(sw, "apply_action", lambda act, h, keys, kb, **k: pushed.append(act) or h)
+    kb = core.kb
+    monkeypatch.setattr(kb, "pause", False, raising=False)
+    monkeypatch.setattr(kb, "safe_press", lambda k: None)
+    monkeypatch.setattr(kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(kb, "safe_release_all", lambda: None)
+    for name, fn in {"focus": lambda: True, "set_minimap": lambda *a: None,
+                     "ensure_game_focused": lambda **k: True, "lie_check_fast_tick": lambda: None,
+                     "is_lie_check_active": lambda: False, "capture": lambda: object(),
+                     "make_exp_tracker": lambda **k: (lambda: None),
+                     "start_safety_monitor": lambda *a, **k: None,
+                     "stable_char": lambda n=3: (100, 106)}.items():
+        monkeypatch.setattr(core, name, fn, raising=False)
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    import mob_detect
+    monkeypatch.setattr(mob_detect, "load_yolo", lambda p: object())
+    # player box centre x 500; mob centre 780 (280 px ahead), then 600 (100 px ahead)
+    beats = iter([[(0.9, 760, 300, 40, 70)], [(0.9, 580, 300, 40, 70)]])
+
+    def detect(*a, **k):
+        m = next(beats, None)
+        if m is None:
+            core.STOP.set(); m = []
+        return (m, (0.9, 480, 300, 40, 70))
+    monkeypatch.setattr(mob_detect, "yolo_detect", detect)
+    cfg = {"loop": "sweep", "anchor": "yolo_player", "attack_key": "x", "engage": "kite",
+           "kite_safe_dist": 150, "minimap": {"x": 0, "y": 0, "w": 10, "h": 10},
+           "route": [{"dir": "right", "until_x": 275, "then": None, "attack": True, "y": 106}]}
+    core.STOP.clear()
+    farm_general.farming_loop_general(cfg, max_seconds=5)
+    assert calls[:2] == [sw.WALK_SHOOT, sw.STAND_SHOOT]
+    assert sw.GATHER not in pushed and sw.FIRE not in pushed

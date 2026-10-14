@@ -211,6 +211,13 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     climb_tol = int(map_cfg.get("climb_tol", portal_tol))      # ladder line-up tolerance (px)
     portal_brake = int(map_cfg.get("portal_brake", 8))         # line-up: walk until this close, then tap
     reach = sweep.dash_reach(attack_range, gcfg) if gcfg else attack_range
+    # engage "kite" (archer: shoots while walking): route attack legs walk on tapping the shot and
+    # only stand to shoot when a mob ahead is inside kite_safe_dist screen px. Default "push" is the
+    # push + AoE rhythm. Segment-end finishing is the same for both (stand + shoot within range).
+    kite = map_cfg.get("engage", "push") == "kite"
+    kite_safe = int(map_cfg.get("kite_safe_dist", 150))
+    shot_press = float(map_cfg.get("shot_press_secs", 0.05))
+    stand_shoot = float(map_cfg.get("stand_shoot_secs", 0.3))
 
     # Buffs -- same scheme as farm_water (each group on its own interval).
     buff_groups = core.buff_plan(map_cfg, skill_interval)       # [(keys, interval, potion)]
@@ -579,7 +586,8 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         return heading
 
     print(f"[sweep] start: range={attack_range} aoe_max={aoe_max} heading={heading} "
-          f"gather={('%s@%.1fs' % (keys['dash'], gather_cd)) if gcfg else 'off'} bounds={bounds}")
+          f"gather={('%s@%.1fs' % (keys['dash'], gather_cd)) if gcfg else 'off'} bounds={bounds}"
+          + (f" engage=kite safe={kite_safe}px" if kite else ""))
     core.start_safety_monitor()        # curse/monster popups (guard() only runs the fast captcha check)
     try:
         while True:
@@ -783,6 +791,20 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                                    keep_holding=lambda: _still_in_range(_h, _t0), hold_max=60)
                 attack_end[0] = core.time.time()
                 last_act[0] = sweep.FIRE
+                continue
+            if route and kite:
+                act = sweep.kite_action(mob_xs, px, heading, kite_safe)
+                if _debug:
+                    ahead = [(x - px) * heading for x in mob_xs if (x - px) * heading >= -30]
+                    core.dbg(f"[sweep] seg{seg_i[0] + 1} kite mm=({mmx},{_mmy}) p=({px},{pfeet}) "
+                             f"nearest={min(ahead) if ahead else None} kept={mob_xs} -> {act}")
+                last_act[0] = act
+                sweep.apply_kite(act, heading, keys, core.kb, sleep=core.time.sleep,
+                                 shot_press=shot_press, stand_secs=stand_shoot)
+                if act == sweep.WALK_SHOOT:
+                    progress.mark_walking()
+                attack_end[0] = core.time.time()
+                core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))
                 continue
             if route:
                 # Route attack leg, fixed rhythm: one push (z) then hold x (AoE); no push within

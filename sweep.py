@@ -178,6 +178,45 @@ def route_attack(mob_xs, px, heading, attack_range, reach, near_edge, behind_tol
     return WALK
 
 
+# --- Kite engage (archer) ----------------------------------------------------------------
+# She shoots WHILE walking, so a route attack leg never stops for far mobs: walk on shooting,
+# and only stand (still shooting) when a mob ahead is inside safe_dist -- closer, it reaches her.
+WALK_SHOOT = "WALK_SHOOT"     # keep walking the heading, tap the shot
+STAND_SHOOT = "STAND_SHOOT"   # a mob ahead is too close: stop and shoot
+
+
+def kite_action(mob_xs, px, heading, safe_dist, behind_tol=30):
+    """WALK_SHOOT unless a same-floor mob is ahead within safe_dist screen px (or overlapping
+    her, within behind_tol) -> STAND_SHOOT. Mobs further behind are left alone (forward-only
+    shot, one direction per segment). Empty ground walks on shooting too (user): the shot is
+    free while walking and hits mobs the detector missed. mob_xs must be same-platform filtered."""
+    if any(-behind_tol <= (x - px) * heading <= safe_dist for x in mob_xs):
+        return STAND_SHOOT
+    return WALK_SHOOT
+
+
+def apply_kite(action, heading, keys, kb, sleep=lambda s: None, shot_press=0.05,
+               stand_secs=0.3, shot_gap=0.05):
+    """WALK_SHOOT: hold the heading arrow (kept held across beats) and tap the shot once.
+    STAND_SHOOT: release the arrows and keep tapping the shot for stand_secs, then re-decide.
+    She already faces the heading (she walked in), so no facing tap."""
+    face = keys["right"] if heading > 0 else keys["left"]
+    if action == WALK_SHOOT:
+        kb.safe_release(keys["left"] if heading > 0 else keys["right"])
+        kb.safe_press(face)
+        kb.safe_press(keys["attack"]); sleep(shot_press); kb.safe_release(keys["attack"])
+        return heading
+    kb.safe_release(keys["right"]); kb.safe_release(keys["left"])
+    t = 0.0
+    while True:
+        kb.safe_press(keys["attack"]); sleep(shot_press); kb.safe_release(keys["attack"])
+        t += shot_press
+        if t + 1e-9 >= stand_secs:
+            break
+        sleep(shot_gap); t += shot_gap
+    return heading
+
+
 def approach_x(target, heading, keys, kb, read_xy, sleep=lambda s: None, tol=2, back=6,
                tap=0.045, poll=0.03, timeout=4.0, brake=8):
     """Stand on minimap x `target` ARRIVING MOVING IN `heading` (the portal-press side). The press
