@@ -204,6 +204,10 @@ def _water_shoot_env(monkeypatch, read):
                         lambda *a, **k: (calls.__setitem__("swim", calls["swim"] + 1), True)[1])
     monkeypatch.setattr(core, "_face_right", lambda *a, **k: None)
     monkeypatch.setattr(core, "lie_check_fast_tick", lambda *a, **k: None)
+    # water_shoot's focus guard reads the REAL foreground window: unpatched, it bails on the first
+    # beat (and tries to raise the game) unless the game happens to be focused -> flaky.
+    monkeypatch.setattr(core, "is_focused", lambda: True)
+    monkeypatch.setattr(core, "focus", lambda *a, **k: None)
     monkeypatch.setattr(core, "get_character_color", lambda *a, **k: read)
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
     monkeypatch.setattr(core.kb, "safe_press", lambda k: None)
