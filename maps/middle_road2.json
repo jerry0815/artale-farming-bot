@@ -100,7 +100,9 @@
       "then": null,
       "attack": true,
       "y": 96,
-      "floor_end": 70
+      "floor_end": 70,
+      "push_margin": 40,
+      "_push_margin_note": "No push within 40 px of the end (90): a push at x=113 dashed to 88 and she fell off the left end (live 21:59, 2026-10-13); default push_edge_margin 18."
     },
     {
       "dir": "right",
@@ -134,5 +136,7 @@
   "_climb_note": "Segment 3 climbs with a RUNNING jump (ladder_test.py, 2026-09-25): line up at 84, run right, jump when the minimap reads 92 with right held 0.3 s more, hold up. Live tests: run@92 7/10 hit (misses mostly mob hits), stand@99 8/10, run@86 3/5; user found run@92 better in practice. Remove run_takeoff to go back to the standing jump at until_x (climb_tol).",
   "_finish_note": "Segment 1 floor_end 311 (2026-09-26): the portal (296) is mid-floor and the bottom floor runs to 311 (recording: 82 reads past 297). Mobs left at the segment end sat 280-450 px ahead (beyond the 200 px AoE) and were skipped; finishing now walks toward mobs within finish_reach (450 px) up to floor_end - finish_edge_margin (6), AoEs them, then the portal line-up backs up and comes in moving right. Segments 2 and 5 (middle floor, heading left, end ~88-90): floor_end 70 -- the floor edge is ~66 (recording); finishing may walk on to ~76 (floor_end + finish_edge_margin) toward mobs 200-450 px ahead (live: the mob she had been hitting sat 242-312 px ahead at the left end and was left). finish_rounds 3 -> 6 (live: 3 AoE rounds at the segment 1 end, then the portal with mobs still at 190-376 px). Segment 5 drop point 88 -> 84 (user: a bit too right); good drops were 84-88, x=74 landed on the low step.",
   "floor_tol": 15,
-  "_floor_tol_note": "Floors are not flat: the bottom reads 148 on its raised left block, 143 on the car, 156 elsewhere. floor_tol 15 (floors are 45+ px apart) so those count as the bottom floor when checking/resyncing after a transition."
+  "_floor_tol_note": "Floors are not flat: the bottom reads 148 on its raised left block, 143 on the car, 156 elsewhere. floor_tol 15 (floors are 45+ px apart) so those count as the bottom floor when checking/resyncing after a transition.",
+  "fall_tol": 12,
+  "_fall_tol_note": "Mid-segment fall check (default floor_tol): a fall off the middle floor's left end lands on the low step at y 111 = 15 below the middle floor (96), which floor_tol 15 missed (live 21:59, 2026-10-13). 12 still ignores reads that are only a little lower."
 }

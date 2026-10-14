@@ -423,3 +423,39 @@ def test_kite_engage_walks_shooting_and_stands_when_a_mob_is_close(monkeypatch):
     farm_general.farming_loop_general(cfg, max_seconds=5)
     assert calls[:2] == [sw.WALK_SHOOT, sw.STAND_SHOOT]
     assert sw.GATHER not in pushed and sw.FIRE not in pushed
+
+
+def test_fall_tol_catches_a_drop_onto_a_step_just_floor_tol_below(monkeypatch, capsys):
+    """Live 21:59 (middle_road2): a push carried her off the middle floor's left end (y 96) onto the
+    low step at y 111 -- exactly floor_tol (15) below, so fell_below never fired and she 'finished'
+    segment 2 from the step. fall_tol (default floor_tol) sets the mid-segment fall threshold."""
+    kb = core.kb
+    monkeypatch.setattr(kb, "pause", False, raising=False)
+    monkeypatch.setattr(kb, "safe_press", lambda k: None)
+    monkeypatch.setattr(kb, "safe_release", lambda k: None)
+    monkeypatch.setattr(kb, "safe_release_all", lambda: None)
+    for name, fn in {"focus": lambda: True, "set_minimap": lambda *a: None,
+                     "ensure_game_focused": lambda **k: True, "lie_check_fast_tick": lambda: None,
+                     "is_lie_check_active": lambda: False, "capture": lambda: object(),
+                     "make_exp_tracker": lambda **k: (lambda: None),
+                     "start_safety_monitor": lambda *a, **k: None,
+                     "stable_char": lambda n=3: (37, 111)}.items():
+        monkeypatch.setattr(core, name, fn, raising=False)
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    import mob_detect
+    monkeypatch.setattr(mob_detect, "load_yolo", lambda p: object())
+    n = [0]
+
+    def detect(*a, **k):
+        n[0] += 1
+        if n[0] > 4:
+            core.STOP.set()
+        return ([], (0.9, 480, 300, 40, 70))
+    monkeypatch.setattr(mob_detect, "yolo_detect", detect)
+    route = [{"dir": "left", "until_x": 20, "then": None, "attack": True, "y": 96},
+             {"dir": "right", "until_x": 99, "then": None, "attack": False, "y": 96}]
+    cfg = {"loop": "sweep", "anchor": "yolo_player", "attack_key": "x", "floor_tol": 15,
+           "fall_tol": 12, "minimap": {"x": 0, "y": 0, "w": 10, "h": 10}, "route": route}
+    core.STOP.clear()
+    farm_general.farming_loop_general(cfg, max_seconds=5)
+    assert "segment 1 fell off its floor at x=37 y=111" in capsys.readouterr().out

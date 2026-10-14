@@ -448,6 +448,9 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     drop_retry = float(map_cfg.get("drop_retry_secs", 0.8))      # not falling this long -> press again
     drop_tol = int(map_cfg.get("drop_overshoot_px", 3))          # past the drop point -> walk back
     floor_tol = int(map_cfg.get("floor_tol", 10))   # minimap px: "on that floor" (floors aren't flat)
+    # mid-segment "fell off her floor" threshold (fell_below); can be tighter than floor_tol, whose
+    # slack is for raised bits ABOVE a floor (middle_road2: the step 15 below the middle floor)
+    fall_tol = int(map_cfg.get("fall_tol", floor_tol))
 
     def _transition(seg, mmx, mmy):
         """Run the segment's end transition (portal / jump / ladder climb / drop-through / none)
@@ -645,7 +648,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 # continue from the floor she is on (live: walked off the middle floor onto the
                 # start platform, then kept walking segment 5 left into the wall)
                 below_n[0] = below_n[0] + 1 if (air[0] is None and sweep.fell_below(
-                    seg, _mmy, floor_tol)) else 0
+                    seg, _mmy, fall_tol)) else 0
                 if below_n[0] >= 2:
                     below_n[0] = 0
                     h = _resync(mmx, _mmy, f"segment {seg_i[0] + 1} fell off its floor")
