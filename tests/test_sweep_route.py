@@ -331,6 +331,43 @@ def test_progress_gain_resets_the_clock():
         assert pr.update(t, 100 + 3 * (i + 1), 1) is False
 
 
+
+def _walk_frozen(pr, t, x, beats, dt=0.25):
+    flags = []
+    for _ in range(beats):
+        pr.mark_walking(); t += dt
+        flags.append(pr.update(t, x, 1))
+    return t, flags
+
+
+def test_progress_after_a_rescue_rechecks_quickly():
+    """Live 17:57: a hop climbed ONE stair of the low steps left of middle_road2's middle floor
+    (y 111 -> 103), then she walked into the next riser for the full 4 s before the next hop. After
+    a rescue move the next stuck check uses the short quick window."""
+    pr = sweep.Progress(stuck_secs=4.0)
+    pr.rescue(quick_secs=1.0)                # the loop just hopped (after progress.reset())
+    pr.update(0.0, 57, 1)
+    t, flags = _walk_frozen(pr, 0.0, 57, 4)  # 1.0 s against the next stair
+    assert flags[-1] is True and not any(flags[:-1])
+
+
+def test_progress_quick_window_ends_once_she_moves_on():
+    pr = sweep.Progress(stuck_secs=4.0)
+    pr.rescue(quick_secs=1.0)
+    pr.update(0.0, 57, 1)
+    pr.mark_walking(); pr.update(0.25, 62, 1)      # real gain: the rescue worked
+    t, flags = _walk_frozen(pr, 0.25, 62, 8)       # 2 s frozen: back to the normal 4 s window
+    assert not any(flags)
+
+
+def test_progress_reset_clears_the_quick_window():
+    pr = sweep.Progress(stuck_secs=4.0)
+    pr.rescue(quick_secs=1.0)
+    pr.reset()                                     # e.g. a normal segment advance
+    pr.update(0.0, 57, 1)
+    t, flags = _walk_frozen(pr, 0.0, 57, 8)
+    assert not any(flags)
+
 ROUTE = [{"dir": "right", "until_x": 275, "y": 106}, {"dir": "left", "until_x": 216, "y": 106},
          {"dir": "left", "until_x": 120, "y": 55}, {"dir": "right", "until_x": 195, "y": 55},
          {"dir": "right", "until_x": 307, "y": 62}, {"dir": "left", "until_x": 214, "y": 106},

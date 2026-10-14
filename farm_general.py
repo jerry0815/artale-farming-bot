@@ -336,6 +336,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     # jump/portal left her on a level where this segment's until_x is unreachable) -> resync.
     gate = sweep.MinimapGate(max_jump=int(map_cfg.get("mm_max_jump", 40)))
     progress = sweep.Progress(stuck_secs=float(map_cfg.get("stuck_secs", 4.0)))
+    rescue_stuck = float(map_cfg.get("rescue_stuck_secs", 1.0))  # stuck window right after a rescue
 
     def _reanchor_here(y_hint=None):
         """Re-seed the HP-bar lock at her usual screen spot for the floor she is on NOW. y_hint
@@ -375,6 +376,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 core.time.sleep(0.5)
             else:
                 sweep.hop(h, keys, core.kb, sleep=core.time.sleep)
+            progress.rescue(rescue_stuck)   # stairs: the next hop comes after ~1 s, not 4 s
             return h
         rescue_n[0] = 0
         print(f"[sweep] {why} at x={mmx} y={mmy} -> resync to segment {j + 1}")

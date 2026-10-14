@@ -615,6 +615,13 @@ class Progress:
 
     def reset(self):
         self.best, self.walk, self.t, self.walking = None, 0.0, None, False
+        self.limit = self.stuck_secs
+
+    def rescue(self, quick_secs=1.0):
+        """A stuck-rescue move (hop / drop) just ran: until she gains ground again, flag stuck after
+        only quick_secs of walking. Low steps take one hop PER stair; with the full window every
+        stair cost another 4 s walking into its riser (live 17:57, middle_road2)."""
+        self.limit = min(self.stuck_secs, quick_secs)
 
     def mark_walking(self):
         self.walking = True
@@ -627,9 +634,12 @@ class Progress:
         self.t, self.walking = now, False
         if mmx is not None and mmx >= 0:
             p = mmx * heading
-            if self.best is None or p >= self.best + self.min_gain:
+            if self.best is None:
                 self.best, self.walk = p, 0.0
-        return self.walk >= self.stuck_secs
+            elif p >= self.best + self.min_gain:
+                self.best, self.walk = p, 0.0
+                self.limit = self.stuck_secs        # moving again: the rescue worked
+        return self.walk >= self.limit
 
 
 def resync_segment(route, cur_i, mmx, mmy, level_tol=10, same_floor=2):
