@@ -606,7 +606,10 @@ def _status_dict(controller):
     # show a live timer and prove recording is running.
     started = st.get("exp_started_at")
     if st.get("state") == "exp_record" and started:
-        st["run_secs"] = int(time.time() - started)
+        el = time.time() - started
+        st["run_secs"] = int(el)
+        # rate over the RECORDING time (a previous bot run's active time is not this session's)
+        st["exp_per_min"] = round(st.get("exp_total", 0) / (el / 60.0)) if el >= 60 else None
     return st
 
 
@@ -932,6 +935,8 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
  async function setEnemyMode(mode){
    await fetch('/cmd?'+new URLSearchParams({action:'enemy_mode', mode}));
  }
+ // top-level: loadExpSessions() uses it too (inside poll() it was a swallowed ReferenceError)
+ const fmt = n => (n==null ? '–' : Number(n).toLocaleString());
  async function poll(){
    try{
      const s = await (await fetch('/status')).json();
@@ -948,7 +953,6 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      document.getElementById('stat').textContent =
        `farming time: ${hms(s.run_secs)}\nmode: ${dash(s.mode)}\nstate: ${dash(s.state)}\nnode: ${dash(s.node)}`
        + `\nmobs: ${dash(s.count)}\nbuff: ${buff}\nmarks: ${s.recorder_marks}`;
-     const fmt = n => (n==null ? '–' : Number(n).toLocaleString());
      document.getElementById('exppm').textContent = fmt(s.exp_per_min);
      document.getElementById('exptot').textContent = fmt(s.exp_total);
      document.getElementById('exp10').textContent = fmt(s.exp_10min);

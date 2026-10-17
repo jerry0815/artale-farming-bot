@@ -262,6 +262,8 @@ def exp_record_loop(label="human", sleep=time.sleep):
     summarizes; both are null when the tracker never produced a value (OCR failed)."""
     STOP.clear()
     STATUS["state"] = "exp_record"
+    # a previous bot run's active timer would keep driving the panel's EXP/min (run avg)
+    STATUS["run_active_base"], STATUS["run_active_since"] = None, None
     exp_tick = make_exp_tracker(label="record", sample_secs=15, min_run_secs=30)
     t0 = time.time()
     STATUS["exp_started_at"] = t0                       # UI reads this to show a live timer
@@ -286,6 +288,7 @@ def exp_record_loop(label="human", sleep=time.sleep):
             "label": label,
         }
         append_exp_session(row)
+        STATUS["exp_per_min"] = row["exp_per_min"]     # the panel keeps showing this session's rate
         lie_check_silence()
         STATUS["lie"] = False
         STATUS["state"] = "idle"

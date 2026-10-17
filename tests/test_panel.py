@@ -174,3 +174,25 @@ def test_hop_start_rejects_bad_numbers():
     assert c.hop_start("x", "3")[0] is False
     assert c.hop_start("5", "-1")[0] is False
     assert c.mode == "idle" and not any(e[0] == "hop" for e in log if isinstance(e, tuple))
+
+
+def test_status_dict_exp_rate_during_record_ignores_a_previous_runs_active_time():
+    """Live 2026-10-17: a bot run stopped, then an EXP recording (607 s, 2,362,510 EXP) showed
+    117,117 EXP/min -- the recording's total divided by the OLD run's ~20 min active time. During a
+    recording the rate is total / recording time."""
+    import core, time
+    core.STATUS.update(state="exp_record", exp_started_at=time.time() - 607, exp_total=2362510,
+                       run_active_base=1211.0, run_active_since=None)
+    _, c = _make()
+    st = panel._status_dict(c)
+    assert abs(st["exp_per_min"] - 233527) < 500
+    core.STATUS.update(state="idle", exp_started_at=None, exp_total=0, run_active_base=None)
+
+
+def test_exp_table_formatter_is_visible_to_the_session_table():
+    """loadExpSessions() used fmt(), defined inside poll() -> ReferenceError swallowed by its
+    try/catch -> the session history table stayed empty. fmt must be top-level in the page."""
+    page = panel.PAGE
+    i_fmt = page.index("const fmt = n =>")
+    i_poll = page.index("async function poll")
+    assert i_fmt < i_poll

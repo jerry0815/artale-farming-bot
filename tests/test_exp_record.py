@@ -63,3 +63,27 @@ def test_exp_record_loop_null_gain_when_no_exp(monkeypatch):
     monkeypatch.setattr(core.STOP, "is_set", lambda: True)   # exit immediately
     core.exp_record_loop(label="bot", sleep=lambda s: None)
     assert saved[0]["exp_gained"] is None and saved[0]["exp_per_min"] is None
+
+
+def test_exp_record_loop_clears_a_previous_runs_timer_and_keeps_its_rate(monkeypatch):
+    """The panel derives EXP/min from run_active_base when set; a stale one from the previous bot
+    run made the recording's rate wrong. Start clears it; stop leaves the session's own rate."""
+    def fake_tracker(*a, **k):
+        def tick():
+            core.STATUS["exp_total"] = 500
+        return tick
+    monkeypatch.setattr(core, "make_exp_tracker", fake_tracker)
+    monkeypatch.setattr(core, "lie_check_tick", lambda: None)
+    monkeypatch.setattr(core, "is_lie_check_active", lambda: False)
+    monkeypatch.setattr(core, "lie_check_silence", lambda: None)
+    monkeypatch.setattr(core, "append_exp_session", lambda row, **k: None)
+    t = {"v": 1000.0}
+    monkeypatch.setattr(core.time, "time", lambda: t["v"])
+    core.STATUS.update(run_active_base=1211.0, run_active_since=None)
+
+    def fake_sleep(s):
+        assert core.STATUS["run_active_base"] is None
+        t["v"] += 60
+        core.STOP.set()
+    core.exp_record_loop(label="human", sleep=fake_sleep)
+    assert core.STATUS["exp_per_min"] == 500
