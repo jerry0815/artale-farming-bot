@@ -5,8 +5,9 @@ button we crop its box from every recorded frame, keep the crops whose surroundi
 the click frame's (NCC, and similar brightness -> no fade-in frames), and take the pixel-wise MEDIAN -> the moving cursor drops out.
 
 Usage:  python build_channel_templates.py [session_dir]      (default: latest datasets/channel_switch/*)
-Writes: assets/channel_hop/<name>.png + templates.json (box, click offset inside it) +  prints each template's match score over the stream
-        (present vs absent) so the threshold in channel_hop.py can be sanity-checked.
+Writes: assets/channel_hop/<name>.png + templates.json (recording window size; per button: box,
+        click offset inside it) + prints each template's match score over the stream (present vs
+        absent) so the threshold in channel_hop.py can be sanity-checked.
 """
 import glob, json, os, sys
 import cv2
@@ -14,17 +15,19 @@ import numpy as np
 
 OUT = os.path.join("assets", "channel_hop")
 # name -> (click index in the session, template box, gate box, click point), all in window px of the
-# 1940x1135 recording. The GATE box (bigger, so the cursor is a small part of it) picks which frames
-# show the button; the template box is what gets matched live; the click point is where to click.
+# 1915x1121 recording (2026-10-20, after the game update). The GATE box (bigger, so the cursor is a
+# small part of it) picks which frames show the button; the template box is what gets matched live;
+# the click point is where to click.
 BOXES = {
-    "menu":    (1, (1662, 1060, 1760, 1130), (1560, 1050, 1940, 1135), (1707, 1090)),  # 目錄 -- also "in map"
-    "channel": (2, (1640, 975, 1800, 1025), (1630, 700, 1810, 1030), (1720, 1000)),    # 頻道 in the game menu
-    "random":  (3, (1275, 230, 1360, 268), (560, 225, 1390, 320), (1316, 249)),        # random-channel icon
-    "confirm": (4, (825, 535, 1115, 655), (825, 535, 1115, 655), (890, 634)),          # 是否要隨機前往頻道? 確定
-    # login/select: the cursor sat ON the button in every frame, so these match a cursor-free
-    # neighbour (account/password fields; the 新建角色/刪除角色 signs) and click at a fixed offset.
-    "login":   (6, (1130, 685, 1315, 745), (1120, 665, 1410, 760), (1360, 716)),       # 登入 (bright, not fading in)
-    "select":  (7, (1145, 530, 1315, 620), (1140, 450, 1320, 620), (1229, 491)),       # 選擇角色
+    "menu":    (0, (1650, 1052, 1748, 1118), (1550, 1042, 1915, 1121), (1695, 1082)),  # 目錄 -- also "in map"
+    "channel": (1, (1615, 958, 1775, 996), (1600, 870, 1785, 1015), (1695, 985)),      # 頻道 (above the cursor)
+    "random":  (2, (1256, 225, 1341, 263), (541, 220, 1371, 315), (1297, 244)),        # random-channel icon
+    "confirm": (3, (819, 531, 1109, 598), (819, 531, 1109, 651), (884, 630)),          # question text -> 確定
+    # The cursor sits ON the button in every click frame, so these match a cursor-free neighbour
+    # and click at a fixed offset from it.
+    "login":   (4, (1080, 590, 1232, 655), (1060, 580, 1330, 700), (1276, 619)),       # fields -> 登入 (bright)
+    "charsel": (5, (1240, 495, 1410, 600), (1240, 495, 1410, 600), (780, 644)),        # 新建/刪除 signs -> the character
+    "select":  (6, (648, 405, 708, 512), (640, 395, 900, 550), (1352, 463)),           # info scroll labels -> 選擇角色
 }
 
 
@@ -34,7 +37,9 @@ def main():
              sorted(f for f in glob.glob(os.path.join(d, "clicks", "*.png")) if "_marked" not in f)
     imgs = [cv2.imread(f) for f in frames]
     os.makedirs(OUT, exist_ok=True)
-    meta = {}
+    # The game redraws its UI scaled to the window size, so channel_hop scales these templates by
+    # (live window width / this width) at run time.
+    meta = {"_window": [imgs[0].shape[1], imgs[0].shape[0]]}
     for name, (ci, (x0, y0, x1, y1), (gx0, gy0, gx1, gy1), (cx, cy)) in BOXES.items():
         gate = cv2.imread(os.path.join(d, "clicks", f"click_{ci:02d}.png"))[gy0:gy1, gx0:gx1]
         g_mean = gate.mean()                          # brightness gate: skip fade-in (dim) frames

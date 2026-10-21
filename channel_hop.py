@@ -1,7 +1,8 @@
 """Channel hop: switch to random channels until one lands on a map with NO other player.
 
-One hop, by hand, is: 目錄 -> 頻道 -> random-channel icon -> 確定 -> (white loading ~15 s, black) ->
-登入 -> 選擇角色 -> back in the map (~35 s total). Instead of a fixed click script, each tick reads
+One hop, by hand, is: 目錄 -> 頻道 -> random-channel icon -> 確定 -> (loading ~16 s) -> 登入 ->
+click the character -> 選擇角色 -> back in the map (~30 s total). Since the 2026-10 game update the
+character must be clicked first: its info scroll appears, and only then does 選擇角色 log in. Instead of a fixed click script, each tick reads
 WHICH screen is up (template match, assets/channel_hop/ from build_channel_templates.py) and clicks
 that screen's button -- so a swallowed click (登入 clicked while still fading in) or a slow load just
 repeats the tick instead of derailing the sequence.
@@ -27,32 +28,53 @@ BRIGHT_TOL = 0.10        # matched patch mean within 10% of the template's: the 
                          # in over ~5 s and a 登入 click at ~83% brightness was ignored
 SEARCH_PAD = 120         # search this far around the recorded box (dialogs barely move)
 # Checked in priority order: a dialog sits over the HUD, so 目錄 (menu) is visible under all of
-# the first three; login/select never co-occur with the in-map ones.
-ORDER = ("confirm", "random", "channel", "login", "select", "menu")
+# the first three; the login screens never co-occur with the in-map ones. On character select,
+# 'select' (the info scroll -> click 選擇角色) wins over 'charsel' (signs only -> click the character).
+ORDER = ("confirm", "random", "channel", "login", "select", "charsel", "menu")
 RECLICK_SECS = 2.5       # don't re-click the same button sooner than this (let the UI react)
 HOP_TIMEOUT = 150.0      # one hop (click 確定 -> back in a map) normally ~35 s
-MM_BOX = (15, 168, 420, 410)   # x, y, w, h: covers every map's minimap (see module doc)
+MM_BOX = (15, 168, 420, 410)   # x, y, w, h: covers every map's minimap (see module doc), measured at
+MM_REF_W = 1940                # this window width; scaled like the templates
 DOT_THR = 0.75           # red-dot template threshold (same as core.ENEMY_THRESHOLD / the map configs)
 
+# The game redraws its whole UI scaled to the window size, from the window's top-left corner:
+# between two recordings the window went 1940 -> 1915 wide (-1.3%) and every element shrank 1-1.5%.
+# Unscaled templates then scored 0.64-0.86 (< MATCH_THR), so everything below is scaled by
+# live width / recording width.
 _T = {}
+_REC_W = [None]
 
 
-def templates():
-    """name -> (BGR template, box [x0,y0,x1,y1], click offset (dx,dy), template mean). Lazy."""
+def _load():
     if not _T:
         with open(os.path.join(TMPL_DIR, "templates.json"), encoding="utf-8") as f:
             meta = json.load(f)
+        _REC_W[0] = float(meta.pop("_window", [MM_REF_W])[0])
         for name, m in meta.items():
             t = cv2.imread(os.path.join(TMPL_DIR, f"{name}.png"))
-            _T[name] = (t, m["box"], tuple(m["click"]), float(t.mean()))
-    return _T
+            _T[(name, 1.0)] = (t, m["box"], tuple(m["click"]), float(t.mean()))
+
+
+def templates(width=None):
+    """name -> (BGR template, box [x0,y0,x1,y1], click offset (dx,dy), template mean), scaled to a
+    window `width` px wide (None = the recording's own size). Cached per scale."""
+    _load()
+    s = 1.0 if width is None else round(width / _REC_W[0], 3)
+    if (ORDER[0], s) not in _T:
+        for name in ORDER:
+            t, box, (dx, dy), _ = _T[(name, 1.0)]
+            ts = cv2.resize(t, None, fx=s, fy=s,
+                            interpolation=cv2.INTER_AREA if s < 1 else cv2.INTER_LINEAR)
+            _T[(name, s)] = (ts, [round(v * s) for v in box], (round(dx * s), round(dy * s)),
+                             float(ts.mean()))
+    return {name: _T[(name, s)] for name in ORDER}
 
 
 def find(frame, name):
     """Window-relative click point for `name` if its button is on screen (and fully faded in),
     else None."""
-    t, (x0, y0, x1, y1), (dx, dy), t_mean = templates()[name]
     H, W = frame.shape[:2]
+    t, (x0, y0, x1, y1), (dx, dy), t_mean = templates(W)[name]
     sx0, sy0 = max(0, x0 - SEARCH_PAD), max(0, y0 - SEARCH_PAD)
     sx1, sy1 = min(W, x1 + SEARCH_PAD), min(H, y1 + SEARCH_PAD)
     roi = frame[sy0:sy1, sx0:sx1]
@@ -82,7 +104,8 @@ def minimap_drawn(frame):
     game scene, so 'no dots' alone can't tell an empty map from a minimap not drawn yet. Present on
     every in-map frame after a login in the recording; a buff aura over the minimap can hide it
     (-> read as not drawn, never as empty)."""
-    band = frame[155:195, 25:95].min(axis=2)
+    k = frame.shape[1] / MM_REF_W
+    band = frame[round(155 * k):round(195 * k), round(25 * k):round(95 * k)].min(axis=2)
     return band.size > 0 and bool(((band >= 215).mean(axis=1) >= 0.7).any())
 
 
@@ -90,8 +113,12 @@ def other_players(frame):
     """Red other-player dots inside MM_BOX, or None if the minimap isn't drawn yet."""
     if not minimap_drawn(frame):
         return None
-    x, y, w, h = MM_BOX
-    return core.detect_red_dots(frame[y:y + h, x:x + w],
+    k = frame.shape[1] / MM_REF_W
+    x, y, w, h = (round(v * k) for v in MM_BOX)
+    mm = frame[y:y + h, x:x + w]
+    if abs(k - 1) > 0.02:            # the red-dot templates are pixel-sized for ~1940 wide: bring
+        mm = cv2.resize(mm, (MM_BOX[2], MM_BOX[3]))   # the crop back to that scale first
+    return core.detect_red_dots(mm,
                                 templates_folder="assets/minimap_other_character/", threshold=DOT_THR)
 
 
@@ -154,7 +181,7 @@ def hop_once():
         if name is not None and now - last.get(name, 0) >= RECLICK_SECS:
             if name == "confirm":
                 launched = True
-            if name in ("login", "select"):
+            if name in ("login", "charsel", "select"):
                 launched = True                   # already past 確定 (e.g. started mid-hop)
             core.STATUS["node"] = f"hop: {name}"
             print(f"[hop] {name} -> click {p}")

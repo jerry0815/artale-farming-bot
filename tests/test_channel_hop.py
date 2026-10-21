@@ -1,5 +1,6 @@
 """channel_hop: screen recognition on synthetic frames (templates pasted at their recorded boxes)
 and the arrival check's empty / occupied / unreadable decisions. No game needed."""
+import cv2
 import numpy as np
 import pytest
 
@@ -7,8 +8,16 @@ import channel_hop as ch
 import core
 
 
+def _rec_size():
+    import json, os
+    with open(os.path.join(ch.TMPL_DIR, "templates.json"), encoding="utf-8") as fh:
+        w, h = json.load(fh)["_window"]
+    return w, h
+
+
 def _frame(*names, dim=1.0):
-    f = np.full((1135, 1940, 3), 40, np.uint8)
+    w, h = _rec_size()                                # at the recording's window size: unscaled
+    f = np.full((h, w, 3), 40, np.uint8)
     for n in names:
         t, (x0, y0, x1, y1), _, _ = ch.templates()[n]
         f[y0:y0 + t.shape[0], x0:x0 + t.shape[1]] = (t * dim).astype(np.uint8)
@@ -25,6 +34,9 @@ def test_each_screen_found_at_its_click_point(name):
 def test_dialog_wins_over_hud_under_it():
     assert ch.screen(_frame("menu", "channel"))[0] == "channel"
     assert ch.screen(_frame("menu", "random", "confirm"))[0] == "confirm"
+    # character select: info scroll up (character clicked) -> 選擇角色, else click the character
+    assert ch.screen(_frame("charsel", "select"))[0] == "select"
+    assert ch.screen(_frame("charsel"))[0] == "charsel"
 
 
 def test_fading_in_button_is_not_clicked():
@@ -109,3 +121,14 @@ def test_no_discord_when_stopped(monkeypatch):
         core.STOP.set(); return None
     monkeypatch.setattr(ch, "check_empty", _stop)
     assert ch.run(max_hops=3, settle=0) is False and sent == []
+
+
+@pytest.mark.parametrize("width", [1700, 2100])
+def test_templates_follow_the_window_size(width):
+    # the game redraws its UI scaled to the window; a resized window must still be recognised
+    k = width / _rec_size()[0]
+    f = cv2.resize(_frame("confirm"), None, fx=k, fy=k)
+    name, p = ch.screen(f)
+    _, (x0, y0, _, _), (dx, dy), _ = ch.templates()["confirm"]
+    assert name == "confirm"
+    assert abs(p[0] - (x0 + dx) * k) <= 3 and abs(p[1] - (y0 + dy) * k) <= 3

@@ -755,7 +755,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
        <button class=stop onclick="cmd('stop')">■ Stop</button>
      </div>
      <div id=hopstat class=sub style="font-family:ui-monospace,monospace">idle</div>
-     <div class=sub>Start from inside the map. Each hop: 目錄 → 頻道 → random → 確定 → 登入 → 選擇角色 (~35 s).
+     <div class=sub>Start from inside the map. Each hop: 目錄 → 頻道 → random → 確定 → 登入 → character → 選擇角色 (~30 s).
        It checks the current channel first, then stops at the first channel with no red dot. Progress → Log.</div>
    </fieldset>
  </div>
