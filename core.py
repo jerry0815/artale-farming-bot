@@ -28,6 +28,7 @@ from detection import (detect_character_on_minimap, detect_red_dots,
 from lie_check_yolo import detect_lie_check_yolo
 from alarm import Alarm, AlertController
 import notify
+import whisper
 import os
 from glob import glob as _glob
 from exp_processor import ExpProcessor
@@ -131,7 +132,7 @@ _last_full_tpl = [0.0]      # last full-template pass (safety.lie_check_full_tic
 if not _lie_enabled:
     print(f"[lie-check] '{_LIE_DIR}' 沒有模板，警報停用。")
 if notify.notifier().enabled:
-    print("[notify] Discord webhook 已啟用 (lie-check / another-player -> Discord)")
+    print("[notify] Discord webhook 已啟用 (lie-check / another-player / whisper -> Discord)")
 
 # Full frames dumped here for OFFLINE recall tuning (kept out of assets/, which holds templates).
 _LIE_CAP_DIR = "datasets/lie_check/captures"
@@ -165,6 +166,15 @@ _enemy_alarm = Alarm(freq=700, beep_ms=250, gap_ms=120)
 #   "notify" = Discord note, keep farming | "off" = no check at all |
 #   "stop"   = note + the loop stops and waits; still there after N s -> Free Market (sweep loop)
 _ENEMY_MODE = ["notify"]
+
+# Someone whispered you (blue/cyan line in the chat bar) -> Discord note, keep farming.
+# Panel dropdown: "notify" | "off". One note per NEW cyan line (whisper.WhisperWatch).
+_WHISPER_MODE = ["notify"]
+_whisper_watch = whisper.WhisperWatch()
+# On a whisper, save the trigger frame + the next few fast-tick frames (~0.8 s apart) for review.
+_WHISPER_CAP_DIR = "datasets/whisper/captures"
+_WHISPER_DUMP_FRAMES = 5
+_whisper_dumps_left = [0]
 
 
 # --- auto-escape: if another player stays and the alarm is left un-acknowledged, click the

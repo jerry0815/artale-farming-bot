@@ -81,6 +81,7 @@ datasets/player_yolo_fail/
 # Collected sample dumps (shadow logger / F10 / capture tools — training data, not source)
 datasets/enemy_dots/
 datasets/lie_check/captures/
+datasets/whisper/
 datasets/lie_check/negatives/
 datasets/lie_check/Screenshot*.png
 

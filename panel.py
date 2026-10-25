@@ -206,6 +206,17 @@ class Controller:
         print(f"[panel] another player -> {self.ENEMY_MODES[mode]}")
         return True, f"another player: {self.ENEMY_MODES[mode]}"
 
+    WHISPER_MODES = {"notify": "Discord note", "off": "off"}
+
+    def set_whisper_mode(self, mode):
+        """Panel dropdown: Discord note when someone whispers you (blue chat-bar line), or off."""
+        import core
+        if mode not in self.WHISPER_MODES:
+            return False, f"unknown whisper mode {mode}"
+        core._WHISPER_MODE[0] = mode
+        print(f"[panel] whisper -> {self.WHISPER_MODES[mode]}")
+        return True, f"whisper: {self.WHISPER_MODES[mode]}"
+
     def stop(self):
         if self.mode == "recording":
             return self.record_stop()
@@ -591,6 +602,7 @@ def _status_dict(controller):
     st = dict(core.STATUS)
     st["mode"] = controller.mode
     st["enemy_mode"] = core._ENEMY_MODE[0]
+    st["whisper_mode"] = core._WHISPER_MODE[0]
     st["recorder_marks"] = controller.recorder.marks if controller.recorder else 0
     ba = st.get("buff_at")
     st["buff_ago"] = int(time.time() - ba) if ba else None   # seconds since last buff (server clock)
@@ -674,6 +686,11 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
            <option value=notify>notify, keep farming</option>
            <option value=off>off (no check)</option>
            <option value=stop>notify + stop, Free Market after 20 s</option>
+         </select></label>
+       <label title="Blue/cyan line in the chat bar = someone whispered you.">whisper
+         <select id=whispermode onchange="setWhisperMode(this.value)">
+           <option value=notify>Discord note</option>
+           <option value=off>off</option>
          </select></label>
      </div>
    </fieldset>
@@ -935,6 +952,9 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
  async function setEnemyMode(mode){
    await fetch('/cmd?'+new URLSearchParams({action:'enemy_mode', mode}));
  }
+ async function setWhisperMode(mode){
+   await fetch('/cmd?'+new URLSearchParams({action:'whisper_mode', mode}));
+ }
  // top-level: loadExpSessions() uses it too (inside poll() it was a swallowed ReferenceError)
  const fmt = n => (n==null ? '–' : Number(n).toLocaleString());
  async function poll(){
@@ -942,6 +962,8 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      const s = await (await fetch('/status')).json();
      const em = document.getElementById('enemymode');
      if (em && s.enemy_mode && document.activeElement !== em) em.value = s.enemy_mode;
+     const wm = document.getElementById('whispermode');
+     if (wm && s.whisper_mode && document.activeElement !== wm) wm.value = s.whisper_mode;
      const lie = document.getElementById('lie');
      lie.className = s.lie ? 'bad' : 'ok';
      lie.textContent = s.lie ? '⚠ lie-check: NEEDS HUMAN' : 'lie-check: OK';
@@ -1100,6 +1122,8 @@ def make_handler(controller):
                 return controller.pause()
             if action == "enemy_mode":
                 return controller.set_enemy_mode(q.get("mode", [""])[0])
+            if action == "whisper_mode":
+                return controller.set_whisper_mode(q.get("mode", [""])[0])
             if action == "stop":
                 return controller.stop()
             if action == "quit":

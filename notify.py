@@ -1,4 +1,4 @@
-"""Optional Discord webhook alerts for 'needs a human' events (lie-check / another player).
+"""Optional Discord webhook alerts for 'needs a human' events (lie-check / another player / whisper).
 
 When the audible alarm fires the bot also pings a Discord channel (via an incoming
 webhook), so you get a phone notification while away from the PC. Enable it by putting
