@@ -28,6 +28,10 @@ SOURCES = [
     ("datasets/dragons/labels", "datasets/dragons/images", "dragon_"),
     ("datasets/flat_sweep/labels", "datasets/flat_sweep/images", "flat_"),
     ("datasets/middle_road2/labels", "datasets/middle_road2/images", "mroad2_"),
+    # mob_review.py frames (2026-10-21): labels = the detector's boxes MINUS its false positives
+    # (dropped STOP/80/no-entry signs, buff icons, pet). Every frame was reviewed, so an EMPTY label
+    # here really means "no mob" -> kept as a hard negative (4th field).
+    ("datasets/mob_review/labels", "datasets/mob_review", "review_", True),
 ]
 
 # Empty label files are SKIPPED, not treated as negatives: in this project an empty label means
@@ -58,7 +62,8 @@ def main():
         shutil.rmtree(ROOT)            # rebuild clean
     os.makedirs(IMG); os.makedirs(LBL)
     stems, boxes = [], 0
-    for lbl_dir, img_dir, prefix in SOURCES:
+    for lbl_dir, img_dir, prefix, *opt in SOURCES:
+        empty_ok = bool(opt and opt[0])               # reviewed source: empty label = no mob
         for lp in sorted(glob.glob(os.path.join(lbl_dir, "*.txt"))):
             base = os.path.splitext(os.path.basename(lp))[0]
             ip = img_for(base, img_dir)
@@ -70,7 +75,7 @@ def main():
                 if len(p) != 5 or p[0] == "2":          # drop player -> HP-bar anchor handles it
                     continue
                 out.append(f"0 {p[1]} {p[2]} {p[3]} {p[4]}")   # any mob class -> mob(0)
-            if SKIP_EMPTY and not out:                  # unlabeled/navigated-past frame -> skip
+            if SKIP_EMPTY and not out and not empty_ok:  # unlabeled/navigated-past frame -> skip
                 continue
             stem = prefix + base.replace(prefix, "")
             open(os.path.join(LBL, stem + ".txt"), "w", encoding="utf-8").write(
