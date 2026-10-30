@@ -19,7 +19,9 @@ OUT = os.path.join("assets", "channel_hop")
 # small part of it) picks which frames show the button; the template box is what gets matched live;
 # the click point is where to click.
 BOXES = {
-    "menu":    (0, (1650, 1052, 1748, 1118), (1550, 1042, 1915, 1121), (1695, 1082)),  # 目錄 -- also "in map"
+    # 目錄 -- also "in map". Box stops at the button's bottom (y 1108): the strip below it is drawn
+    # differently live (2026-10-21: score 0.80 / brightness 0.86 -> never matched, hop stuck).
+    "menu":    (0, (1650, 1052, 1748, 1108), (1550, 1042, 1915, 1121), (1695, 1082)),
     "channel": (1, (1615, 958, 1775, 996), (1600, 870, 1785, 1015), (1695, 985)),      # 頻道 (above the cursor)
     "random":  (2, (1256, 225, 1341, 263), (541, 220, 1371, 315), (1297, 244)),        # random-channel icon
     "confirm": (3, (819, 531, 1109, 598), (819, 531, 1109, 651), (884, 630)),          # question text -> 確定

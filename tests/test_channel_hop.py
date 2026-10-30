@@ -132,3 +132,69 @@ def test_templates_follow_the_window_size(width):
     _, (x0, y0, _, _), (dx, dy), _ = ch.templates()["confirm"]
     assert name == "confirm"
     assert abs(p[0] - (x0 + dx) * k) <= 3 and abs(p[1] - (y0 + dy) * k) <= 3
+
+
+def test_dots_the_strict_templates_missed_are_found():
+    # live 2026-10-22: two players on the minimap (one on a platform edge, one on the portal)
+    # scored 0.72 / 0.67 against the dot templates -> "empty channel" with people in it
+    mm = cv2.imread("tests/data/minimap_two_missed_dots.png")
+    assert core.detect_red_dots(mm, templates_folder="assets/minimap_other_character/",
+                                threshold=ch.DOT_THR) == []          # the old check: nothing
+    got = sorted(ch.minimap_dots(mm))
+    assert len(got) == 2
+    assert abs(got[0][0] - 175) <= 3 and abs(got[1][0] - 346) <= 3
+
+
+def test_red_scenery_blob_is_not_a_player():
+    # a dot-sized red rectangle on a green poster (flat_sweep) passed the blob shape test but
+    # scored <= 0.40 against the templates -> rejected
+    mm = np.full((410, 420, 3), (60, 200, 90), np.uint8)               # green
+    mm[250:259, 200:210] = (30, 30, 230)                               # 10x9 solid red block
+    assert ch.minimap_dots(mm) == []
+
+
+def test_only_empty_calls_save_their_minimap(monkeypatch, tmp_path):
+    monkeypatch.setattr(ch, "HOP_CHECK_DIR", str(tmp_path))
+    f = _minimap_frame(True)
+    monkeypatch.setattr(core, "capture", lambda: f)
+    monkeypatch.setattr(ch.time, "sleep", lambda s: None)
+    core.STOP.clear()
+    monkeypatch.setattr(ch, "other_players", lambda fr: [(5, 5)])
+    assert ch.check_empty(settle=0, samples=2, gap=0) is False
+    assert list(tmp_path.iterdir()) == []                      # occupied: nothing saved
+    monkeypatch.setattr(ch, "other_players", lambda fr: [])
+    assert ch.check_empty(settle=0, samples=2, gap=0) is True
+    names = [p.name for p in tmp_path.iterdir()]
+    assert len(names) == 1 and names[0].endswith("_empty.png")
+
+
+def test_real_red_scenery_is_not_a_player():
+    # flat_sweep frame_00216: a red blob in the game scene under the short minimap (scored 0.40
+    # against the dot templates; with the bright-red mask it no longer even looks like a dot)
+    mm = cv2.imread("tests/data/minimap_red_scenery.png")
+    assert ch.minimap_dots(mm) == []
+
+
+def test_dot_touching_red_scenery_is_found():
+    # live 2026-10-27: a player dot touching the top floor's dull-red flower box merged with it
+    # into one 27x10 red blob (and scored 0.72 < 0.75 vs the templates) -> "empty", with a player
+    mm = cv2.imread("tests/data/minimap_dot_touching_flowerbox.png")
+    got = ch.minimap_dots(mm)
+    assert len(got) == 1 and abs(got[0][0] - 105) <= 4 and abs(got[0][1] - 55) <= 4
+
+
+def test_clicks_are_mapped_from_the_canonical_frame_to_the_screen(monkeypatch):
+    # capture() frames are canonical; a click on a frame point must land on the real screen even
+    # when the game shrank its client (1893x1065 inside the 11/45/11/11 border)
+    import capture
+    box = {"left": 14, "top": 900, "width": 1893 + 22, "height": 1065 + 56}
+    g = capture.canon_geometry(box, (14 + 11, 900 + 45, 1893, 1065))
+    clicks, parks = [], []
+    monkeypatch.setattr(core, "window_geometry", lambda: g)
+    monkeypatch.setattr(core, "_click_screen", lambda x, y: clicks.append((x, y)))
+    monkeypatch.setattr(core.ctypes.windll.user32, "SetCursorPos", lambda x, y: parks.append((x, y)), raising=False)
+    monkeypatch.setattr(ch.time, "sleep", lambda s: None)
+    assert ch._click((884, 630)) is True
+    assert clicks == [capture.frame_to_screen(884, 630, g)]
+    k = 1893 / 1920
+    assert abs(clicks[0][0] - (14 + 11 + (884 - 11) * k)) <= 1
