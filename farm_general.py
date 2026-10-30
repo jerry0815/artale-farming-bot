@@ -121,13 +121,15 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         map_cfg = core.watermap.load_map(map_cfg)
     if char is not None:                                   # overlay this character's keys
         map_cfg = core.apply_character(map_cfg, core.load_char(char))
-    core.set_minimap(*core.watermap.minimap_crop(map_cfg))
+    core.apply_map_minimap(map_cfg)
     core.set_enemy_threshold(map_cfg.get("enemy_threshold", 0.75))
     if map_cfg.get("map_box"):
         core.set_map_box(*map_cfg["map_box"])
     # debug_log: per-beat decision trace -> logs/debug_<ts>.log, plus every route attack's frame
     # annotated -> logs/sweep_dbg/ (capped) -- to see WHAT she attacked when she hits air.
     _debug = bool(map_cfg.get("debug_log", False))
+    import mob_review
+    _review = mob_review.Reviewer.from_cfg(map_cfg)   # None unless the map config enables it
     _dump_left = [int(map_cfg.get("debug_max_frames", 400))]
     if _debug:
         _p = core.open_debug_log()
@@ -183,9 +185,11 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     route = map_cfg.get("route") or None
     seg_i = [0]
     if route:
-        heading = sweep.seg_heading(route[0])
-        print(f"[sweep] route mode: {len(route)} segments, starting at segment 1 "
-              f"({route[0]['dir']} to x={route[0]['until_x']})")
+        seg_i[0] = sweep.start_segment_index(route, map_cfg.get("start_segment"))
+        s0 = route[seg_i[0]]
+        heading = sweep.seg_heading(s0)
+        print(f"[sweep] route mode: {len(route)} segments, starting at segment {seg_i[0] + 1} "
+              f"({s0['dir']} to x={s0['until_x']})")
 
     # Normalize the gather block for sweep.decide (it derives dash = attack_range - dash_gap).
     gcfg = None
@@ -199,6 +203,10 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     # Route attack rhythm knobs: AoE presses per push, and how close to a segment end (minimap px)
     # she stops pushing so the dash can't carry her past the edge / portal / jump spot.
     aoe_hold = float(map_cfg.get("aoe_hold_secs", 1.05))      # hold x this long (continuous AoE)
+    # AoE after a push (GATHER) is a FIXED hold (no until-clear). Its own knob: the push pulls more
+    # mobs in and 2 casts left mobs in range after 59% of pushes (2026-10-21); a hold of h s gives
+    # floor(h / cast) + 1 casts (cast ~0.6 s -> 1.5 = 3). Default = aoe_hold_secs.
+    push_hold = float(map_cfg.get("push_hold_secs", aoe_hold))
     push_settle = float(map_cfg.get("push_settle_secs", 0.6))  # push animation before the AoE
     push_margin = int(map_cfg.get("push_edge_margin", 25))
     push_prewalk = float(map_cfg.get("push_prewalk_secs", 0.0))  # walk this long, push while moving
@@ -335,6 +343,52 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     # Recovery: phantom minimap reads are gated out; walking stuck_secs with no progress (a failed
     # jump/portal left her on a level where this segment's until_x is unreachable) -> resync.
     gate = sweep.MinimapGate(max_jump=int(map_cfg.get("mm_max_jump", 40)))
+    # stale minimap read while walking (her dot hidden -> the tracker stuck on something else):
+    # the screen anchor keeps moving, the minimap x doesn't. Live 2026-10-29: walked her off the
+    # middle floor before segment 5's drop point was "reached".
+    mm_stall = sweep.MinimapStall(beats=int(map_cfg.get("mm_stall_beats", 4)),
+                                  screen_px=int(map_cfg.get("mm_stall_screen_px", 60)))
+    mm_blind = [None]                     # (stuck x, until): don't walk while the read stays stuck
+    # The game itself freezes the minimap ~0.6-1 s when another player enters/leaves the map (5 of 7
+    # stalls 2026-10-29/30 matched a red dot appearing/vanishing). Mid-floor that is harmless (she
+    # walks ~14 minimap px before it catches up); only near the segment end -- where both falls
+    # happened, 2-5 px from the drop point -- does she stop and wait. Elsewhere: keep farming.
+    mm_stall_safe = int(map_cfg.get("mm_stall_safe_px", 25))
+    stall_dumps = [int(map_cfg.get("mm_stall_dumps", 50))]   # evidence frames left this run
+
+    def _dump_stall(frame, mmx, mmy, fx, fy, px, pfeet):
+        """Save what the minimap reader saw when MinimapStall fired (datasets/mm_stall/): the raw
+        frame, an annotated copy (red = the stuck read, green = the fresh full read, cyan = her
+        screen spot) and the numbers incl. every yellow blob -- to find out what it locks onto when
+        another player is in the map. Never raises."""
+        if stall_dumps[0] <= 0:
+            return
+        stall_dumps[0] -= 1
+        try:
+            import json, os
+            out = os.path.join("datasets", "mm_stall")
+            os.makedirs(out, exist_ok=True)
+            t = core.time.time()
+            base = os.path.join(out, core.time.strftime("%Y%m%d_%H%M%S", core.time.localtime(t))
+                                + f"_{int(t % 1 * 1000):03d}")
+            core.cv2.imwrite(base + ".png", frame)
+            mm = core._minimap(frame)
+            blobs = [list(map(int, b[:3])) if len(b) >= 3 else list(map(int, b))
+                     for b in core._char_blobs_from_mm(mm)] if mm is not None else []
+            ann = frame.copy()
+            for (x, y), col in (((mmx, mmy), (0, 0, 255)), ((fx, fy), (0, 255, 0))):
+                if x is not None and x >= 0:
+                    core.cv2.circle(ann, (core.MM_X + int(x), core.MM_Y + int(y)), 9, col, 2)
+            core.cv2.circle(ann, (int(px), int(pfeet)), 25, (255, 255, 0), 2)
+            core.cv2.imwrite(base + "_annotated.png", ann)
+            with open(base + ".json", "w", encoding="utf-8") as fh:
+                json.dump({"segment": seg_i[0] + 1, "stuck_read": [mmx, mmy], "fresh_read": [fx, fy],
+                           "gate_last": list(gate.last) if gate.last else None,
+                           "screen_pos": [int(px), int(pfeet)], "yellow_blobs": blobs,
+                           "minimap_box": [core.MM_X, core.MM_Y, core.MM_W, core.MM_H]}, fh)
+            print(f"[sweep] minimap-stall evidence -> {base}.png")
+        except Exception as e:
+            print(f"[sweep] minimap-stall dump failed: {e}")
     progress = sweep.Progress(stuck_secs=float(map_cfg.get("stuck_secs", 4.0)))
     rescue_stuck = float(map_cfg.get("rescue_stuck_secs", 1.0))  # stuck window right after a rescue
 
@@ -346,20 +400,38 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         lock_win.clear()
 
     rescue_n = [0]                                  # consecutive stuck-rescue moves (rescue_move)
+    rescue_y = [None]                               # her y at the last rescue (stair climb check)
+    # rescue moves since she was last back on the route (resync / segment done). A loop of them
+    # ran 1.5+ min unnoticed on 2026-10-29 -> Discord once at stuck_alert_rescues.
+    rescue_total = [0]
+    stuck_alert = int(map_cfg.get("stuck_alert_rescues", 10))
     below_n = [0]                                   # consecutive reads below the segment's floor
 
-    def _resync(mmx, mmy, why):
+    def _resync(mmx, mmy, why, stuck=False):
         """Continue from the next route segment on the level she is actually on. Returns the new
-        heading, or None if no segment matches (keep going; the stuck clock restarts)."""
+        heading, or None if no segment matches (keep going; the stuck clock restarts). stuck: a
+        twin segment (same floor + heading) would walk her into the same wall -> rescue instead."""
         progress.reset()
-        j = sweep.resync_segment(route, seg_i[0], mmx, mmy, level_tol=floor_tol)
+        j = sweep.resync_segment(route, seg_i[0], mmx, mmy, level_tol=floor_tol, fall_tol=fall_tol)
+        if stuck and j is not None and not sweep.resync_helps(route, seg_i[0], j):
+            j = seg_i[0]
         if j is None or j == seg_i[0]:
             # no other segment fits: she is on an odd spot (middle_road2: the low step left of the
             # middle floor, y 103-111). Floor needed BELOW her -> drop / walk off the ledge first;
             # otherwise (a step up or a wall) -> hop over it. Cycles on repeated stucks.
             h = sweep.seg_heading(route[seg_i[0]])
+            rescue_n[0] = sweep.rescue_count(rescue_y[0], mmy, rescue_n[0])   # climbing stairs?
+            rescue_y[0] = mmy
             move = sweep.rescue_move(route[seg_i[0]].get("y"), mmy, rescue_n[0])
             rescue_n[0] += 1
+            rescue_total[0] += 1
+            if rescue_total[0] == stuck_alert:
+                print(f"[sweep] {stuck_alert} rescue moves without getting back on the route -> Discord")
+                try:
+                    core.notify.send("stuck", f"⚠️ Stuck: {stuck_alert} rescue moves in a row on segment "
+                                              f"{seg_i[0] + 1} (minimap x={mmx} y={mmy}) -- may need a hand")
+                except Exception:
+                    pass
             print(f"[sweep] {why} at x={mmx} y={mmy} -- "
                   f"{'no route segment on this level' if j is None else 'same segment'}: {move}")
             core.dbg(f"[sweep] {why} at x={mmx} y={mmy} -> {move}")
@@ -378,7 +450,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 sweep.hop(h, keys, core.kb, sleep=core.time.sleep)
             progress.rescue(rescue_stuck)   # stairs: the next hop comes after ~1 s, not 4 s
             return h
-        rescue_n[0] = 0
+        rescue_n[0] = 0; rescue_y[0] = None; rescue_total[0] = 0
         print(f"[sweep] {why} at x={mmx} y={mmy} -> resync to segment {j + 1}")
         core.dbg(f"[sweep] {why} at x={mmx} y={mmy} -> resync to segment {j + 1}")
         core.kb.safe_release_all()
@@ -389,6 +461,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
 
     def _advance(ok, mmx):
         """Move to the next route segment (after its transition ran). Returns the new heading."""
+        rescue_total[0] = 0                           # completed a segment: back on the route
         if not ok:
             print(f"[sweep] segment {seg_i[0] + 1}: '{route[seg_i[0]].get('then')}' at x={mmx} "
                   f"not confirmed -- continuing")
@@ -418,19 +491,34 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
         """keep_holding for the AoE: re-detect on a fresh frame while x is held; True while a mob
         on her level is still in AoE range ahead (or overlapping her). False on pause/STOP, no frame
         or no player lock, or after aoe_hold_max s of wall time (a false box can't pin her)."""
-        if core.STOP.is_set() or core.kb.pause or core.time.time() - t0 > aoe_hold_max:
-            return False
+        if core.STOP.is_set() or core.kb.pause:
+            hold_end[0] = "stop"; return False
+        if core.time.time() - t0 > aoe_hold_max:
+            hold_end[0] = "cap"; return False
         fr = core.capture()
         if fr is None:
-            return False
+            hold_end[0] = "no-frame"; return False
         ms, pb = mob_detect.yolo_detect(_mm, fr, conf=_mconf, imgsz=_mimg, class_conf=_cconf,
                                         near=last_px[0], max_jump=_pmax, player_conf=_pconf)
         pos, last_px[0] = _player_pos(_anchor, fr, pb, last_px[0])
         if pos is None:
-            return False
+            hold_end[0] = "no-player"; return False
         xs = sweep.same_platform([(m[1] + m[3] // 2, m[2] + m[4]) for m in ms], pos[1],
                                  band_up=band_up, band_down=band_down)
-        return any(-30 <= (x - pos[0]) * heading <= attack_range for x in xs)
+        left = any(-30 <= (x - pos[0]) * heading <= attack_range for x in xs)
+        hold_end[0] = "extend" if left else "clear"
+        return left
+
+    hold_end = [None]
+
+    def _log_hold(kind, t0):
+        """Debug trace for tuning aoe_hold_secs: how long x was really held and why it stopped
+        ('min' = released at the minimum hold; 'clear' = held on until nothing was in range)."""
+        if _debug:
+            why = hold_end[0] or "min"
+            mn = push_hold if kind == sweep.GATHER else aoe_hold
+            core.dbg(f"[hold] {kind} held {core.time.time() - t0:.2f}s (min {mn:.2f}) end={why}")
+        hold_end[0] = None
 
     finish_max = int(map_cfg.get("finish_rounds", 3))   # AoE rounds allowed past a segment end
     finish_reach = int(map_cfg.get("finish_reach", 450))  # finishing walks to mobs this far (px)
@@ -568,7 +656,10 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                                 tol=climb_tol if exact else portal_tol,
                                 # the ladder grab needs a precise spot: tap the whole line-up
                                 # (the walk-then-tap line-up landed off the ladder, user)
-                                brake=10 ** 6 if exact else portal_brake)
+                                brake=10 ** 6 if exact else portal_brake,
+                                # backing up to the run-up start must not walk her off the floor
+                                # (middle_road2: past the middle floor's left end, 2026-10-28)
+                                back_limit=seg.get("lineup_back_limit"), log=core.dbg)
 
     def edge_step(heading, mmx, mmy):
         """Walk on toward the edge_jump edge in ONE continuous walk (up to edge_step_secs) that only
@@ -609,6 +700,13 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 seg = route[seg_i[0]]
                 now = core.time.time()
                 mmx, _mmy = gate.feed(*_mm_read(frame), now)
+                if mm_blind[0] is not None:                         # read still stuck: stand still
+                    bx, until = mm_blind[0]
+                    if mmx == bx and now < until:
+                        core.kb.safe_release_all(); core.time.sleep(0.1); continue
+                    if mmx == bx:
+                        print(f"[sweep] minimap still stuck at x={bx} after 1.5 s -- continuing")
+                    mm_blind[0] = None
                 if air[0] is not None:                              # just jumped: landed yet?
                     t_j, ty = air[0]
                     st = sweep.landing_state(now - t_j, _mmy, ty)
@@ -656,7 +754,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                         heading = h
                     continue
                 if progress.update(now, mmx, heading):              # walking, going nowhere
-                    h = _resync(mmx, _mmy, f"segment {seg_i[0] + 1} stuck")
+                    h = _resync(mmx, _mmy, f"segment {seg_i[0] + 1} stuck", stuck=True)
                     if h is not None:
                         heading = h
                     continue
@@ -705,6 +803,8 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
             mobs, pbox = mob_detect.yolo_detect(_mm, frame, conf=_mconf, imgsz=_mimg,
                                                 class_conf=_cconf, near=last_px[0], max_jump=_pmax,
                                                 player_conf=_pconf)
+            if _review is not None:                  # map cfg "mob_review": collect FP frames
+                _review.offer(frame, mobs)
             if _anchor is not None and route and _mmy >= 0:
                 # her usual screen spot: x pooled over all floors (the camera centers her), feet y
                 # for THIS floor (the camera clamps vertically) -- find_player's home prior.
@@ -723,6 +823,27 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                     progress.mark_walking()
                 core.time.sleep(0.05); continue            # no player lock yet -> wait
             px, pfeet = pos
+            if route and mmx >= 0 and mm_stall.feed(mmx, px, last_act[0] == sweep.WALK):
+                mm_stall.reset()
+                if seg.get("until_x") is not None and not sweep.near_seg_end(seg, mmx, mm_stall_safe):
+                    # mid-floor: the game froze the minimap (a player entered/left) -- she walks at
+                    # most ~14 px before it catches up, so keep farming; no pause, no released keys
+                    core.dbg(f"[sweep] minimap frozen at x={mmx} (player entered/left?) -- more than "
+                             f"{mm_stall_safe} px from the segment end, keep going")
+                else:
+                    core.kb.safe_release_all()
+                    last_act[0] = None
+                    fx, fy = core.get_character_full(frame)        # fresh read, not near-tracked
+                    _dump_stall(frame, mmx, _mmy, fx, fy, px, pfeet)
+                    if fx >= 0 and abs(fx - mmx) >= 2:
+                        print(f"[sweep] minimap read stuck at x={mmx} near the segment end -> "
+                              f"fresh read x={fx} y={fy}")
+                        gate.reset(); gate.feed(fx, fy, core.time.time())
+                    else:
+                        print(f"[sweep] minimap frozen at x={mmx} near the segment end -> "
+                              f"stop walking until it updates")
+                        mm_blind[0] = (mmx, core.time.time() + 1.5)   # freezes last ~0.6-1 s
+                    core.time.sleep(0.05); continue
             if route and mmx >= 0:
                 lock_win.append((px, mmx))
                 # her usual screen x is the same on every floor (the camera centers her
@@ -794,6 +915,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 sweep.apply_action(sweep.FIRE, heading, keys, core.kb, sleep=core.time.sleep,
                                    attack_hold=aoe_hold, face_tap=False,
                                    keep_holding=lambda: _still_in_range(_h, _t0), hold_max=60)
+                _log_hold("FIRE-finish", _t0)
                 attack_end[0] = core.time.time()
                 last_act[0] = sweep.FIRE
                 continue
@@ -850,7 +972,8 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 # step that walks her off the lip mid-AoE (seen live) -> no tap there.
                 _t0, _h = core.time.time(), heading
                 sweep.apply_action(act, heading, keys, core.kb, sleep=core.time.sleep,
-                                   attack_hold=aoe_hold, pull_settle=push_settle,
+                                   attack_hold=push_hold if act == sweep.GATHER else aoe_hold,
+                                   pull_settle=push_settle,
                                    face_tap=not edge_zone, dash_press=push_press,
                                    # walk >= push_prewalk AND until the minimap shows her moving
                                    # forward: the AoE animation eats the walk for an unknown
@@ -864,6 +987,7 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                 if act == sweep.WALK:
                     progress.mark_walking()
                 else:
+                    _log_hold(act, _t0)
                     attack_end[0] = core.time.time()
                 core.time.sleep(float(map_cfg.get("beat_gap", 0.05)))
                 continue

@@ -125,3 +125,48 @@ def test_aoe_max_caps_gather_threshold():
     five = [305, 312, 319, 326, 333]
     assert sweep.decide(five, px=100, heading=1, attack_range=AR,
                         gather=g, cd_ok=True, aoe_max=6) == sweep.WALK
+
+
+def test_resync_skips_floors_she_already_fell_off():
+    # live 2026-10-21: on the ledge right of middle_road2's middle floor (x 292, y 108 = 15 below
+    # y 93) the fall check (fall_tol 12) said "fell off", but resync (level_tol 15) picked the other
+    # middle-floor segment -> segments 2 <-> 5 ping-ponged for minutes without a key press.
+    route = [{"dir": "right", "until_x": 292, "y": 152}, {"dir": "left", "until_x": 89, "y": 93},
+             {"dir": "right", "until_x": 98, "y": 93}, {"dir": "right", "until_x": 225, "y": 48},
+             {"dir": "left", "until_x": 83, "y": 93}]
+    assert sweep.resync_segment(route, 1, 292, 108, level_tol=15) == 4          # old behaviour
+    assert sweep.resync_segment(route, 1, 292, 108, level_tol=15, fall_tol=12) is None
+    assert sweep.resync_segment(route, 4, 292, 108, level_tol=15, fall_tol=12) is None
+    # a read within fall_tol still resyncs normally
+    assert sweep.resync_segment(route, 1, 150, 100, level_tol=15, fall_tol=12) == 4
+
+
+def test_start_segment_index():
+    route = [{"y": 1}, {"y": 2}, {"y": 3}]
+    assert sweep.start_segment_index(route, None) == 0          # default: segment 1
+    assert sweep.start_segment_index(route, 2) == 1             # 1-based in the map config
+    assert sweep.start_segment_index(route, 9) == 0             # out of range -> segment 1
+    assert sweep.start_segment_index(route, 0) == 0
+
+
+def _stall_run(reads, walking=True):
+    s = sweep.MinimapStall(beats=4, screen_px=60)
+    return [s.feed(mx, sx, walking) for mx, sx in reads]
+
+
+def test_minimap_stall_fires_when_screen_moves_but_minimap_does_not():
+    # live 2026-10-29 (segment 5, walking left): minimap stuck at x=88 while her screen x slid
+    # 883 -> 455 -- she walked off the middle floor before the drop point (83) was ever "reached"
+    reads = [(88, 883), (88, 861), (88, 840), (88, 815), (88, 804), (88, 788), (88, 758)]
+    fired = _stall_run(reads)
+    assert fired.index(True) <= 5                                    # by ~0.5 s, before the fall
+
+
+def test_minimap_stall_quiet_in_normal_walking_and_standing():
+    walking = [(120 - i, 900 + (i % 2)) for i in range(10)]          # camera centred: minimap moves
+    assert not any(_stall_run(walking))
+    standing = [(90, 903)] * 10                                        # stopped: neither moves
+    assert not any(_stall_run(standing))
+    map_edge = [(80 - i, 900 - 25 * i) for i in range(10)]           # camera clamped: both move
+    assert not any(_stall_run(map_edge))
+    assert not any(_stall_run([(88, 883 - 30 * i) for i in range(8)], walking=False))  # not walking

@@ -475,6 +475,7 @@ class _World:
     def sleep(self, dt):
         if self.held in ("R", "L"):
             self.x += self.speed * dt * (1 if self.held == "R" else -1)
+            self.min_x = min(getattr(self, "min_x", self.x), self.x)
     def read(self): return (round(self.x), 106)
 
 
@@ -970,3 +971,84 @@ def test_fell_below_the_segment_floor():
     assert sweep.fell_below(seg, 51, tol=15) is False         # ABOVE is not a fall
     assert sweep.fell_below(seg, -1, tol=15) is False
     assert sweep.fell_below({"dir": "left", "until_x": 84}, 148, tol=15) is False
+
+
+def test_rescue_walks_the_other_way_after_two_failed_hops():
+    # live 2026-10-21: on the ledge right of middle_road2's middle floor (y 104-108, floor 93) the hop
+    # moved her along the ledge but never up -> third try walks back off its open side instead.
+    # Stairs (left low steps) still get their two hops first.
+    assert [sweep.rescue_move(seg_y=93, mmy=104, attempt=a) for a in range(4)] == \
+        ["hop", "hop", "walk_back", "hop"]
+
+
+def test_stuck_resync_to_a_twin_segment_does_not_help():
+    route = [{"dir": "right", "until_x": 292, "y": 152}, {"dir": "left", "until_x": 89, "y": 93},
+             {"dir": "right", "until_x": 98, "y": 93}, {"dir": "right", "until_x": 225, "y": 48},
+             {"dir": "left", "until_x": 83, "y": 93}]
+    assert sweep.resync_helps(route, 4, 1) is False     # seg 5 -> seg 2: same floor, same heading
+    assert sweep.resync_helps(route, 1, 4) is False
+    assert sweep.resync_helps(route, 1, 2) is True      # same floor but turns around
+    assert sweep.resync_helps(route, 1, 0) is True      # another floor
+    assert sweep.resync_helps(route, 1, None) is False
+
+
+def test_resync_past_a_segments_end_takes_its_transition():
+    # after walking off the right-end ledge she lands on the bottom floor at x ~300, past segment
+    # 1's end (292) -> continue from segment 1: its end fires at once and the portal UP runs,
+    # instead of "no segment" + rescue moves on the bottom floor.
+    route = [{"dir": "right", "until_x": 292, "y": 152, "then": "up"},
+             {"dir": "left", "until_x": 89, "y": 93},
+             {"dir": "right", "until_x": 98, "y": 93, "then": "climb"},
+             {"dir": "right", "until_x": 225, "y": 48, "then": "down_jump"},
+             {"dir": "left", "until_x": 83, "y": 93, "then": "down_jump"}]
+    for cur in (1, 4):
+        assert sweep.resync_segment(route, cur, 300, 152, level_tol=15, fall_tol=12) == 0
+    # a finished segment with NO transition is still skipped
+    flat = [dict(route[0], then=None)] + route[1:]
+    assert sweep.resync_segment(flat, 1, 300, 152, level_tol=15, fall_tol=12) is None
+
+
+def test_back_up_is_capped_when_reads_go_blind():
+    # live 2026-10-28: ladder run-up start (83) was behind her (segment 2 ended at 87-89 walking
+    # left); the back-up held LEFT until a read said she was 6 px back -- with no usable reads it
+    # walked up to the 4 s timeout (~56 px) off the middle floor's left end onto the stairs.
+    w = _World(87)
+    reads = [0]
+    def read():
+        reads[0] += 1
+        return (round(w.x), 93) if reads[0] <= 1 else (-1, -1)      # blind after the first read
+    sweep.approach_x(83, 1, KEYS, w, read, w.sleep, tol=1, back_max=1.0)
+    assert w.x >= 87 - 14 * 1.0 - 1                  # walked back at most ~1 s
+
+
+def test_back_up_never_passes_the_floor_edge_limit():
+    w = _World(87)
+    sweep.approach_x(83, 1, KEYS, w, w.read, w.sleep, tol=1, back=12, back_limit=80)
+    assert min_x_seen(w) >= 79                       # stopped backing at the limit (80), not 71
+    assert 82 <= round(w.x) <= 84 and _last_dir(w.events) == "R"
+
+
+def min_x_seen(w):
+    return w.min_x
+
+
+def test_rescue_keeps_hopping_while_hops_climb_stairs():
+    # live 2026-10-29: on the left stairs under the middle floor (y 108 -> 100 -> 93) the rescue
+    # went hop, hop (climbed to y 100), walk_back (back down) -- forever. A rescue that finds her
+    # HIGHER than the last one restarts the count, so a stair climb keeps hopping.
+    n, prev, moves = 0, None, []
+    for mmy in (108, 108, 100):                          # the three rescues of each live cycle
+        n = sweep.rescue_count(prev, mmy, n)
+        moves.append(sweep.rescue_move(93, mmy, n))
+        n += 1; prev = mmy
+    assert moves == ["hop", "hop", "hop"]
+
+
+def test_rescue_still_walks_back_when_hops_do_not_lift_her():
+    # the right-end ledge (y 104-108 under the 93 floor): hops only move her along it
+    n, prev, moves = 0, None, []
+    for mmy in (108, 104, 106):
+        n = sweep.rescue_count(prev, mmy, n)
+        moves.append(sweep.rescue_move(93, mmy, n))
+        n += 1; prev = mmy
+    assert moves == ["hop", "hop", "walk_back"]

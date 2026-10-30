@@ -93,3 +93,6 @@ datasets/mobs_real/*.cache
 
 # Generic pooled mob dataset (rebuild via build_generic_mob_dataset.py from tracked map labels)
 datasets/mob_generic/
+datasets/mob_review/
+datasets/hop_checks/
+datasets/mm_stall/

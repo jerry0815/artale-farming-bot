@@ -118,7 +118,8 @@
       "y": 93,
       "run_takeoff": 91,
       "run_up": 8,
-      "air_hold": 0.3
+      "air_hold": 0.3,
+      "lineup_back_limit": 72
     },
     {
       "dir": "right",
@@ -145,5 +146,16 @@
   "_floor_tol_note": "Floors are not flat: the bottom reads 148 on its raised left block, 143 on the car, 156 elsewhere. floor_tol 15 (floors are 45+ px apart) so those count as the bottom floor when checking/resyncing after a transition.",
   "fall_tol": 12,
   "_fall_tol_note": "Mid-segment fall check (default floor_tol): a fall off the middle floor's left end lands on the low step at y 111 = 15 below the middle floor (96), which floor_tol 15 missed (live 21:59, 2026-10-13). 12 still ignores reads that are only a little lower.",
-  "_rescale_note": "2026-10-20 game update: the UI is drawn 1.3% smaller (window 1940->1915 wide) and the minimap contents sit ~2 px higher, so every minimap read moved (floors 156/96/51 -> 152/93/48, measured live). The climb's landing check (target y +-1) never matched y=48 -> each climb timed out (~6.5 s) and resynced. All until_x/floor_end/run_takeoff/map_box x scaled x*0.987, y as y*0.987-2. Notes above quote the OLD numbers."
+  "_rescale_note": "2026-10-20 game update: the UI is drawn 1.3% smaller (window 1940->1915 wide) and the minimap contents sit ~2 px higher, so every minimap read moved (floors 156/96/51 -> 152/93/48, measured live). The climb's landing check (target y +-1) never matched y=48 -> each climb timed out (~6.5 s) and resynced. All until_x/floor_end/run_takeoff/map_box x scaled x*0.987, y as y*0.987-2. Notes above quote the OLD numbers.",
+  "mob_review": {
+    "every_secs": 4,
+    "small_h": 70,
+    "max_frames": 300
+  },
+  "_mob_review_note": "2026-10-21: collecting frames with short mob boxes away from the screen edges (item drops / pet / buff icon get detected as mobs) -> datasets/mob_review/ for labelling + retraining the generic mob model. Remove mob_review when done.",
+  "push_hold_secs": 1.05,
+  "_push_hold_note": "2026-10-21/22: cast ~0.6 s (measure_cast_time.py) -> a hold of h s gives floor(h/0.6)+1 casts. Tried push_hold_secs 1.5 (3 casts after a push; 2 casts left mobs in range after 59% of pushes) -- user found 2 casts better in play (2026-10-22), back to 1.05. The 3-cast run was too short for an EXP/lap verdict.",
+  "_lineup_back_note": "2026-10-28: segment 2 sometimes ends at x 84-89 (walking left), past the ladder run-up start (run_takeoff 91 - run_up 8 = 83) -> approach_x backs up LEFT; with no limit that walk could run up to 4 s and she walked off the middle floor's left end onto the stairs (user saw it, recovered by hand). Back-up is now capped at 1 s and never past x 72 (floor holds her to ~63; segment 2 ends recorded down to 63 at y 93).",
+  "minimap_ref_w": 1915,
+  "_minimap_ref_note": "2026-10-29: every minimap number in this file was measured with the game window 1915 wide (after the 10-20 update). The game scales its UI with the window, so at other sizes the reads drift (1942 wide: middle floor read 96 instead of 93). minimap_ref_w makes the bot scale the minimap crop with the window and resize it back to 1915-scale, so these numbers hold at any window size."
 }

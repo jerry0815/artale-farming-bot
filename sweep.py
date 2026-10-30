@@ -218,13 +218,20 @@ def apply_kite(action, heading, keys, kb, sleep=lambda s: None, shot_press=0.05,
 
 
 def approach_x(target, heading, keys, kb, read_xy, sleep=lambda s: None, tol=2, back=6,
-               tap=0.045, poll=0.03, timeout=4.0, brake=8):
+               tap=0.045, poll=0.03, timeout=4.0, brake=8, back_max=1.0, back_limit=None,
+               log=None):
     """Stand on minimap x `target` ARRIVING MOVING IN `heading` (the portal-press side). The press
     spot reads differently depending on the side she comes from; overshooting and correcting from
     the other side made UP miss (live). If she is past the target, walk back until `back` px before
     it, then approach in the heading: one continuous walk while more than `brake` px out (tapping
     the whole way stalled ~5 s per portal/ladder leg), short taps for the last few px. True when
-    within tol."""
+    within tol.
+
+    The back-up is bounded: at most `back_max` s per back-up, and never past minimap x `back_limit`
+    (the floor edge behind the target). It used to hold the back key until a read confirmed the
+    distance, up to `timeout` -- blind reads walked her ~56 px off middle_road2's middle floor onto
+    the stairs (live 2026-10-28). `log` (e.g. core.dbg) traces each step."""
+    say = log or (lambda m: None)
     fk = keys["right"] if heading > 0 else keys["left"]
     bk = keys["left"] if heading > 0 else keys["right"]
 
@@ -236,13 +243,21 @@ def approach_x(target, heading, keys, kb, read_xy, sleep=lambda s: None, tol=2, 
     for _ in range(3):
         d = ahead()
         if d is not None and d < -tol:             # passed it: back up past the approach point
+            say(f"[approach] target {target}: {-d} px past it -> back up (max {back_max}s"
+                f"{'' if back_limit is None else f', limit x={back_limit}'})")
             kb.safe_press(bk)
-            while waited < timeout:
+            t_back = 0.0
+            while waited < timeout and t_back < back_max:
                 d = ahead()
                 if d is not None and d >= back:
                     break
-                sleep(poll); waited += poll
+                if back_limit is not None and d is not None and                         (target - d * heading - back_limit) * heading <= 0:
+                    say(f"[approach] back-up stopped at the floor-edge limit x={back_limit}")
+                    break
+                sleep(poll); waited += poll; t_back += poll
             kb.safe_release(bk)
+            if t_back >= back_max:
+                say(f"[approach] back-up capped at {back_max}s (last read {ahead()})")
         for _ in range(40):
             d = ahead()
             if d is None:
@@ -417,7 +432,32 @@ def rescue_move(seg_y, mmy, attempt, below=10):
     the target, the hop-only rescue took her UP onto the middle floor."""
     if seg_y is not None and mmy is not None and mmy >= 0 and seg_y - mmy > below:
         return ("down_jump", "walk_back", "hop")[attempt % 3]
-    return "hop"
+    # level / above: hop (a stair needs one hop each -- the left low steps take two), but if two
+    # hops in a row didn't free her, walk back the other way instead: on the ledge right of
+    # middle_road2's middle floor the hop only moved her along the ledge (live 2026-10-21); walking
+    # back drops her off its open side to the bottom floor.
+    return ("hop", "hop", "walk_back")[attempt % 3]
+
+
+def rescue_count(prev_y, mmy, n, step=6):
+    """Rescue attempt counter for rescue_move. If she is >= `step` minimap px HIGHER than at the
+    previous rescue, the last hop climbed a stair: restart the count, so the next move is a hop
+    again. Live 2026-10-29: the left stairs under middle_road2's middle floor (y 108 -> 100 -> 93)
+    need three hops; with hop, hop, walk_back she climbed one step and walked back down, forever.
+    The right-end ledge reads 104-108 (jitter < step) -> the count keeps rising -> walk_back."""
+    if prev_y is not None and prev_y >= 0 and mmy is not None and mmy >= 0 and prev_y - mmy >= step:
+        return 0
+    return n
+
+
+def resync_helps(route, cur_i, j):
+    """Would switching from segment cur_i to j change what she does when STUCK? Not when j is on
+    the same floor with the same heading: she walks into the same wall (middle_road2 segments 2 and
+    5 swapped every 4 s on the right-end ledge, live 2026-10-21) -- run a rescue move instead."""
+    if j is None:
+        return False
+    a, b = route[cur_i], route[j]
+    return not (a.get("y") == b.get("y") and seg_heading(a) == seg_heading(b))
 
 
 def fell_below(seg, mmy, tol=10):
@@ -642,13 +682,30 @@ class Progress:
         return self.walk >= self.limit
 
 
-def resync_segment(route, cur_i, mmx, mmy, level_tol=10, same_floor=2):
+def start_segment_index(route, start_segment):
+    """0-based index of the route segment to start from: map config "start_segment" is 1-based
+    (default / out of range -> segment 1). Lets a test start mid-route (ledge_recovery_test.py)."""
+    try:
+        i = int(start_segment) - 1
+    except (TypeError, ValueError):
+        return 0
+    return i if 0 <= i < len(route) else 0
+
+
+def resync_segment(route, cur_i, mmx, mmy, level_tol=10, same_floor=2, fall_tol=None):
     """Index of the segment to continue from when she is off-route: the next one in route order
     (after cur_i, cyclic) on HER floor whose until_x is still ahead of her. Her floor = the segment
     level(s) NEAREST her minimap y (within level_tol; levels within same_floor px of the nearest
     count as the same floor) -- a plain +-10 window matched the upper floor (y 55) for a read of
     y 63 on the right platform (y 62) and ping-ponged segments. None if nothing matches; segments
-    without "y" never match."""
+    without "y" never match.
+
+    fall_tol: also skip segments she would count as FALLEN OFF (fell_below) the moment she resumed
+    them -- level_tol is looser below a floor than the fall check, and on middle_road2's right-end
+    ledge (15 below the middle floor) the two middle-floor segments handed her back and forth
+    forever (live 2026-10-21); with no match the caller runs its rescue move instead."""
+    if fall_tol is not None:
+        route = [s if not fell_below(s, mmy, fall_tol) else {**s, "y": None} for s in route]
     ys = [abs(s["y"] - mmy) for s in route if s.get("y") is not None]
     if not ys or min(ys) > level_tol:
         return None
@@ -661,7 +718,42 @@ def resync_segment(route, cur_i, mmx, mmy, level_tol=10, same_floor=2):
             continue
         if not seg_done(seg, mmx):
             return i
+    # every segment on her floor is already behind her: continue from one whose end she is past AND
+    # that ends in a transition -- its end fires at once and the transition (portal / climb / drop)
+    # takes her on. Live 2026-10-21: walked off middle_road2's right ledge onto the bottom floor at
+    # x ~300, past segment 1's end (292, portal UP) -> previously None -> rescue moves on the floor.
+    for k in range(1, n + 1):
+        i = (cur_i + k) % n
+        seg = route[i]
+        if seg.get("y") is not None and abs(seg["y"] - mmy) <= best + same_floor and seg.get("then"):
+            return i
     return None
+
+
+class MinimapStall:
+    """Stale minimap read: while WALKING the minimap x has not changed for `beats` reads but her
+    SCREEN x (HP-bar anchor) moved >= screen_px. Normally the camera keeps her centred, so a real
+    stop moves neither; the camera clamped at a map edge moves both. Live 2026-10-29: the read
+    stuck at x=88 (her yellow dot hidden -- another player arrived on top of it) while the screen
+    showed her sliding 883 -> 455; segment 5 never saw its drop point (83) and walked her off the
+    middle floor."""
+
+    def __init__(self, beats=4, screen_px=60):
+        self.beats, self.screen_px = beats, screen_px
+        self.reset()
+
+    def reset(self):
+        self.mm, self.sx0, self.n = None, None, 0
+
+    def feed(self, mmx, sx, walking):
+        if not walking or mmx is None or mmx < 0 or sx is None:
+            self.reset()
+            return False
+        if mmx != self.mm:
+            self.mm, self.sx0, self.n = mmx, sx, 0
+            return False
+        self.n += 1
+        return self.n >= self.beats - 1 and abs(sx - self.sx0) >= self.screen_px
 
 
 class MinimapGate:
