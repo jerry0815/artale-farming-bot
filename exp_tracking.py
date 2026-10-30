@@ -25,6 +25,13 @@ def _dpi_offsets(ow, oh, rw=1920, rh=1080, wmax=40, hmax=80):
     return wo, ho
 
 
+# EXP text box on the HUD, in 1920x1080 reference px: "EXP 103349960[96.65%]". The right edge must
+# clear the WHOLE percent: the parser needs it to split number from bracket. At 1190 a 9-digit EXP
+# (>= 100,000,000) pushed the percent out of the box and every read failed ('103122300[' -> None),
+# so "last 10 min" sat at 0 (2026-10-20). Empty HUD continues to ~1370 (自由市場 button).
+EXP_OCR_REG = (1028, 996, 1290, 1025)
+
+
 def get_exp_number(exp_processor):
     """Absolute EXP number via OCR (or None). Unlike get_exp it does NOT run the delta /
     'reasonable gain' logic, so it never prints the anomaly warning -- the per-10-min
@@ -37,7 +44,7 @@ def get_exp_number(exp_processor):
     wo, ho = _dpi_offsets(ow, oh)
     cw, ch = ow - wo, oh - ho
     rw, rh = 1920, 1080
-    reg = (1028, 996, 1190, 1025)
+    reg = EXP_OCR_REG
     try:
         left = int(cw * reg[0] / rw) + wo
         top = max(0, int(ch * reg[1] / rh) + ho)
@@ -67,7 +74,7 @@ def get_exp(exp_processor):
     wo, ho = _dpi_offsets(ow, oh)
     cw, ch = ow - wo, oh - ho
     rw, rh = 1920, 1080
-    reg = (1028, 996, 1190, 1025)
+    reg = EXP_OCR_REG
     try:
         left = int(cw * reg[0] / rw) + wo
         top = max(0, int(ch * reg[1] / rh) + ho)

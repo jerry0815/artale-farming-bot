@@ -47,3 +47,16 @@ def test_clean_read_percent_is_parsed_properly():
     assert p.parse_exp_data("4154300[6.27") == ("4154300", "6.27")
     assert p.parse_exp_data("58995074[94.06") == ("58995074", "94.06")
     assert p.parse_exp_data("4653410[7.0.") == ("4653410", "7.00")
+
+
+def test_nine_digit_exp_needs_the_percent_in_the_box():
+    # 2026-10-20 live reads: past 100,000,000 EXP the old OCR box ended at the '[' -> unparseable,
+    # "last 10 min" sat at 0. The widened box (exp_tracking.EXP_OCR_REG) reads the whole percent.
+    assert ExpProcessor().parse_exp_data("103122300[") == (None, None)
+    assert ExpProcessor().parse_exp_data("103349960[96.65%]") == ("103349960", "96.65")
+    assert ExpProcessor().parse_exp_data("103349960[96.65%") == ("103349960", "96.65")
+
+
+def test_ocr_box_clears_the_percent():
+    import exp_tracking
+    assert exp_tracking.EXP_OCR_REG[2] >= 1260      # 1190 cut '[96.65%]' off a 9-digit EXP (live)
