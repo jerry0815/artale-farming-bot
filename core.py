@@ -89,6 +89,10 @@ SP = r"C:\Users\jerry\AppData\Local\Temp\claude\C--jerry-toy-work-maple\76b73c35
 
 # minimap map-area, same offset the bot uses; taller so fallen positions are visible
 MM_X, MM_Y, MM_W, MM_H = 20, 171, 229, 259   # band was H=145; 259 reaches lower platforms
+# Window width the MM_* box (and the map's minimap numbers) were measured at. None = fixed pixels.
+# The game redraws its UI scaled to the window from the top-left, so with a reference set the crop
+# follows the window and is resized back to this scale (charloc._minimap / capture_minimap).
+MM_REF_W = [None]
 CHAR_TPL = "assets/minimap_character/"
 
 # Valid map area for the character dot (minimap-crop coords). The character is
@@ -929,6 +933,17 @@ def execute_edge(edge):
 _ARROW = {"up": Key.up, "down": Key.down, "left": Key.left, "right": Key.right}
 
 
+def apply_map_minimap(cfg):
+    """A map config's minimap box + the window width it was measured at ("minimap_ref_w")."""
+    set_minimap(*watermap.minimap_crop(cfg))
+    set_minimap_ref(cfg.get("minimap_ref_w"))
+
+
+def set_minimap_ref(w):
+    """Window width the current minimap box was measured at (None = no scaling)."""
+    MM_REF_W[0] = int(w) if w else None
+
+
 def set_minimap(x, y, w, h):
     """Override the full-minimap crop (per-map). Water maps have a taller minimap than
     the dragon nest's default (MM_X,MM_Y,MM_W,MM_H = 20,171,229,259)."""
@@ -1094,6 +1109,7 @@ from char_config import (  # noqa: E402  (extracted; re-exported so core.<name> 
 from capture import (  # noqa: E402  (extracted; re-exported so core.<name> still works)
     _window_box, _sct, capture,
     capture_pil_np, capture_minimap,
+    _client_rect, window_geometry, game_to_screen,
 )
 
 
@@ -1105,7 +1121,7 @@ kb.focus_check = is_focused   # n/m/F10 only while the game is in front (the lis
 
 
 from charloc import (  # noqa: E402  (extracted; re-exported so core.<name> still works)
-    _minimap, _char_color_from_mm, _char_blobs_from_mm, char_blobs, get_character_color,
+    _minimap, _minimap_scale, _char_color_from_mm, _char_blobs_from_mm, char_blobs, get_character_color,
     _pick_char_blob, get_character_full, swim_read,
     minimap_scroll,
 )
@@ -1293,7 +1309,7 @@ if __name__ == "__main__":
             sys.argv.remove("--sweep")
         cfg = watermap.load_map(_map_path) if _map_path else {}
         if _map_path and cfg.get("minimap"):
-            set_minimap(*watermap.minimap_crop(cfg))
+            apply_map_minimap(cfg)
         scale = _flag("--scale", float, None)
         thr = _flag("--thr", float, None)
         per = _flag("--per", int, None)

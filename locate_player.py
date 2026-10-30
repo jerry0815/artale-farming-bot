@@ -56,7 +56,7 @@ def locate_live(map_name, hz=20, up_wait=2.0, y_change=8):
 
     map_path = map_name if os.path.exists(map_name) else os.path.join("maps", f"{map_name}.json")
     cfg = core.watermap.load_map(map_path)
-    core.set_minimap(*core.watermap.minimap_crop(cfg))
+    core.apply_map_minimap(cfg)
     if cfg.get("map_box"):
         core.set_map_box(*cfg["map_box"])
     name = os.path.splitext(os.path.basename(map_path))[0]

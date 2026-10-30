@@ -207,11 +207,11 @@ def _click_screen(x, y):
 def click_free_market():
     """Focus the game and click 自由市場 to leave the map. Screen point = window box + the button's
     frame offset (recomputed live). One click -- it opens/teleports directly."""
-    box = core._window_box()
-    if box is None:
-        print("[free-market] game window not found -> cannot click"); return
     fx, fy = core._FM_XY[0]
-    sx, sy = box["left"] + fx, box["top"] + fy
+    pt = core.game_to_screen(fx, fy)             # canonical frame point -> real screen pixel
+    if pt is None:
+        print("[free-market] game window not found -> cannot click"); return
+    sx, sy = pt
     print(f"[free-market] enemy alarm un-acked {core._FM_AFTER[0]:g}s -> click 自由市場 @ screen ({sx},{sy})")
     try:
         core.notify.send("another_player",
@@ -306,8 +306,7 @@ def _enemy_dots(frame):
     validate the switch (see _enemy_shadow). Presence-only -> non-empty means escape."""
     if frame is None or core._ENEMY_MODE[0] == "off":       # turned off in the panel
         return []
-    ey = min(core.MM_Y + core.MM_H, frame.shape[0]); ex = min(core.MM_X + core.MM_W, frame.shape[1])
-    mm = frame[core.MM_Y:ey, core.MM_X:ex]                  # FULL configured minimap band (lower platforms too)
+    mm = core._minimap(frame)              # FULL configured minimap band, at the reference scale
     try:
         dots = core.detect_red_dots(mm, templates_folder="assets/minimap_other_character/",
                                threshold=core.ENEMY_THRESHOLD)

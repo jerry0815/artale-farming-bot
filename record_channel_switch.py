@@ -50,10 +50,12 @@ def main():
     def on_click(x, y, button, pressed):
         if not pressed or button != pm.Button.left:
             return
-        img, box = R.capture(), R._window_box()      # grabbed before the game redraws for the click
-        if img is None or box is None:
+        img, g = R.capture(), R.window_geometry()    # grabbed before the game redraws for the click
+        if img is None or g is None:
             return
-        wx, wy = x - box["left"], y - box["top"]
+        import capture as _cap
+        wx, wy = _cap.screen_to_frame(x, y, g)        # canonical frame coords, like capture()
+        box = {"width": g["W"], "height": g["H"]}
         if not (0 <= wx < box["width"] and 0 <= wy < box["height"]):
             return                                    # click outside the game window -> ignore
         with lock:

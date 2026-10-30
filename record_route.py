@@ -155,7 +155,7 @@ def record_live(map_name, poll_hz=30):
     map_path = map_name if os.path.exists(map_name) else os.path.join("maps", f"{map_name}.json")
     try:
         cfg = core.watermap.load_map(map_path)
-        core.set_minimap(*core.watermap.minimap_crop(cfg))
+        core.apply_map_minimap(cfg)
         if cfg.get("map_box"):
             core.set_map_box(*cfg["map_box"])
         print(f"[record] loaded {map_path} minimap crop")

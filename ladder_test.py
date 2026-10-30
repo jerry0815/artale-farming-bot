@@ -140,7 +140,7 @@ def main():
     args = ap.parse_args()
 
     cfg = core.watermap.load_map(args.map)
-    core.set_minimap(*core.watermap.minimap_crop(cfg))
+    core.apply_map_minimap(cfg)
     if cfg.get("map_box"):
         core.set_map_box(*cfg["map_box"])
     keys = {"right": core.Key.right, "left": core.Key.left, "up": core.Key.up,

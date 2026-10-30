@@ -3,9 +3,32 @@ core.py re-exports them so callers/tests keep using core.<name> and monkeypatch 
 import core
 
 
+def _minimap_scale(window_w):
+    """Window / reference width, or None when no reference is set or the sizes match."""
+    ref = core.MM_REF_W[0]
+    if not ref or not window_w:
+        return None
+    k = window_w / ref
+    return None if abs(k - 1) < 0.002 else k
+
+
 def _minimap(np_img):
-    ey = min(core.MM_Y + core.MM_H, np_img.shape[0]); ex = min(core.MM_X + core.MM_W, np_img.shape[1])
-    return np_img[core.MM_Y:ey, core.MM_X:ex]
+    """The minimap crop at the REFERENCE scale (core.MM_REF_W): at another window size the box is
+    scaled with the window (the game scales its UI from the top-left) and the crop resized back, so
+    reads, blob-size limits and templates all see the scale the map was tuned at (2026-10-29:
+    1942-wide window vs middle_road2 tuned at 1915 -> every read 2-4 px off)."""
+    k = _minimap_scale(np_img.shape[1])
+    if k is None:
+        ey = min(core.MM_Y + core.MM_H, np_img.shape[0]); ex = min(core.MM_X + core.MM_W, np_img.shape[1])
+        return np_img[core.MM_Y:ey, core.MM_X:ex]
+    x0, y0 = round(core.MM_X * k), round(core.MM_Y * k)
+    x1 = min(round((core.MM_X + core.MM_W) * k), np_img.shape[1])
+    y1 = min(round((core.MM_Y + core.MM_H) * k), np_img.shape[0])
+    crop = np_img[y0:y1, x0:x1]
+    if crop.size == 0:
+        return crop
+    return core.cv2.resize(crop, (core.MM_W, core.MM_H),
+                           interpolation=core.cv2.INTER_AREA if k > 1 else core.cv2.INTER_LINEAR)
 
 
 def _char_blobs_from_mm(mm):

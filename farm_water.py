@@ -23,7 +23,7 @@ def farming_loop_water(map_cfg, char=None, enemy_check=None, panic=None,
     if char is not None:                              # overlay this character's keys
         map_cfg = core.apply_character(map_cfg, core.load_char(char))
     core._LAST_WATER_ATTACK_KEY[0] = map_cfg.get("attack_key", "c")
-    core.set_minimap(*core.watermap.minimap_crop(map_cfg))
+    core.apply_map_minimap(map_cfg)
     core.set_enemy_threshold(map_cfg.get("enemy_threshold", 0.75))   # red-dot sensitivity (per map)
     if map_cfg.get("map_box"):                          # per-map valid dot box (reject phantoms)
         core.set_map_box(*map_cfg["map_box"])
