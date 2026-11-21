@@ -51,7 +51,65 @@ def test_apply_kite_stand_releases_arrows_then_shoots():
                      stand_secs=0.3)
     assert kb.events[:2] == [("release", "R"), ("release", "L")]
     assert ("press", "R") not in kb.events and ("press", "L") not in kb.events
-    shots = [e for e in kb.events if e == ("press", "x")]
-    assert len(shots) >= 2                         # keeps tapping through the stand window
-    assert kb.events[-1] == ("release", "x")
-    assert abs(sum(slept) - 0.3) < 0.06
+    assert kb.events[2:] == [("press", "x"), ("release", "x")]   # one continuous hold, not taps
+    assert slept == [0.3]
+
+
+def test_apply_kite_stand_hold_length_jitters():
+    import random
+    rng = random.Random(3)
+    lens = []
+    for _ in range(50):
+        slept = []
+        sweep.apply_kite(sweep.STAND_SHOOT, 1, KEYS, _KB(), sleep=slept.append, stand_secs=0.3,
+                         jitter=0.25, rng=rng)
+        assert len(slept) == 1
+        lens.append(slept[0])
+    assert len(set(round(x, 4) for x in lens)) > 20
+    assert all(0.15 - 1e-9 <= x <= 0.45 + 1e-9 for x in lens)
+
+
+def test_apply_kite_walk_secs_keeps_tapping_with_arrow_held():
+    kb, slept = _KB(), []
+    sweep.apply_kite(sweep.WALK_SHOOT, 1, KEYS, kb, sleep=slept.append, shot_press=0.05,
+                     shot_gap=0.05, walk_secs=0.25)
+    assert kb.events[:2] == [("release", "L"), ("press", "R")]
+    assert kb.events[2:] == [("press", "x"), ("release", "x")] * 3     # arrow never released
+    assert slept == [0.05, 0.05, 0.05, 0.05, 0.05]
+
+
+def test_apply_kite_jitter_varies_each_tap_within_bounds():
+    import random
+    kb, slept = _KB(), []
+    sweep.apply_kite(sweep.WALK_SHOOT, 1, KEYS, kb, sleep=slept.append, shot_press=0.035,
+                     shot_gap=0.01, walk_secs=3.0, jitter=0.3, rng=random.Random(1))
+    presses, gaps = slept[0::2], slept[1::2]
+    assert len(set(round(p, 5) for p in presses)) > 10           # not one fixed rhythm
+    assert all(0.02 <= p <= 0.035 * 1.6 + 1e-9 for p in presses)  # long enough to register
+    assert all(0.005 - 1e-9 <= g <= 0.01 * 1.6 + 0.09 + 1e-9 for g in gaps)
+    assert abs(sum(presses) / len(presses) - 0.035) < 0.006       # same pace on average
+    assert abs(sum(slept) - 3.0) < 0.15                           # beat length kept
+
+
+def test_apply_kite_jitter_sometimes_hesitates():
+    import random
+    kb, slept = _KB(), []
+    sweep.apply_kite(sweep.WALK_SHOOT, 1, KEYS, kb, sleep=slept.append, shot_press=0.035,
+                     shot_gap=0.01, walk_secs=20.0, jitter=0.3, rng=random.Random(2))
+    gaps = slept[1::2]
+    long_gaps = [g for g in gaps if g > 0.03]
+    assert 0 < len(long_gaps) < len(gaps) * 0.2                   # rare short pauses only
+
+
+def test_apply_kite_no_jitter_is_exact():
+    kb, slept = _KB(), []
+    sweep.apply_kite(sweep.WALK_SHOOT, 1, KEYS, kb, sleep=slept.append, shot_press=0.05,
+                     shot_gap=0.05, walk_secs=0.25, jitter=0.0)
+    assert slept == [0.05] * 5
+
+
+def test_character_overrides_kite_tap_timing():
+    import core
+    merged = core.apply_character({"shot_press_secs": 0.05, "shot_gap_secs": 0.05},
+                                  {"shot_press_secs": 0.04, "shot_gap_secs": 0.03})
+    assert (merged["shot_press_secs"], merged["shot_gap_secs"]) == (0.04, 0.03)

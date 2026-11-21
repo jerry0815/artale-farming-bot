@@ -28,6 +28,9 @@ MATCH_THR = 0.8          # recorded: present >= 0.90, absent <= 0.63
 BRIGHT_TOL = 0.10        # matched patch mean within 10% of the template's: the login screen fades
                          # in over ~5 s and a 登入 click at ~83% brightness was ignored
 SEARCH_PAD = 120         # search this far around the recorded box (dialogs barely move)
+# 頻道 sits in the game menu, which game updates keep growing: 2026-11 added 遊戲設定 below it and it
+# moved up ~72 px. Its text is unique in that menu, so search the whole menu column.
+SEARCH_PADS = {"channel": 250}
 # Checked in priority order: a dialog sits over the HUD, so 目錄 (menu) is visible under all of
 # the first three; the login screens never co-occur with the in-map ones. On character select,
 # 'select' (the info scroll -> click 選擇角色) wins over 'charsel' (signs only -> click the character).
@@ -90,8 +93,9 @@ def find(frame, name):
     else None."""
     H, W = frame.shape[:2]
     t, (x0, y0, x1, y1), (dx, dy), t_mean = templates(W)[name]
-    sx0, sy0 = max(0, x0 - SEARCH_PAD), max(0, y0 - SEARCH_PAD)
-    sx1, sy1 = min(W, x1 + SEARCH_PAD), min(H, y1 + SEARCH_PAD)
+    pad = SEARCH_PADS.get(name, SEARCH_PAD)
+    sx0, sy0 = max(0, x0 - pad), max(0, y0 - pad)
+    sx1, sy1 = min(W, x1 + pad), min(H, y1 + pad)
     roi = frame[sy0:sy1, sx0:sx1]
     th, tw = t.shape[:2]
     if roi.shape[0] < th or roi.shape[1] < tw:

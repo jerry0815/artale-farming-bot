@@ -988,7 +988,9 @@ _last_fail_small = [None]        # 64x36 gray of the last SAVED fail frame -> ne
 
 CHAR_FIELDS = ("attack_key", "attack_keys", "buff_keys", "buff_groups",
                "buff_interval_secs", "buff_settle_secs",
-               "nametag_template", "title_template")   # per-character name/title for the anchor
+               "nametag_template", "title_template",   # per-character name/title for the anchor
+               "shot_press_secs", "shot_gap_secs",     # kite attack tap: press / release secs
+               "shot_jitter")                          # random spread of that tap timing
 
 
 def break_cycle(idle_seconds=30):

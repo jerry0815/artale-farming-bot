@@ -195,25 +195,63 @@ def kite_action(mob_xs, px, heading, safe_dist, behind_tol=30):
     return WALK_SHOOT
 
 
+MIN_SHOT_PRESS = 0.02      # shorter taps risk the game missing the press
+MIN_SHOT_GAP = 0.005
+HESITATE_P = 0.06          # chance a gap gets a short human-like pause added
+HESITATE_SECS = (0.03, 0.09)
+
+
+def _jittered(base, jitter, rng):
+    """base * a gaussian multiplier around 1 (sd = jitter), clipped to 1 +- 2*jitter."""
+    if not jitter:
+        return base
+    m = min(max(rng.gauss(1.0, jitter), 1.0 - 2 * jitter), 1.0 + 2 * jitter)
+    return base * m
+
+
 def apply_kite(action, heading, keys, kb, sleep=lambda s: None, shot_press=0.05,
-               stand_secs=0.3, shot_gap=0.05):
-    """WALK_SHOOT: hold the heading arrow (kept held across beats) and tap the shot once.
-    STAND_SHOOT: release the arrows and keep tapping the shot for stand_secs, then re-decide.
-    She already faces the heading (she walked in), so no facing tap."""
+               stand_secs=0.3, shot_gap=0.05, walk_secs=None, jitter=0.0, rng=None):
+    """WALK_SHOOT: hold the heading arrow (kept held across beats) and tap the shot once -- or,
+    with walk_secs, keep tapping it for walk_secs like a stand (user 2026-10-30: attack pressed
+    nonstop, only the arrow depends on the mob distance; one tap per walk beat fired too rarely).
+    STAND_SHOOT: release the arrows and HOLD the shot for stand_secs, then re-decide.
+    She already faces the heading (she walked in), so no facing tap.
+    jitter (user 2026-11-05: a constant tap rhythm looks like a bot): each press and gap is
+    randomized around shot_press / shot_gap (sd = jitter fraction), and now and then a gap gets
+    a short pause -- same average pace, no fixed rhythm. 0 = exact timing."""
+    if jitter and rng is None:
+        import random
+        rng = random
     face = keys["right"] if heading > 0 else keys["left"]
     if action == WALK_SHOOT:
         kb.safe_release(keys["left"] if heading > 0 else keys["right"])
         kb.safe_press(face)
-        kb.safe_press(keys["attack"]); sleep(shot_press); kb.safe_release(keys["attack"])
+        secs = walk_secs if walk_secs is not None else shot_press
+    else:
+        # Standing still (user 2026-11-05): hold the shot down for the whole beat instead of
+        # tapping -- a player who isn't moving just keeps the key pressed. Released at the end of
+        # the beat so nothing after (walk, portal, finish) inherits a held key.
+        kb.safe_release(keys["right"]); kb.safe_release(keys["left"])
+        hold = stand_secs
+        if jitter:
+            hold = max(MIN_SHOT_PRESS, _jittered(stand_secs, jitter, rng))
+        kb.safe_press(keys["attack"]); sleep(hold); kb.safe_release(keys["attack"])
         return heading
-    kb.safe_release(keys["right"]); kb.safe_release(keys["left"])
     t = 0.0
     while True:
-        kb.safe_press(keys["attack"]); sleep(shot_press); kb.safe_release(keys["attack"])
-        t += shot_press
-        if t + 1e-9 >= stand_secs:
+        press = shot_press
+        if jitter:
+            press = max(MIN_SHOT_PRESS, _jittered(shot_press, jitter, rng))
+        kb.safe_press(keys["attack"]); sleep(press); kb.safe_release(keys["attack"])
+        t += press
+        if t + 1e-9 >= secs:
             break
-        sleep(shot_gap); t += shot_gap
+        gap = shot_gap
+        if jitter:
+            gap = max(MIN_SHOT_GAP, _jittered(shot_gap, jitter, rng))
+            if rng.random() < HESITATE_P:
+                gap += rng.uniform(*HESITATE_SECS)
+        sleep(gap); t += gap
     return heading
 
 

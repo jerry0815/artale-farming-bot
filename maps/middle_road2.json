@@ -34,13 +34,6 @@
     },
     {
       "keys": [
-        "3"
-      ],
-      "interval_secs": 600,
-      "potion": true
-    },
-    {
-      "keys": [
         "g"
       ],
       "interval_secs": 900
@@ -49,8 +42,7 @@
       "keys": [
         "1"
       ],
-      "interval_secs": 600,
-      "potion": true
+      "interval_secs": 300
     },
     {
       "keys": [
@@ -61,6 +53,12 @@
     {
       "keys": [
         "f"
+      ],
+      "interval_secs": 300
+    },
+    {
+      "keys": [
+        "j"
       ],
       "interval_secs": 300
     }

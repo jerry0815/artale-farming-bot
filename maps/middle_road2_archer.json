@@ -17,9 +17,12 @@
   "attack_range": 400,
   "beat_gap": 0.05,
   "engage": "kite",
-  "kite_safe_dist": 150,
-  "shot_press_secs": 0.05,
+  "kite_safe_dist": 350,
+  "shot_press_secs": 0.04,
+  "shot_gap_secs": 0.04,
   "stand_shoot_secs": 0.3,
+  "kite_walk_shoot_secs": 0.1,
+  "_kite_walk_note": "2026-10-30 (user): attack TAPPED nonstop (not held -- a held shot pins her); only the arrow depends on the mob distance (held = walk, released within kite_safe_dist). Each walk beat taps the shot for kite_walk_shoot_secs with the arrow held, like stand_shoot_secs for a stand. Timed steps/pauses looked weird and were removed. 0.3 -> 0.1 and safe 150 -> 250 (live 16:40); 350 (user): a walk beat took ~0.5 s (0.3 taps + ~0.2 detect) and covered ~170 screen px, so a mob at 169 px was overlapping her (-8) one beat later.",
   "enemy_threshold": 0.75,
   "buff_groups": [
     {

@@ -4,14 +4,35 @@
   "nametag_template": "assets/player/deep_sea_2_nametag_1.png",
   "title_template": "assets/player/deep_sea_2_title_1.png",
   "buff_settle_secs": 0.6,
+  "shot_press_secs": 0.035,
+  "shot_gap_secs": 0.01,
   "buff_groups": [
     {
       "keys": [
-        "a",
-        "j",
-        "3"
+        "f"
       ],
       "interval_secs": 300
+    },
+    {
+      "keys": [
+        "1"
+      ],
+      "interval_secs": 600,
+      "potion": true
+    },
+    {
+      "keys": [
+        "3"
+      ],
+      "interval_secs": 300,
+      "potion": true
+    },
+    {
+      "keys": [
+        "4"
+      ],
+      "interval_secs": 600,
+      "potion": true
     }
   ]
 }

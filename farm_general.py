@@ -225,7 +225,11 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
     kite = map_cfg.get("engage", "push") == "kite"
     kite_safe = int(map_cfg.get("kite_safe_dist", 150))
     shot_press = float(map_cfg.get("shot_press_secs", 0.05))
+    shot_gap = float(map_cfg.get("shot_gap_secs", 0.05))      # release between kite shot taps
+    shot_jitter = float(map_cfg.get("shot_jitter", 0.25))    # random per-tap timing spread (0 = exact)
     stand_shoot = float(map_cfg.get("stand_shoot_secs", 0.3))
+    kite_walk = map_cfg.get("kite_walk_shoot_secs")   # walk beat: tap the shot this long (None: once)
+    kite_walk = float(kite_walk) if kite_walk is not None else None
 
     # Buffs -- same scheme as farm_water (each group on its own interval).
     buff_groups = core.buff_plan(map_cfg, skill_interval)       # [(keys, interval, potion)]
@@ -927,7 +931,8 @@ def farming_loop_general(map_cfg, char=None, enemy_check=None, panic=None,
                              f"nearest={min(ahead) if ahead else None} kept={mob_xs} -> {act}")
                 last_act[0] = act
                 sweep.apply_kite(act, heading, keys, core.kb, sleep=core.time.sleep,
-                                 shot_press=shot_press, stand_secs=stand_shoot)
+                                 shot_press=shot_press, stand_secs=stand_shoot, shot_gap=shot_gap,
+                                 walk_secs=kite_walk, jitter=shot_jitter)
                 if act == sweep.WALK_SHOOT:
                     progress.mark_walking()
                 attack_end[0] = core.time.time()

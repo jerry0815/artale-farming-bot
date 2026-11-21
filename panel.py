@@ -597,6 +597,35 @@ def save_buffs(file, groups, allowed_paths):
     return True, f"saved buffs to {file}"
 
 
+TAP_FIELDS = ("shot_press_secs", "shot_gap_secs")   # kite attack tap: press / release secs
+
+
+def save_tap(file, values, allowed_paths):
+    """Whitelist `file`, then set (number) or clear (None -> the map / code default) each
+    TAP_FIELDS value in the config. (ok, msg)."""
+    import os
+    norm = os.path.normpath(file or "")
+    if norm not in {os.path.normpath(p) for p in allowed_paths}:
+        return False, f"not a config file: {file}"
+    if not os.path.isfile(norm):
+        return False, f"missing config: {file}"
+    for k in TAP_FIELDS:
+        v = values.get(k)
+        if v is not None and not (isinstance(v, (int, float)) and 0 < v <= 2):
+            return False, f"{k} must be between 0 and 2 seconds"
+    with open(norm, encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    for k in TAP_FIELDS:
+        if values.get(k) is None:
+            cfg.pop(k, None)
+        else:
+            cfg[k] = values[k]
+    with open(norm, "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+    return True, f"saved attack tap to {file}"
+
+
 def _status_dict(controller):
     import core, time
     st = dict(core.STATUS)
@@ -739,6 +768,17 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
        <button onclick="loadBuffs()">↻</button>
      </div>
      <div id=buffstat class=sub></div>
+   </fieldset>
+   <fieldset><legend>Attack tap — kite (edits the selected character, else the map)</legend>
+     <div id=tapfile class=sub style="font-family:ui-monospace,monospace">–</div>
+     <div class=row>
+       press <input id=tappress type=number min=0.01 step=0.01 style="width:70px" placeholder="0.05"> s
+       release <input id=tapgap type=number min=0.01 step=0.01 style="width:70px" placeholder="0.05"> s
+       <button class=go onclick="saveTap()">💾 Save</button>
+       <button onclick="loadTap()">↻</button>
+     </div>
+     <div class=sub>Blank = use the map's value (or 0.05 s). Restart farming to apply.</div>
+     <div id=tapstat class=sub></div>
    </fieldset>
  </div>
 
@@ -935,6 +975,24 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
    const j=await (await fetch('/buffs_save?'+new URLSearchParams({file, groups: JSON.stringify(groups)}))).json();
    const s=document.getElementById('buffstat'); s.textContent=j.msg; s.style.color=j.ok?'#7d7':'#f77';
  }
+ async function loadTap(){
+   document.getElementById('tapstat').textContent='';
+   const file=buffTarget();
+   if(!file){ document.getElementById('tapfile').textContent='(select a map or character first)'; return; }
+   const j=await (await fetch('/tap?'+new URLSearchParams({file}))).json();
+   if(!j.ok){ document.getElementById('tapfile').textContent='error: '+j.msg; return; }
+   document.getElementById('tapfile').textContent='editing → '+j.file;
+   document.getElementById('tappress').value=j.shot_press_secs ?? '';
+   document.getElementById('tapgap').value=j.shot_gap_secs ?? '';
+ }
+ async function saveTap(){
+   const file=buffTarget();
+   if(!file){ alert('select a map or character first'); return; }
+   const j=await (await fetch('/tap_save?'+new URLSearchParams({file,
+     shot_press_secs: document.getElementById('tappress').value,
+     shot_gap_secs: document.getElementById('tapgap').value}))).json();
+   const s=document.getElementById('tapstat'); s.textContent=j.msg; s.style.color=j.ok?'#7d7':'#f77';
+ }
  async function startFarm(){
    const map = document.getElementById('mapsel').value;
    if(!map){ alert('no map selected'); return; }
@@ -1032,9 +1090,11 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>maple control</t
      }
    }catch(e){}
  }
- Promise.all([loadMaps(), loadChars()]).then(loadBuffs);   // buffs follow the initial map/char list
+ Promise.all([loadMaps(), loadChars()]).then(()=>{ loadBuffs(); loadTap(); });   // buffs follow the initial map/char list
  document.getElementById('mapsel').addEventListener('change', loadBuffs);
+ document.getElementById('mapsel').addEventListener('change', loadTap);
  document.getElementById('charsel').addEventListener('change', loadBuffs);
+ document.getElementById('charsel').addEventListener('change', loadTap);
  poll(); snapLoop(); pollLog(); loadExpSessions();
  // If the window was hidden/minimized at load (WebView2 freezes the page), the poll loops may
  // not have started or got throttled -> re-kick them the moment it becomes visible. clearTimeout
@@ -1087,6 +1147,26 @@ def make_handler(controller):
                 except Exception as e:
                     return self._send(200, json.dumps({"ok": False, "msg": f"bad groups: {e}"}))
                 ok, msg = save_buffs(file, groups, allowed)
+                return self._send(200, json.dumps({"ok": ok, "msg": msg}))
+            if parsed.path in ("/tap", "/tap_save"):
+                import os
+                file = q.get("file", [None])[0]
+                allowed = [m["path"] for m in list_maps()] + list(list_chars())
+                if parsed.path == "/tap":
+                    if not (file and os.path.normpath(file) in {os.path.normpath(p) for p in allowed}):
+                        return self._send(200, json.dumps({"ok": False, "msg": "not a config file"}))
+                    try:
+                        with open(file, encoding="utf-8") as fh:
+                            cfg = json.load(fh)
+                        return self._send(200, json.dumps(
+                            {"ok": True, "file": file, **{k: cfg.get(k) for k in TAP_FIELDS}}))
+                    except Exception as e:
+                        return self._send(200, json.dumps({"ok": False, "msg": str(e)}))
+                try:
+                    values = {k: (float(q[k][0]) if q.get(k, [""])[0] else None) for k in TAP_FIELDS}
+                except ValueError as e:
+                    return self._send(200, json.dumps({"ok": False, "msg": f"bad number: {e}"}))
+                ok, msg = save_tap(file, values, allowed)
                 return self._send(200, json.dumps({"ok": ok, "msg": msg}))
             if parsed.path == "/exp_sessions":
                 import core

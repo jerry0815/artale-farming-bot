@@ -38,6 +38,11 @@ def _http_post(url, content):
     requests.post(url, json={"content": content}, timeout=10)
 
 
+# Per-key cooldown overrides. whisper: none -- WhisperWatch already reports each new chat line
+# once, and a second whisper within 120 s was dropped (live 2026-11-02, "KK" at 04:03:01).
+KEY_COOLDOWNS = {"whisper": 0.0}
+
+
 class DiscordNotifier:
     """Rate-limited, fire-and-forget Discord webhook poster.
 
@@ -45,9 +50,10 @@ class DiscordNotifier:
     persistent alarm re-pings as an occasional reminder instead of spamming. A missing
     URL makes every call a silent no-op."""
 
-    def __init__(self, url=None, cooldown=120.0, poster=_http_post, host=None):
+    def __init__(self, url=None, cooldown=120.0, poster=_http_post, host=None, cooldowns=None):
         self.url = (url or "").strip()
         self.cooldown = cooldown
+        self.cooldowns = dict(KEY_COOLDOWNS if cooldowns is None else cooldowns)  # per-key override
         self._poster = poster
         self._host = host or socket.gethostname()
         self._last = {}                       # key -> last send monotonic time
@@ -64,7 +70,7 @@ class DiscordNotifier:
             return False
         now = time.monotonic()
         with self._lock:
-            if now - self._last.get(key, -1e9) < self.cooldown:
+            if now - self._last.get(key, -1e9) < self.cooldowns.get(key, self.cooldown):
                 return False
             self._last[key] = now
         content = f"\U0001f3a3 **{self._host}** {time.strftime('%H:%M:%S')}\n{message}"

@@ -67,12 +67,6 @@
   "buff_groups": [
     {
       "keys": [
-        "d"
-      ],
-      "interval_secs": 300
-    },
-    {
-      "keys": [
         "3"
       ],
       "interval_secs": 600,
@@ -90,6 +84,24 @@
       ],
       "interval_secs": 600,
       "potion": true
+    },
+    {
+      "keys": [
+        "j"
+      ],
+      "interval_secs": 300
+    },
+    {
+      "keys": [
+        "f"
+      ],
+      "interval_secs": 300
+    },
+    {
+      "keys": [
+        "v"
+      ],
+      "interval_secs": 300
     }
   ],
   "player": {

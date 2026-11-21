@@ -75,3 +75,11 @@ def test_poster_exception_never_propagates():
     n = notify_mod.DiscordNotifier(url="https://x", cooldown=0.0, poster=boom, host="T")
     assert n.notify("k", "m") is True   # dispatch succeeds; the thread swallows the error
     time.sleep(0.05)                    # let the daemon thread run + print
+
+
+def test_whisper_has_no_cooldown_but_other_keys_still_do():
+    n, posts, _ = _capturing_notifier(cooldown=120.0)
+    assert n.notify("whisper", "first") is True
+    assert n.notify("whisper", "second") is True       # each new chat line goes out
+    assert n.notify("lie_check", "a") is True
+    assert n.notify("lie_check", "b") is False

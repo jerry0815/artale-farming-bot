@@ -198,3 +198,14 @@ def test_clicks_are_mapped_from_the_canonical_frame_to_the_screen(monkeypatch):
     assert clicks == [capture.frame_to_screen(884, 630, g)]
     k = 1893 / 1920
     assert abs(clicks[0][0] - (14 + 11 + (884 - 11) * k)) <= 1
+
+
+def test_channel_item_found_after_the_menu_grew():
+    # 2026-11 update: 遊戲設定 was added under 頻道, moving 頻道 up one slot (~72 px); a further
+    # item would push it past the default search pad -> 頻道 gets a wider pad of its own
+    w, h = _rec_size()
+    f = np.full((h, w, 3), 40, np.uint8)
+    t, (x0, y0, _, _), (dx, dy), _ = ch.templates()["channel"]
+    shift = 150                                          # two menu slots up
+    f[y0 - shift:y0 - shift + t.shape[0], x0:x0 + t.shape[1]] = t
+    assert ch.find(f, "channel") == (x0 + dx, y0 - shift + dy)
