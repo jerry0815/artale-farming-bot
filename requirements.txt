@@ -1,0 +1,21 @@
+# Runtime deps for the farming bot (Windows, Python 3.11).
+# Also install Tesseract OCR to C:\Program Files\Tesseract-OCR\ (EXP tracking).
+#
+# PyTorch: install it FIRST so pip doesn't pull the CPU build.
+#   NVIDIA GPU: pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+#   no GPU:     pip install torch==2.6.0 torchvision==0.21.0
+# then: pip install -r requirements.txt
+ultralytics==8.4.118
+opencv-python==4.11.0.86
+numpy==2.4.4
+mss==10.0.0
+pynput==1.8.1
+keyboard==0.13.5
+pillow==12.2.0
+pytesseract==0.3.13
+pywin32==310
+PyGetWindow==0.0.9
+screeninfo==0.8.1
+requests==2.32.3
+psutil==7.2.2
+pytest

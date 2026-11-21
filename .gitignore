@@ -96,3 +96,9 @@ datasets/mob_generic/
 datasets/mob_review/
 datasets/hop_checks/
 datasets/mm_stall/
+
+# Per-map mob frames (labels + diverse/uncertain lists are tracked, images are large)
+datasets/flat_sweep/images/
+datasets/middle_road2/images/
+# Raw channel-hop recordings (record_channel_switch.py)
+datasets/channel_switch/
