@@ -77,19 +77,27 @@ def canonicalize(img, g):
     return canvas
 
 
+def _frame_client(g):
+    """The client size inside the frame: CANON_CLIENT normally, but the raw window size when the
+    client rect was unknown (canon_geometry(box, None) leaves the frame = the window, unscaled)."""
+    return g["W"] - g["off_x"] - g["right"], g["H"] - g["off_y"] - g["bottom"]
+
+
 def frame_to_screen(x, y, g):
     """Pure: a canonical-frame point -> the real screen pixel (for clicks)."""
     b = g["box"]
-    sx = b["left"] + g["off_x"] + (x - g["off_x"]) * g["cw"] / CANON_CLIENT[0]
-    sy = b["top"] + g["off_y"] + (y - g["off_y"]) * g["ch"] / CANON_CLIENT[1]
+    fw, fh = _frame_client(g)
+    sx = b["left"] + g["off_x"] + (x - g["off_x"]) * g["cw"] / fw
+    sy = b["top"] + g["off_y"] + (y - g["off_y"]) * g["ch"] / fh
     return round(sx), round(sy)
 
 
 def screen_to_frame(sx, sy, g):
     """Pure: a real screen pixel -> the canonical-frame point (e.g. a recorded click)."""
     b = g["box"]
-    x = g["off_x"] + (sx - b["left"] - g["off_x"]) * CANON_CLIENT[0] / g["cw"]
-    y = g["off_y"] + (sy - b["top"] - g["off_y"]) * CANON_CLIENT[1] / g["ch"]
+    fw, fh = _frame_client(g)
+    x = g["off_x"] + (sx - b["left"] - g["off_x"]) * fw / g["cw"]
+    y = g["off_y"] + (sy - b["top"] - g["off_y"]) * fh / g["ch"]
     return round(x), round(y)
 
 

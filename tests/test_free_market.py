@@ -68,10 +68,39 @@ def test_disabled_never_clicks(monkeypatch):
     assert clicks == []
 
 
+def _click_fm(monkeypatch, client):
+    """Run click_free_market against a fake window (box at 61,935; `client` rect or None) and
+    return the screen points clicked. Mocks window_geometry so the real game window is never read."""
+    import capture
+    box = {"left": 61, "top": 935, "width": 1942, "height": 1136}
+    monkeypatch.setattr(core, "window_geometry", lambda: capture.canon_geometry(box, client))
+    monkeypatch.setattr(core, "focus", lambda: True)
+    monkeypatch.setattr(core.notify, "send", lambda *a, **k: None)
+    monkeypatch.setattr(core, "enemy_alarm_silence", lambda: None)
+    core._FM_XY[0] = (1452, 1092)
+    got = []
+    monkeypatch.setattr(core, "_click_screen", lambda x, y: got.append((x, y)))
+    core.click_free_market()
+    return got
+
+
+def test_click_free_market_maps_canonical_point_through_shrunk_client(monkeypatch):
+    # the game drew a smaller client (1888x1062) inside the 11/45 border: the canonical button
+    # point is scaled into that client, not just offset by the window origin.
+    import capture
+    client = (61 + 11, 935 + 45, 1888, 1062)
+    got = _click_fm(monkeypatch, client)
+    g = capture.canon_geometry({"left": 61, "top": 935, "width": 1942, "height": 1136}, client)
+    assert got == [capture.frame_to_screen(1452, 1092, g)]
+    assert got != [(61 + 1452, 935 + 1092)]
+
+
 def test_click_free_market_uses_window_box_offset_then_silences(monkeypatch):
     # screen click point = window box origin + the button's frame offset (survives window moves),
     # and after the click the alarm is silenced (the escape is done -> no human ack needed).
-    monkeypatch.setattr(core, "_window_box", lambda: {"left": 61, "top": 935, "width": 1942, "height": 1136})
+    import capture
+    box = {"left": 61, "top": 935, "width": 1942, "height": 1136}
+    monkeypatch.setattr(core, "window_geometry", lambda: capture.canon_geometry(box, None))
     monkeypatch.setattr(core, "focus", lambda: True)
     monkeypatch.setattr(core.notify, "send", lambda *a, **k: None)
     core._FM_XY[0] = (1452, 1092)
